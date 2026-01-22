@@ -1,0 +1,1105 @@
+{
+  "info": {
+    "name": "SkiDO API - Complete",
+    "description": "Complete API collection for SkiDO logistics platform backend",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{access_token}}",
+        "type": "string"
+      }
+    ]
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:3000/api",
+      "type": "string"
+    },
+    {
+      "key": "access_token",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "refresh_token",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "customer_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "driver_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "booking_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "vehicle_id",
+      "value": "",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "1. Authentication",
+      "item": [
+        {
+          "name": "Customer Register",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 201) {",
+                  "    const response = pm.response.json();",
+                  "    pm.collectionVariables.set('customer_id', response.data.user.id);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Test Customer\",\n  \"phone\": \"+919876543210\",\n  \"email\": \"customer@test.com\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/auth/customer/register",
+              "host": ["{{base_url}}"],
+              "path": ["auth", "customer", "register"]
+            }
+          }
+        },
+        {
+          "name": "Driver Register",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 201) {",
+                  "    const response = pm.response.json();",
+                  "    pm.collectionVariables.set('driver_id', response.data.user.id);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Test Driver\",\n  \"phone\": \"+919876543211\",\n  \"email\": \"driver@test.com\",\n  \"license_number\": \"OD02-20220001234\",\n  \"license_expiry\": \"2030-12-31\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/auth/driver/register",
+              "host": ["{{base_url}}"],
+              "path": ["auth", "driver", "register"]
+            }
+          }
+        },
+        {
+          "name": "Verify OTP",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    const response = pm.response.json();",
+                  "    pm.collectionVariables.set('access_token', response.data.access_token);",
+                  "    pm.collectionVariables.set('refresh_token', response.data.refresh_token);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"phone\": \"+919876543210\",\n  \"otp\": \"123456\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/auth/verify-otp",
+              "host": ["{{base_url}}"],
+              "path": ["auth", "verify-otp"]
+            }
+          }
+        },
+        {
+          "name": "Customer Login",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"phone\": \"+919876543210\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/auth/customer/login",
+              "host": ["{{base_url}}"],
+              "path": ["auth", "customer", "login"]
+            }
+          }
+        },
+        {
+          "name": "Admin Login",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    const response = pm.response.json();",
+                  "    pm.collectionVariables.set('access_token', response.data.access_token);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"admin@skido.com\",\n  \"password\": \"Admin@123\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/auth/admin/login",
+              "host": ["{{base_url}}"],
+              "path": ["auth", "admin", "login"]
+            }
+          }
+        },
+        {
+          "name": "Refresh Token",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refresh_token\": \"{{refresh_token}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/auth/refresh-token",
+              "host": ["{{base_url}}"],
+              "path": ["auth", "refresh-token"]
+            }
+          }
+        },
+        {
+          "name": "Get Current User",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/auth/me",
+              "host": ["{{base_url}}"],
+              "path": ["auth", "me"]
+            }
+          }
+        },
+        {
+          "name": "Logout",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/auth/logout",
+              "host": ["{{base_url}}"],
+              "path": ["auth", "logout"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "2. Customer",
+      "item": [
+        {
+          "name": "Get Profile",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/customer/profile",
+              "host": ["{{base_url}}"],
+              "path": ["customer", "profile"]
+            }
+          }
+        },
+        {
+          "name": "Update Profile",
+          "request": {
+            "method": "PUT",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Updated Customer Name\",\n  \"email\": \"newemail@test.com\",\n  \"address\": \"123 Main St, Bhubaneswar, Odisha\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/customer/profile",
+              "host": ["{{base_url}}"],
+              "path": ["customer", "profile"]
+            }
+          }
+        },
+        {
+          "name": "Get Saved Locations",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/customer/saved-locations",
+              "host": ["{{base_url}}"],
+              "path": ["customer", "saved-locations"]
+            }
+          }
+        },
+        {
+          "name": "Add Saved Location",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"label\": \"Home\",\n  \"address\": \"Nayapalli, Bhubaneswar, Odisha\",\n  \"latitude\": 20.2961,\n  \"longitude\": 85.8245\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/customer/saved-locations",
+              "host": ["{{base_url}}"],
+              "path": ["customer", "saved-locations"]
+            }
+          }
+        },
+        {
+          "name": "Remove Saved Location",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/customer/saved-locations/0",
+              "host": ["{{base_url}}"],
+              "path": ["customer", "saved-locations", "0"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "3. Driver",
+      "item": [
+        {
+          "name": "Get Profile",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/driver/profile",
+              "host": ["{{base_url}}"],
+              "path": ["driver", "profile"]
+            }
+          }
+        },
+        {
+          "name": "Update Profile",
+          "request": {
+            "method": "PUT",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Updated Driver Name\",\n  \"license_number\": \"OD02-20220009999\",\n  \"license_expiry\": \"2032-12-31\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/driver/profile",
+              "host": ["{{base_url}}"],
+              "path": ["driver", "profile"]
+            }
+          }
+        },
+        {
+          "name": "Update Availability",
+          "request": {
+            "method": "PUT",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"availability_status\": \"online\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/driver/availability",
+              "host": ["{{base_url}}"],
+              "path": ["driver", "availability"]
+            }
+          }
+        },
+        {
+          "name": "Update Location",
+          "request": {
+            "method": "PUT",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"latitude\": 20.2961,\n  \"longitude\": 85.8245\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/driver/location",
+              "host": ["{{base_url}}"],
+              "path": ["driver", "location"]
+            }
+          }
+        },
+        {
+          "name": "Get Earnings",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/driver/earnings",
+              "host": ["{{base_url}}"],
+              "path": ["driver", "earnings"]
+            }
+          }
+        },
+        {
+          "name": "Get Trip History",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/driver/trips?page=1&limit=10",
+              "host": ["{{base_url}}"],
+              "path": ["driver", "trips"],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "10"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "4. Vehicle",
+      "item": [
+        {
+          "name": "Get Vehicle Types (Public)",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/vehicle/types",
+              "host": ["{{base_url}}"],
+              "path": ["vehicle", "types"]
+            }
+          }
+        },
+        {
+          "name": "Register Vehicle",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 201) {",
+                  "    const response = pm.response.json();",
+                  "    pm.collectionVariables.set('vehicle_id', response.data.id);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"vehicle_type\": \"tata_ace\",\n  \"registration_number\": \"OD-02-AB-1234\",\n  \"capacity\": 750,\n  \"vehicle_model\": \"Tata Ace Gold\",\n  \"insurance_details\": \"Policy #123456, Valid till 2025-12-31\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/vehicle/register",
+              "host": ["{{base_url}}"],
+              "path": ["vehicle", "register"]
+            }
+          }
+        },
+        {
+          "name": "Get My Vehicles",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/vehicle/my-vehicles",
+              "host": ["{{base_url}}"],
+              "path": ["vehicle", "my-vehicles"]
+            }
+          }
+        },
+        {
+          "name": "Get Vehicle by ID",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/vehicle/{{vehicle_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["vehicle", "{{vehicle_id}}"]
+            }
+          }
+        },
+        {
+          "name": "Update Vehicle",
+          "request": {
+            "method": "PUT",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"capacity\": 800,\n  \"insurance_details\": \"Updated insurance details\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/vehicle/{{vehicle_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["vehicle", "{{vehicle_id}}"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "5. Booking",
+      "item": [
+        {
+          "name": "Estimate Fare",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"pickup_location\": {\n    \"latitude\": 20.2961,\n    \"longitude\": 85.8245,\n    \"address\": \"Nayapalli, Bhubaneswar\"\n  },\n  \"drop_location\": {\n    \"latitude\": 20.3500,\n    \"longitude\": 85.8700,\n    \"address\": \"Khandagiri, Bhubaneswar\"\n  },\n  \"vehicle_type\": \"tata_ace\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/booking/estimate-fare",
+              "host": ["{{base_url}}"],
+              "path": ["booking", "estimate-fare"]
+            }
+          }
+        },
+        {
+          "name": "Create Booking",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 201) {",
+                  "    const response = pm.response.json();",
+                  "    pm.collectionVariables.set('booking_id', response.data.id);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"pickup_location\": {\n    \"latitude\": 20.2961,\n    \"longitude\": 85.8245,\n    \"address\": \"Nayapalli, Bhubaneswar\"\n  },\n  \"drop_location\": {\n    \"latitude\": 20.3500,\n    \"longitude\": 85.8700,\n    \"address\": \"Khandagiri, Bhubaneswar\"\n  },\n  \"vehicle_type\": \"tata_ace\",\n  \"booking_type\": \"instant\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/booking/create",
+              "host": ["{{base_url}}"],
+              "path": ["booking", "create"]
+            }
+          }
+        },
+        {
+          "name": "Get Booking by ID",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/booking/{{booking_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["booking", "{{booking_id}}"]
+            }
+          }
+        },
+        {
+          "name": "Cancel Booking",
+          "request": {
+            "method": "PUT",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"Changed my mind\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/booking/{{booking_id}}/cancel",
+              "host": ["{{base_url}}"],
+              "path": ["booking", "{{booking_id}}", "cancel"]
+            }
+          }
+        },
+        {
+          "name": "Get Customer History",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/booking/customer/history?page=1&limit=10",
+              "host": ["{{base_url}}"],
+              "path": ["booking", "customer", "history"],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "10"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Nearby Bookings (Driver)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/booking/nearby?latitude=20.2961&longitude=85.8245&radius=5",
+              "host": ["{{base_url}}"],
+              "path": ["booking", "nearby"],
+              "query": [
+                {
+                  "key": "latitude",
+                  "value": "20.2961"
+                },
+                {
+                  "key": "longitude",
+                  "value": "85.8245"
+                },
+                {
+                  "key": "radius",
+                  "value": "5"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Driver Active Booking",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/booking/driver/active",
+              "host": ["{{base_url}}"],
+              "path": ["booking", "driver", "active"]
+            }
+          }
+        },
+        {
+          "name": "Accept Booking (Driver)",
+          "request": {
+            "method": "PUT",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"vehicle_id\": \"{{vehicle_id}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/booking/{{booking_id}}/accept",
+              "host": ["{{base_url}}"],
+              "path": ["booking", "{{booking_id}}", "accept"]
+            }
+          }
+        },
+        {
+          "name": "Start Trip (Driver)",
+          "request": {
+            "method": "PUT",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/booking/{{booking_id}}/start",
+              "host": ["{{base_url}}"],
+              "path": ["booking", "{{booking_id}}", "start"]
+            }
+          }
+        },
+        {
+          "name": "Complete Trip (Driver)",
+          "request": {
+            "method": "PUT",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"final_fare\": 280.00\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/booking/{{booking_id}}/complete",
+              "host": ["{{base_url}}"],
+              "path": ["booking", "{{booking_id}}", "complete"]
+            }
+          }
+        },
+        {
+          "name": "Get Driver History",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/booking/driver/history?page=1&limit=10",
+              "host": ["{{base_url}}"],
+              "path": ["booking", "driver", "history"],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "10"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "6. Payment",
+      "item": [
+        {
+          "name": "Create Order",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"booking_id\": \"{{booking_id}}\",\n  \"amount\": 280.00\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/payment/create-order",
+              "host": ["{{base_url}}"],
+              "path": ["payment", "create-order"]
+            }
+          }
+        },
+        {
+          "name": "Verify Payment",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"razorpay_order_id\": \"order_mock_123\",\n  \"razorpay_payment_id\": \"pay_mock_123\",\n  \"razorpay_signature\": \"signature_mock_123\",\n  \"booking_id\": \"{{booking_id}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/payment/verify",
+              "host": ["{{base_url}}"],
+              "path": ["payment", "verify"]
+            }
+          }
+        },
+        {
+          "name": "Record Cash Payment",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"booking_id\": \"{{booking_id}}\",\n  \"amount\": 280.00\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/payment/cash",
+              "host": ["{{base_url}}"],
+              "path": ["payment", "cash"]
+            }
+          }
+        },
+        {
+          "name": "Get Payment History",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/payment/history?page=1&limit=10",
+              "host": ["{{base_url}}"],
+              "path": ["payment", "history"],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "10"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Generate Invoice",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/payment/invoice/{{booking_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["payment", "invoice", "{{booking_id}}"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "7. Rating",
+      "item": [
+        {
+          "name": "Submit Rating",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"booking_id\": \"{{booking_id}}\",\n  \"rating\": 4.5,\n  \"comment\": \"Great service! Very professional driver.\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/rating/submit",
+              "host": ["{{base_url}}"],
+              "path": ["rating", "submit"]
+            }
+          }
+        },
+        {
+          "name": "Get Rating by Booking",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/rating/booking/{{booking_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["rating", "booking", "{{booking_id}}"]
+            }
+          }
+        },
+        {
+          "name": "Get Driver Ratings",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/rating/driver/{{driver_id}}?page=1&limit=10",
+              "host": ["{{base_url}}"],
+              "path": ["rating", "driver", "{{driver_id}}"],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "10"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "8. Admin",
+      "item": [
+        {
+          "name": "Get Dashboard Stats",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/admin/dashboard/stats",
+              "host": ["{{base_url}}"],
+              "path": ["admin", "dashboard", "stats"]
+            }
+          }
+        },
+        {
+          "name": "Get Pending Drivers",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/admin/drivers/pending",
+              "host": ["{{base_url}}"],
+              "path": ["admin", "drivers", "pending"]
+            }
+          }
+        },
+        {
+          "name": "Approve Driver",
+          "request": {
+            "method": "PUT",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/admin/drivers/{{driver_id}}/approve",
+              "host": ["{{base_url}}"],
+              "path": ["admin", "drivers", "{{driver_id}}", "approve"]
+            }
+          }
+        },
+        {
+          "name": "Reject Driver",
+          "request": {
+            "method": "PUT",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/admin/drivers/{{driver_id}}/reject",
+              "host": ["{{base_url}}"],
+              "path": ["admin", "drivers", "{{driver_id}}", "reject"]
+            }
+          }
+        },
+        {
+          "name": "Get Pending Vehicles",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/admin/vehicles/pending",
+              "host": ["{{base_url}}"],
+              "path": ["admin", "vehicles", "pending"]
+            }
+          }
+        },
+        {
+          "name": "Approve Vehicle",
+          "request": {
+            "method": "PUT",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/admin/vehicles/{{vehicle_id}}/approve",
+              "host": ["{{base_url}}"],
+              "path": ["admin", "vehicles", "{{vehicle_id}}", "approve"]
+            }
+          }
+        },
+        {
+          "name": "Get All Bookings",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/admin/bookings?page=1&limit=20",
+              "host": ["{{base_url}}"],
+              "path": ["admin", "bookings"],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "20"
+                },
+                {
+                  "key": "status",
+                  "value": "completed",
+                  "disabled": true
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Analytics",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/admin/analytics",
+              "host": ["{{base_url}}"],
+              "path": ["admin", "analytics"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "9. Notification",
+      "item": [
+        {
+          "name": "Send Notification (Admin)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": \"{{customer_id}}\",\n  \"title\": \"Test Notification\",\n  \"body\": \"This is a test push notification\",\n  \"data\": {\n    \"type\": \"test\",\n    \"custom_field\": \"value\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/notification/send",
+              "host": ["{{base_url}}"],
+              "path": ["notification", "send"]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

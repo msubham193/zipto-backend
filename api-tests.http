@@ -1,0 +1,415 @@
+### SkiDO API Testing - Phase 1
+### Base URL
+@baseUrl = http://localhost:3000/api
+@contentType = application/json
+
+### Variables (Update after registration/login)
+@phone = 9876543210
+@otp = 123456
+@accessToken = your-access-token-here
+@refreshToken = your-refresh-token-here
+
+###############################################
+### AUTHENTICATION MODULE TESTS
+###############################################
+
+### 1. Register Customer - Send OTP
+POST {{baseUrl}}/auth/register
+Content-Type: {{contentType}}
+
+{
+  "phone": "{{phone}}",
+  "name": "Test Customer",
+  "role": "customer"
+}
+
+### Expected Response:
+### {
+###   "success": true,
+###   "message": "OTP sent successfully",
+###   "data": {
+###     "message": "OTP sent to 9876543210",
+###     "expiresIn": "5 minutes"
+###   }
+### }
+
+###
+
+### 2. Verify OTP - Complete Registration
+POST {{baseUrl}}/auth/verify-otp
+Content-Type: {{contentType}}
+
+{
+  "phone": "{{phone}}",
+  "otp": "{{otp}}"
+}
+
+### Expected Response:
+### {
+###   "success": true,
+###   "message": "Registration successful",
+###   "data": {
+###     "user": {
+###       "id": "uuid",
+###       "phone": "9876543210",
+###       "name": "Test Customer",
+###       "role": "customer",
+###       "is_verified": true
+###     },
+###     "accessToken": "jwt-token",
+###     "refreshToken": "refresh-jwt-token"
+###   }
+### }
+
+###
+
+### 3. Register Driver - Send OTP
+POST {{baseUrl}}/auth/register
+Content-Type: {{contentType}}
+
+{
+  "phone": "9876543211",
+  "name": "Test Driver",
+  "role": "driver"
+}
+
+###
+
+### 4. Login - Send OTP
+POST {{baseUrl}}/auth/login
+Content-Type: {{contentType}}
+
+{
+  "phone": "{{phone}}"
+}
+
+### Expected Response:
+### {
+###   "success": true,
+###   "message": "OTP sent successfully",
+###   "data": {
+###     "message": "OTP sent to 9876543210"
+###   }
+### }
+
+###
+
+### 5. Verify Login OTP
+POST {{baseUrl}}/auth/verify-login-otp
+Content-Type: {{contentType}}
+
+{
+  "phone": "{{phone}}",
+  "otp": "{{otp}}"
+}
+
+###
+
+### 6. Resend OTP
+POST {{baseUrl}}/auth/resend-otp
+Content-Type: {{contentType}}
+
+{
+  "phone": "{{phone}}"
+}
+
+###
+
+### 7. Refresh Access Token
+POST {{baseUrl}}/auth/refresh-token
+Content-Type: {{contentType}}
+
+{
+  "refreshToken": "{{refreshToken}}"
+}
+
+###
+
+### 8. Logout (Requires Authentication)
+POST {{baseUrl}}/auth/logout
+Content-Type: {{contentType}}
+Authorization: Bearer {{accessToken}}
+
+###############################################
+### CUSTOMER MODULE TESTS
+###############################################
+
+### 9. Get Customer Profile
+GET {{baseUrl}}/customer/profile
+Authorization: Bearer {{accessToken}}
+
+### Expected Response:
+### {
+###   "success": true,
+###   "data": {
+###     "id": "uuid",
+###     "phone": "9876543210",
+###     "name": "Test Customer",
+###     "email": null,
+###     "role": "customer",
+###     "profile": {
+###       "address": null,
+###       "saved_locations": []
+###     }
+###   }
+### }
+
+###
+
+### 10. Update Customer Profile
+PUT {{baseUrl}}/customer/profile
+Content-Type: {{contentType}}
+Authorization: Bearer {{accessToken}}
+
+{
+  "name": "Updated Customer Name",
+  "email": "customer@example.com",
+  "language_preference": "odia"
+}
+
+###
+
+### 11. Add Saved Location
+POST {{baseUrl}}/customer/saved-locations
+Content-Type: {{contentType}}
+Authorization: Bearer {{accessToken}}
+
+{
+  "label": "Home",
+  "address": "Bhubaneswar, Odisha",
+  "latitude": 20.2961,
+  "longitude": 85.8245
+}
+
+###
+
+### 12. Get Saved Locations
+GET {{baseUrl}}/customer/saved-locations
+Authorization: Bearer {{accessToken}}
+
+###
+
+### 13. Delete Saved Location
+DELETE {{baseUrl}}/customer/saved-locations/location-id-here
+Authorization: Bearer {{accessToken}}
+
+###############################################
+### DRIVER MODULE TESTS
+###############################################
+
+### 14. Get Driver Profile (Driver must login first)
+GET {{baseUrl}}/driver/profile
+Authorization: Bearer {{accessToken}}
+
+###
+
+### 15. Update Driver Profile
+PUT {{baseUrl}}/driver/profile
+Content-Type: {{contentType}}
+Authorization: Bearer {{accessToken}}
+
+{
+  "name": "Updated Driver Name",
+  "email": "driver@example.com",
+  "license_number": "OD-12-2024-1234567",
+  "license_expiry": "2030-12-31",
+  "aadhar_number": "123456789012"
+}
+
+###
+
+### 16. Upload Driver Documents (Multipart - Use Postman/Insomnia)
+### POST {{baseUrl}}/driver/documents/upload
+### Content-Type: multipart/form-data
+### Authorization: Bearer {{accessToken}}
+### 
+### Form Data:
+### - license_document: (file)
+### - aadhar_document: (file)
+
+###
+
+### 17. Get Driver Documents
+GET {{baseUrl}}/driver/documents
+Authorization: Bearer {{accessToken}}
+
+###
+
+### 18. Toggle Driver Availability
+PUT {{baseUrl}}/driver/availability
+Content-Type: {{contentType}}
+Authorization: Bearer {{accessToken}}
+
+{
+  "status": "available"
+}
+
+### Available statuses: "available", "busy", "offline"
+
+###
+
+### 19. Update Driver Location
+PUT {{baseUrl}}/driver/location
+Content-Type: {{contentType}}
+Authorization: Bearer {{accessToken}}
+
+{
+  "latitude": 20.2961,
+  "longitude": 85.8245
+}
+
+###
+
+### 20. Get Driver Earnings
+GET {{baseUrl}}/driver/earnings
+Authorization: Bearer {{accessToken}}
+
+###
+
+### 21. Get Driver Trip History
+GET {{baseUrl}}/driver/trips?page=1&limit=10
+Authorization: Bearer {{accessToken}}
+
+###############################################
+### VEHICLE MODULE TESTS
+###############################################
+
+### 22. Get All Vehicle Types
+GET {{baseUrl}}/vehicle/types
+
+### Expected Response:
+### {
+###   "success": true,
+###   "data": [
+###     {
+###       "type": "bike",
+###       "name": "Bike",
+###       "capacity": "Up to 20kg"
+###     },
+###     {
+###       "type": "tata_ace",
+###       "name": "Tata Ace",
+###       "capacity": "Up to 750kg"
+###     }
+###   ]
+### }
+
+###
+
+### 23. Register Vehicle (Driver only)
+POST {{baseUrl}}/vehicle/register
+Content-Type: {{contentType}}
+Authorization: Bearer {{accessToken}}
+
+{
+  "vehicle_type": "tata_ace",
+  "registration_number": "OD-02-AB-1234",
+  "vehicle_model": "Tata Ace Gold",
+  "capacity": "750kg",
+  "insurance_expiry": "2025-12-31"
+}
+
+###
+
+### 24. Get Vehicle Details
+GET {{baseUrl}}/vehicle/vehicle-id-here
+Authorization: Bearer {{accessToken}}
+
+###
+
+### 25. Update Vehicle
+PUT {{baseUrl}}/vehicle/vehicle-id-here
+Content-Type: {{contentType}}
+Authorization: Bearer {{accessToken}}
+
+{
+  "vehicle_model": "Tata Ace Gold Plus",
+  "capacity": "850kg"
+}
+
+###############################################
+### ADMIN MODULE TESTS (Admin login required)
+###############################################
+
+### 26. Admin Login
+POST {{baseUrl}}/auth/login
+Content-Type: {{contentType}}
+
+{
+  "phone": "9999999999",
+  "role": "admin"
+}
+
+###
+
+### 27. Get All Users
+GET {{baseUrl}}/admin/users?page=1&limit=10&role=customer
+Authorization: Bearer {{accessToken}}
+
+###
+
+### 28. Get Pending Driver Verifications
+GET {{baseUrl}}/admin/drivers/pending
+Authorization: Bearer {{accessToken}}
+
+###
+
+### 29. Verify Driver
+PUT {{baseUrl}}/admin/drivers/driver-id-here/verify
+Content-Type: {{contentType}}
+Authorization: Bearer {{accessToken}}
+
+{
+  "verification_status": "approved",
+  "remarks": "All documents verified"
+}
+
+### Available statuses: "approved", "rejected"
+
+###
+
+### 30. Get Pending Vehicle Verifications
+GET {{baseUrl}}/admin/vehicles/pending
+Authorization: Bearer {{accessToken}}
+
+###
+
+### 31. Verify Vehicle
+PUT {{baseUrl}}/admin/vehicles/vehicle-id-here/verify
+Content-Type: {{contentType}}
+Authorization: Bearer {{accessToken}}
+
+{
+  "verification_status": "approved",
+  "remarks": "Vehicle documents verified"
+}
+
+###
+
+### 32. Block/Unblock User
+PUT {{baseUrl}}/admin/users/user-id-here/block
+Content-Type: {{contentType}}
+Authorization: Bearer {{accessToken}}
+
+{
+  "is_active": false,
+  "reason": "Violation of terms"
+}
+
+###
+
+###############################################
+### HEALTH CHECK
+###############################################
+
+### 33. Health Check
+GET {{baseUrl}}/health
+
+### Expected Response:
+### {
+###   "status": "ok",
+###   "database": "connected",
+###   "redis": "connected"
+### }
+
+###
