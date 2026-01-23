@@ -17,8 +17,17 @@ async function bootstrap() {
   const apiPrefix = configService.get<string>('app.apiPrefix') || 'api';
   const appName = configService.get<string>('app.name') || 'SkiDO';
 
-  // Security
-  app.use(helmet());
+  // Security - Configure Helmet to allow Swagger docs
+  app.use(helmet({
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: [`'self'`],
+        styleSrc: [`'self'`, `'unsafe-inline'`],
+        scriptSrc: [`'self'`, `'unsafe-inline'`, `'unsafe-eval'`],
+        imgSrc: [`'self'`, 'data:', 'validator.swagger.io'],
+      },
+    },
+  }));
   
   // CORS
   app.enableCors({
