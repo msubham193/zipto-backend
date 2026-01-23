@@ -1,7 +1,13 @@
 /**
  * Generate a random OTP code
+ * In development mode (NODE_ENV !== 'production'), returns demo OTP: 123456
  */
 export function generateOTP(length: number = 6): string {
+  // Use demo OTP in development for easy testing
+  if (process.env.NODE_ENV !== 'production') {
+    return '123456';
+  }
+  
   const digits = '0123456789';
   let otp = '';
   for (let i = 0; i < length; i++) {
