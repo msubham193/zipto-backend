@@ -1,4 +1,4 @@
-import { IsString, IsNotEmpty, IsEnum, IsOptional, IsEmail, MinLength } from 'class-validator';
+import { IsString, IsNotEmpty, IsEnum, IsEmail, MinLength } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 import { UserRole } from '../entities/user.entity';
 
@@ -19,16 +19,11 @@ export class VerifyOtpDto {
   @IsNotEmpty()
   phone: string;
 
-  @ApiProperty({ example: '1234' })
+  @ApiProperty({ example: '1234', description: 'Demo OTP: 1234' })
   @IsString()
   @IsNotEmpty()
   @MinLength(4)
   otp: string;
-
-  @ApiProperty({ required: false, example: 'John Doe' })
-  @IsString()
-  @IsOptional()
-  name?: string;
 }
 
 export class LoginDto {

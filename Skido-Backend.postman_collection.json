@@ -100,14 +100,14 @@
 						],
 						"body": {
 							"mode": "raw",
-							"raw": "{\n    \"phone\": \"+919876543210\",\n    \"otp\": \"1234\",\n    \"name\": \"John Doe\"\n}"
+							"raw": "{\n    \"phone\": \"+919876543210\",\n    \"otp\": \"1234\"\n}"
 						},
 						"url": {
 							"raw": "{{baseUrl}}/auth/verify-otp",
 							"host": ["{{baseUrl}}"],
 							"path": ["auth", "verify-otp"]
 						},
-						"description": "Verify OTP and complete registration/login.\n\n**Demo OTP: 1234**\n\nAutomatically saves access_token and refresh_token to collection variables."
+						"description": "Verify OTP and complete registration/login.\n\n**Demo OTP: 1234**\n\nA random username (User_XXXXXX) is auto-generated for new users. Users can edit their name later.\n\nAutomatically saves access_token and refresh_token to collection variables."
 					}
 				},
 				{

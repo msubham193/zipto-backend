@@ -19,7 +19,7 @@ import {
   AdminLoginDto,
   RefreshTokenDto,
 } from './dto/auth.dto';
-import { generateOTP, formatPhoneNumber } from '../../common/utils/helpers.util';
+import { generateOTP, formatPhoneNumber, generateRandomUsername } from '../../common/utils/helpers.util';
 
 @Injectable()
 export class AuthService {
@@ -69,7 +69,7 @@ export class AuthService {
    * Verify OTP and complete registration or login
    */
   async verifyOtp(verifyOtpDto: VerifyOtpDto) {
-    const { phone, otp, name } = verifyOtpDto;
+    const { phone, otp } = verifyOtpDto;
     const formattedPhone = formatPhoneNumber(phone);
 
     // Validate OTP
@@ -101,19 +101,18 @@ export class AuthService {
 
     // Create new user if doesn't exist (registration)
     if (!user) {
-      if (!name) {
-        throw new BadRequestException('Name is required for registration');
-      }
+      // Auto-generate username if not provided (user can edit later)
+      const userName = generateRandomUsername();
 
       user = this.userRepository.create({
         phone: formattedPhone,
-        name,
+        name: userName,
         role: otpRecord.purpose === OTPPurpose.REGISTRATION ? UserRole.CUSTOMER : UserRole.CUSTOMER,
         is_verified: true,
       });
 
       await this.userRepository.save(user);
-      this.logger.log(`New user registered: ${user.id}`);
+      this.logger.log(`New user registered: ${user.id} with name: ${userName}`);
     } else {
       // Update verification status
       user.is_verified = true;

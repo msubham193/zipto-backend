@@ -81,3 +81,16 @@ export function calculateDistance(
 function toRad(degrees: number): number {
   return degrees * (Math.PI / 180);
 }
+
+/**
+ * Generate a unique random username
+ * Format: User_XXXXXX (6 random alphanumeric characters)
+ */
+export function generateRandomUsername(): string {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+  let randomPart = '';
+  for (let i = 0; i < 6; i++) {
+    randomPart += chars[Math.floor(Math.random() * chars.length)];
+  }
+  return `User_${randomPart}`;
+}
