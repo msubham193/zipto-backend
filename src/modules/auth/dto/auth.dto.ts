@@ -19,10 +19,10 @@ export class VerifyOtpDto {
   @IsNotEmpty()
   phone: string;
 
-  @ApiProperty({ example: '123456' })
+  @ApiProperty({ example: '1234' })
   @IsString()
   @IsNotEmpty()
-  @MinLength(6)
+  @MinLength(4)
   otp: string;
 
   @ApiProperty({ required: false, example: 'John Doe' })

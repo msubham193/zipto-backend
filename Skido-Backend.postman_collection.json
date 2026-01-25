@@ -1,0 +1,1470 @@
+{
+	"info": {
+		"_postman_id": "skido-backend-collection",
+		"name": "Skido Backend API",
+		"description": "Complete API collection for Skido ride-sharing backend.\n\n**Demo OTP: 1234** (in development mode)\n\n**Authentication Flow:**\n1. Register/Login with phone number\n2. Verify OTP (use 1234 in dev mode)\n3. Use the access_token in Authorization header for protected routes",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"variable": [
+		{
+			"key": "baseUrl",
+			"value": "http://localhost:3000/api",
+			"type": "string"
+		},
+		{
+			"key": "accessToken",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "refreshToken",
+			"value": "",
+			"type": "string"
+		}
+	],
+	"item": [
+		{
+			"name": "Auth",
+			"description": "Authentication endpoints for customers, drivers, and admins",
+			"item": [
+				{
+					"name": "Customer Register",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"phone\": \"+919876543210\",\n    \"role\": \"customer\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/auth/customer/register",
+							"host": ["{{baseUrl}}"],
+							"path": ["auth", "customer", "register"]
+						},
+						"description": "Register a new customer. Sends OTP to phone number.\n\n**Demo OTP: 1234**"
+					}
+				},
+				{
+					"name": "Driver Register",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"phone\": \"+919876543211\",\n    \"role\": \"driver\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/auth/driver/register",
+							"host": ["{{baseUrl}}"],
+							"path": ["auth", "driver", "register"]
+						},
+						"description": "Register a new driver. Sends OTP to phone number.\n\n**Demo OTP: 1234**"
+					}
+				},
+				{
+					"name": "Verify OTP",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"var jsonData = pm.response.json();",
+									"if (jsonData.access_token) {",
+									"    pm.collectionVariables.set('accessToken', jsonData.access_token);",
+									"}",
+									"if (jsonData.refresh_token) {",
+									"    pm.collectionVariables.set('refreshToken', jsonData.refresh_token);",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"phone\": \"+919876543210\",\n    \"otp\": \"1234\",\n    \"name\": \"John Doe\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/auth/verify-otp",
+							"host": ["{{baseUrl}}"],
+							"path": ["auth", "verify-otp"]
+						},
+						"description": "Verify OTP and complete registration/login.\n\n**Demo OTP: 1234**\n\nAutomatically saves access_token and refresh_token to collection variables."
+					}
+				},
+				{
+					"name": "Customer Login",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"phone\": \"+919876543210\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/auth/customer/login",
+							"host": ["{{baseUrl}}"],
+							"path": ["auth", "customer", "login"]
+						},
+						"description": "Login existing customer. Sends OTP to phone number.\n\n**Demo OTP: 1234**"
+					}
+				},
+				{
+					"name": "Driver Login",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"phone\": \"+919876543211\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/auth/driver/login",
+							"host": ["{{baseUrl}}"],
+							"path": ["auth", "driver", "login"]
+						},
+						"description": "Login existing driver. Sends OTP to phone number.\n\n**Demo OTP: 1234**"
+					}
+				},
+				{
+					"name": "Admin Login",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"var jsonData = pm.response.json();",
+									"if (jsonData.access_token) {",
+									"    pm.collectionVariables.set('accessToken', jsonData.access_token);",
+									"}",
+									"if (jsonData.refresh_token) {",
+									"    pm.collectionVariables.set('refreshToken', jsonData.refresh_token);",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"email\": \"admin@skido.com\",\n    \"password\": \"Admin@123\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/auth/admin/login",
+							"host": ["{{baseUrl}}"],
+							"path": ["auth", "admin", "login"]
+						},
+						"description": "Admin login with email and password (no OTP required)."
+					}
+				},
+				{
+					"name": "Refresh Token",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"var jsonData = pm.response.json();",
+									"if (jsonData.access_token) {",
+									"    pm.collectionVariables.set('accessToken', jsonData.access_token);",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"refresh_token\": \"{{refreshToken}}\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/auth/refresh-token",
+							"host": ["{{baseUrl}}"],
+							"path": ["auth", "refresh-token"]
+						},
+						"description": "Get new access token using refresh token."
+					}
+				},
+				{
+					"name": "Resend OTP",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"phone\": \"+919876543210\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/auth/resend-otp",
+							"host": ["{{baseUrl}}"],
+							"path": ["auth", "resend-otp"]
+						},
+						"description": "Resend OTP to phone number.\n\n**Demo OTP: 1234**"
+					}
+				},
+				{
+					"name": "Logout",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{accessToken}}"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/auth/logout",
+							"host": ["{{baseUrl}}"],
+							"path": ["auth", "logout"]
+						},
+						"description": "Logout current user. Requires authentication."
+					}
+				},
+				{
+					"name": "Get Current User",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{accessToken}}"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/auth/me",
+							"host": ["{{baseUrl}}"],
+							"path": ["auth", "me"]
+						},
+						"description": "Get current authenticated user details."
+					}
+				}
+			]
+		},
+		{
+			"name": "Customer",
+			"description": "Customer profile and saved locations management",
+			"item": [
+				{
+					"name": "Get Profile",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{accessToken}}"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/customer/profile",
+							"host": ["{{baseUrl}}"],
+							"path": ["customer", "profile"]
+						},
+						"description": "Get customer profile. Requires customer role."
+					}
+				},
+				{
+					"name": "Update Profile",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{accessToken}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"name\": \"John Doe Updated\",\n    \"email\": \"john@example.com\",\n    \"language_preference\": \"en\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/customer/profile",
+							"host": ["{{baseUrl}}"],
+							"path": ["customer", "profile"]
+						},
+						"description": "Update customer profile. Requires customer role."
+					}
+				},
+				{
+					"name": "Get Saved Locations",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{accessToken}}"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/customer/saved-locations",
+							"host": ["{{baseUrl}}"],
+							"path": ["customer", "saved-locations"]
+						},
+						"description": "Get all saved locations (home, work, favorites)."
+					}
+				},
+				{
+					"name": "Add Saved Location",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{accessToken}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"name\": \"Home\",\n    \"address\": \"123 Main Street, City\",\n    \"latitude\": 12.9716,\n    \"longitude\": 77.5946\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/customer/saved-locations",
+							"host": ["{{baseUrl}}"],
+							"path": ["customer", "saved-locations"]
+						},
+						"description": "Add a new saved location."
+					}
+				},
+				{
+					"name": "Delete Saved Location",
+					"request": {
+						"method": "DELETE",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{accessToken}}"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/customer/saved-locations/0",
+							"host": ["{{baseUrl}}"],
+							"path": ["customer", "saved-locations", "0"]
+						},
+						"description": "Delete a saved location by index."
+					}
+				}
+			]
+		},
+		{
+			"name": "Driver",
+			"description": "Driver profile, availability, location, and earnings management",
+			"item": [
+				{
+					"name": "Get Profile",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{accessToken}}"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/driver/profile",
+							"host": ["{{baseUrl}}"],
+							"path": ["driver", "profile"]
+						},
+						"description": "Get driver profile. Requires driver role."
+					}
+				},
+				{
+					"name": "Update Profile",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{accessToken}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"name\": \"Driver Name\",\n    \"email\": \"driver@example.com\",\n    \"license_number\": \"DL1234567890\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/driver/profile",
+							"host": ["{{baseUrl}}"],
+							"path": ["driver", "profile"]
+						},
+						"description": "Update driver profile. Requires driver role."
+					}
+				},
+				{
+					"name": "Update Availability",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{accessToken}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"is_available\": true\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/driver/availability",
+							"host": ["{{baseUrl}}"],
+							"path": ["driver", "availability"]
+						},
+						"description": "Update driver availability status (online/offline)."
+					}
+				},
+				{
+					"name": "Update Location",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{accessToken}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"latitude\": 12.9716,\n    \"longitude\": 77.5946\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/driver/location",
+							"host": ["{{baseUrl}}"],
+							"path": ["driver", "location"]
+						},
+						"description": "Update driver current location."
+					}
+				},
+				{
+					"name": "Get Earnings",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{accessToken}}"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/driver/earnings",
+							"host": ["{{baseUrl}}"],
+							"path": ["driver", "earnings"]
+						},
+						"description": "Get driver earnings dashboard."
+					}
+				},
+				{
+					"name": "Get Trip History",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{accessToken}}"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/driver/trips?page=1&limit=10",
+							"host": ["{{baseUrl}}"],
+							"path": ["driver", "trips"],
+							"query": [
+								{
+									"key": "page",
+									"value": "1"
+								},
+								{
+									"key": "limit",
+									"value": "10"
+								}
+							]
+						},
+						"description": "Get driver trip history with pagination."
+					}
+				}
+			]
+		},
+		{
+			"name": "Vehicle",
+			"description": "Vehicle types and driver vehicle management",
+			"item": [
+				{
+					"name": "Get Vehicle Types",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/vehicle/types",
+							"host": ["{{baseUrl}}"],
+							"path": ["vehicle", "types"]
+						},
+						"description": "Get all available vehicle types. No authentication required."
+					}
+				},
+				{
+					"name": "Register Vehicle",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{accessToken}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"vehicle_type_id\": \"uuid-of-vehicle-type\",\n    \"registration_number\": \"KA01AB1234\",\n    \"model\": \"Swift Dzire\",\n    \"color\": \"White\",\n    \"year\": 2022\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/vehicle/register",
+							"host": ["{{baseUrl}}"],
+							"path": ["vehicle", "register"]
+						},
+						"description": "Register a new vehicle. Requires driver role."
+					}
+				},
+				{
+					"name": "Get My Vehicles",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{accessToken}}"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/vehicle/my-vehicles",
+							"host": ["{{baseUrl}}"],
+							"path": ["vehicle", "my-vehicles"]
+						},
+						"description": "Get all vehicles registered by the driver."
+					}
+				},
+				{
+					"name": "Get Vehicle by ID",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{accessToken}}"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/vehicle/:id",
+							"host": ["{{baseUrl}}"],
+							"path": ["vehicle", ":id"],
+							"variable": [
+								{
+									"key": "id",
+									"value": "vehicle-uuid"
+								}
+							]
+						},
+						"description": "Get vehicle details by ID."
+					}
+				},
+				{
+					"name": "Update Vehicle",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{accessToken}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"model\": \"Swift Dzire Updated\",\n    \"color\": \"Silver\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/vehicle/:id",
+							"host": ["{{baseUrl}}"],
+							"path": ["vehicle", ":id"],
+							"variable": [
+								{
+									"key": "id",
+									"value": "vehicle-uuid"
+								}
+							]
+						},
+						"description": "Update vehicle details."
+					}
+				}
+			]
+		},
+		{
+			"name": "Booking",
+			"description": "Booking management for customers and drivers",
+			"item": [
+				{
+					"name": "Customer",
+					"item": [
+						{
+							"name": "Estimate Fare",
+							"request": {
+								"method": "POST",
+								"header": [
+									{
+										"key": "Authorization",
+										"value": "Bearer {{accessToken}}"
+									},
+									{
+										"key": "Content-Type",
+										"value": "application/json"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n    \"pickup_latitude\": 12.9716,\n    \"pickup_longitude\": 77.5946,\n    \"dropoff_latitude\": 12.9352,\n    \"dropoff_longitude\": 77.6245,\n    \"vehicle_type_id\": \"uuid-of-vehicle-type\"\n}"
+								},
+								"url": {
+									"raw": "{{baseUrl}}/booking/estimate-fare",
+									"host": ["{{baseUrl}}"],
+									"path": ["booking", "estimate-fare"]
+								},
+								"description": "Estimate fare for a trip before booking."
+							}
+						},
+						{
+							"name": "Create Booking",
+							"request": {
+								"method": "POST",
+								"header": [
+									{
+										"key": "Authorization",
+										"value": "Bearer {{accessToken}}"
+									},
+									{
+										"key": "Content-Type",
+										"value": "application/json"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n    \"pickup_address\": \"123 Pickup Street\",\n    \"pickup_latitude\": 12.9716,\n    \"pickup_longitude\": 77.5946,\n    \"dropoff_address\": \"456 Dropoff Avenue\",\n    \"dropoff_latitude\": 12.9352,\n    \"dropoff_longitude\": 77.6245,\n    \"vehicle_type_id\": \"uuid-of-vehicle-type\",\n    \"payment_method\": \"cash\"\n}"
+								},
+								"url": {
+									"raw": "{{baseUrl}}/booking/create",
+									"host": ["{{baseUrl}}"],
+									"path": ["booking", "create"]
+								},
+								"description": "Create a new booking request."
+							}
+						},
+						{
+							"name": "Get Booking Details",
+							"request": {
+								"method": "GET",
+								"header": [
+									{
+										"key": "Authorization",
+										"value": "Bearer {{accessToken}}"
+									}
+								],
+								"url": {
+									"raw": "{{baseUrl}}/booking/:id",
+									"host": ["{{baseUrl}}"],
+									"path": ["booking", ":id"],
+									"variable": [
+										{
+											"key": "id",
+											"value": "booking-uuid"
+										}
+									]
+								},
+								"description": "Get booking details by ID."
+							}
+						},
+						{
+							"name": "Cancel Booking",
+							"request": {
+								"method": "PUT",
+								"header": [
+									{
+										"key": "Authorization",
+										"value": "Bearer {{accessToken}}"
+									},
+									{
+										"key": "Content-Type",
+										"value": "application/json"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n    \"cancellation_reason\": \"Changed plans\"\n}"
+								},
+								"url": {
+									"raw": "{{baseUrl}}/booking/:id/cancel",
+									"host": ["{{baseUrl}}"],
+									"path": ["booking", ":id", "cancel"],
+									"variable": [
+										{
+											"key": "id",
+											"value": "booking-uuid"
+										}
+									]
+								},
+								"description": "Cancel a booking."
+							}
+						},
+						{
+							"name": "Get Booking History",
+							"request": {
+								"method": "GET",
+								"header": [
+									{
+										"key": "Authorization",
+										"value": "Bearer {{accessToken}}"
+									}
+								],
+								"url": {
+									"raw": "{{baseUrl}}/booking/customer/history?page=1&limit=10",
+									"host": ["{{baseUrl}}"],
+									"path": ["booking", "customer", "history"],
+									"query": [
+										{
+											"key": "page",
+											"value": "1"
+										},
+										{
+											"key": "limit",
+											"value": "10"
+										}
+									]
+								},
+								"description": "Get customer booking history with pagination."
+							}
+						}
+					]
+				},
+				{
+					"name": "Driver",
+					"item": [
+						{
+							"name": "Get Nearby Bookings",
+							"request": {
+								"method": "GET",
+								"header": [
+									{
+										"key": "Authorization",
+										"value": "Bearer {{accessToken}}"
+									}
+								],
+								"url": {
+									"raw": "{{baseUrl}}/booking/nearby?latitude=12.9716&longitude=77.5946&radius=5",
+									"host": ["{{baseUrl}}"],
+									"path": ["booking", "nearby"],
+									"query": [
+										{
+											"key": "latitude",
+											"value": "12.9716"
+										},
+										{
+											"key": "longitude",
+											"value": "77.5946"
+										},
+										{
+											"key": "radius",
+											"value": "5"
+										}
+									]
+								},
+								"description": "Get nearby available bookings for driver."
+							}
+						},
+						{
+							"name": "Get Active Booking",
+							"request": {
+								"method": "GET",
+								"header": [
+									{
+										"key": "Authorization",
+										"value": "Bearer {{accessToken}}"
+									}
+								],
+								"url": {
+									"raw": "{{baseUrl}}/booking/driver/active",
+									"host": ["{{baseUrl}}"],
+									"path": ["booking", "driver", "active"]
+								},
+								"description": "Get driver's current active booking."
+							}
+						},
+						{
+							"name": "Accept Booking",
+							"request": {
+								"method": "PUT",
+								"header": [
+									{
+										"key": "Authorization",
+										"value": "Bearer {{accessToken}}"
+									}
+								],
+								"url": {
+									"raw": "{{baseUrl}}/booking/:id/accept",
+									"host": ["{{baseUrl}}"],
+									"path": ["booking", ":id", "accept"],
+									"variable": [
+										{
+											"key": "id",
+											"value": "booking-uuid"
+										}
+									]
+								},
+								"description": "Accept a booking request."
+							}
+						},
+						{
+							"name": "Reject Booking",
+							"request": {
+								"method": "PUT",
+								"header": [
+									{
+										"key": "Authorization",
+										"value": "Bearer {{accessToken}}"
+									}
+								],
+								"url": {
+									"raw": "{{baseUrl}}/booking/:id/reject",
+									"host": ["{{baseUrl}}"],
+									"path": ["booking", ":id", "reject"],
+									"variable": [
+										{
+											"key": "id",
+											"value": "booking-uuid"
+										}
+									]
+								},
+								"description": "Reject a booking request."
+							}
+						},
+						{
+							"name": "Start Trip",
+							"request": {
+								"method": "PUT",
+								"header": [
+									{
+										"key": "Authorization",
+										"value": "Bearer {{accessToken}}"
+									}
+								],
+								"url": {
+									"raw": "{{baseUrl}}/booking/:id/start",
+									"host": ["{{baseUrl}}"],
+									"path": ["booking", ":id", "start"],
+									"variable": [
+										{
+											"key": "id",
+											"value": "booking-uuid"
+										}
+									]
+								},
+								"description": "Start the trip (driver arrived at pickup)."
+							}
+						},
+						{
+							"name": "Complete Trip",
+							"request": {
+								"method": "PUT",
+								"header": [
+									{
+										"key": "Authorization",
+										"value": "Bearer {{accessToken}}"
+									},
+									{
+										"key": "Content-Type",
+										"value": "application/json"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n    \"final_fare\": 250.00\n}"
+								},
+								"url": {
+									"raw": "{{baseUrl}}/booking/:id/complete",
+									"host": ["{{baseUrl}}"],
+									"path": ["booking", ":id", "complete"],
+									"variable": [
+										{
+											"key": "id",
+											"value": "booking-uuid"
+										}
+									]
+								},
+								"description": "Complete the trip (arrived at destination)."
+							}
+						},
+						{
+							"name": "Get Driver Booking History",
+							"request": {
+								"method": "GET",
+								"header": [
+									{
+										"key": "Authorization",
+										"value": "Bearer {{accessToken}}"
+									}
+								],
+								"url": {
+									"raw": "{{baseUrl}}/booking/driver/history?page=1&limit=10",
+									"host": ["{{baseUrl}}"],
+									"path": ["booking", "driver", "history"],
+									"query": [
+										{
+											"key": "page",
+											"value": "1"
+										},
+										{
+											"key": "limit",
+											"value": "10"
+										}
+									]
+								},
+								"description": "Get driver booking history with pagination."
+							}
+						}
+					]
+				}
+			]
+		},
+		{
+			"name": "Payment",
+			"description": "Payment processing with Razorpay and cash",
+			"item": [
+				{
+					"name": "Create Payment Order",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{accessToken}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"booking_id\": \"booking-uuid\",\n    \"amount\": 250.00\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/payment/create-order",
+							"host": ["{{baseUrl}}"],
+							"path": ["payment", "create-order"]
+						},
+						"description": "Create Razorpay payment order."
+					}
+				},
+				{
+					"name": "Verify Payment",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{accessToken}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"razorpay_order_id\": \"order_xxx\",\n    \"razorpay_payment_id\": \"pay_xxx\",\n    \"razorpay_signature\": \"signature_xxx\",\n    \"booking_id\": \"booking-uuid\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/payment/verify",
+							"host": ["{{baseUrl}}"],
+							"path": ["payment", "verify"]
+						},
+						"description": "Verify Razorpay payment after completion."
+					}
+				},
+				{
+					"name": "Record Cash Payment",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{accessToken}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"booking_id\": \"booking-uuid\",\n    \"amount\": 250.00\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/payment/cash",
+							"host": ["{{baseUrl}}"],
+							"path": ["payment", "cash"]
+						},
+						"description": "Record cash payment for a booking."
+					}
+				},
+				{
+					"name": "Get Payment History",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{accessToken}}"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/payment/history?page=1&limit=10",
+							"host": ["{{baseUrl}}"],
+							"path": ["payment", "history"],
+							"query": [
+								{
+									"key": "page",
+									"value": "1"
+								},
+								{
+									"key": "limit",
+									"value": "10"
+								}
+							]
+						},
+						"description": "Get payment history with pagination."
+					}
+				},
+				{
+					"name": "Generate Invoice",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{accessToken}}"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/payment/invoice/:bookingId",
+							"host": ["{{baseUrl}}"],
+							"path": ["payment", "invoice", ":bookingId"],
+							"variable": [
+								{
+									"key": "bookingId",
+									"value": "booking-uuid"
+								}
+							]
+						},
+						"description": "Generate invoice for a booking."
+					}
+				}
+			]
+		},
+		{
+			"name": "Rating",
+			"description": "Rating and review management",
+			"item": [
+				{
+					"name": "Submit Rating",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{accessToken}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"booking_id\": \"booking-uuid\",\n    \"rating\": 5,\n    \"review\": \"Great driver, smooth ride!\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/rating/submit",
+							"host": ["{{baseUrl}}"],
+							"path": ["rating", "submit"]
+						},
+						"description": "Submit rating for a completed booking."
+					}
+				},
+				{
+					"name": "Get Rating by Booking",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{accessToken}}"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/rating/booking/:bookingId",
+							"host": ["{{baseUrl}}"],
+							"path": ["rating", "booking", ":bookingId"],
+							"variable": [
+								{
+									"key": "bookingId",
+									"value": "booking-uuid"
+								}
+							]
+						},
+						"description": "Get rating for a specific booking."
+					}
+				},
+				{
+					"name": "Get Driver Ratings",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{accessToken}}"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/rating/driver/:driverId?page=1&limit=10",
+							"host": ["{{baseUrl}}"],
+							"path": ["rating", "driver", ":driverId"],
+							"query": [
+								{
+									"key": "page",
+									"value": "1"
+								},
+								{
+									"key": "limit",
+									"value": "10"
+								}
+							],
+							"variable": [
+								{
+									"key": "driverId",
+									"value": "driver-uuid"
+								}
+							]
+						},
+						"description": "Get all ratings for a driver with pagination."
+					}
+				}
+			]
+		},
+		{
+			"name": "Admin",
+			"description": "Admin dashboard and management endpoints",
+			"item": [
+				{
+					"name": "Get Dashboard Stats",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{accessToken}}"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/admin/dashboard/stats",
+							"host": ["{{baseUrl}}"],
+							"path": ["admin", "dashboard", "stats"]
+						},
+						"description": "Get dashboard statistics. Requires admin role."
+					}
+				},
+				{
+					"name": "Get Pending Drivers",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{accessToken}}"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/admin/drivers/pending",
+							"host": ["{{baseUrl}}"],
+							"path": ["admin", "drivers", "pending"]
+						},
+						"description": "Get list of pending driver verifications."
+					}
+				},
+				{
+					"name": "Approve Driver",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{accessToken}}"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/admin/drivers/:id/approve",
+							"host": ["{{baseUrl}}"],
+							"path": ["admin", "drivers", ":id", "approve"],
+							"variable": [
+								{
+									"key": "id",
+									"value": "driver-uuid"
+								}
+							]
+						},
+						"description": "Approve driver verification."
+					}
+				},
+				{
+					"name": "Reject Driver",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{accessToken}}"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/admin/drivers/:id/reject",
+							"host": ["{{baseUrl}}"],
+							"path": ["admin", "drivers", ":id", "reject"],
+							"variable": [
+								{
+									"key": "id",
+									"value": "driver-uuid"
+								}
+							]
+						},
+						"description": "Reject driver verification."
+					}
+				},
+				{
+					"name": "Get Pending Vehicles",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{accessToken}}"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/admin/vehicles/pending",
+							"host": ["{{baseUrl}}"],
+							"path": ["admin", "vehicles", "pending"]
+						},
+						"description": "Get list of pending vehicle verifications."
+					}
+				},
+				{
+					"name": "Approve Vehicle",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{accessToken}}"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/admin/vehicles/:id/approve",
+							"host": ["{{baseUrl}}"],
+							"path": ["admin", "vehicles", ":id", "approve"],
+							"variable": [
+								{
+									"key": "id",
+									"value": "vehicle-uuid"
+								}
+							]
+						},
+						"description": "Approve vehicle verification."
+					}
+				},
+				{
+					"name": "Reject Vehicle",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{accessToken}}"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/admin/vehicles/:id/reject",
+							"host": ["{{baseUrl}}"],
+							"path": ["admin", "vehicles", ":id", "reject"],
+							"variable": [
+								{
+									"key": "id",
+									"value": "vehicle-uuid"
+								}
+							]
+						},
+						"description": "Reject vehicle verification."
+					}
+				},
+				{
+					"name": "Get All Bookings",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{accessToken}}"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/admin/bookings?page=1&limit=10&status=completed",
+							"host": ["{{baseUrl}}"],
+							"path": ["admin", "bookings"],
+							"query": [
+								{
+									"key": "page",
+									"value": "1"
+								},
+								{
+									"key": "limit",
+									"value": "10"
+								},
+								{
+									"key": "status",
+									"value": "completed"
+								}
+							]
+						},
+						"description": "Get all bookings with filters (status, date range, etc.)."
+					}
+				},
+				{
+					"name": "Get Analytics",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{accessToken}}"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/admin/analytics",
+							"host": ["{{baseUrl}}"],
+							"path": ["admin", "analytics"]
+						},
+						"description": "Get analytics data for the last 30 days."
+					}
+				}
+			]
+		},
+		{
+			"name": "Notification",
+			"description": "Push notification management",
+			"item": [
+				{
+					"name": "Send Notification",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{accessToken}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"user_id\": \"user-uuid\",\n    \"title\": \"Booking Update\",\n    \"body\": \"Your driver is arriving soon!\",\n    \"data\": {\n        \"booking_id\": \"booking-uuid\"\n    }\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/notification/send",
+							"host": ["{{baseUrl}}"],
+							"path": ["notification", "send"]
+						},
+						"description": "Send push notification to user. Requires admin role."
+					}
+				}
+			]
+		}
+	]
+}
