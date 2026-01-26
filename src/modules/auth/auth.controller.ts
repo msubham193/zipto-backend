@@ -3,7 +3,6 @@ import {
   Post,
   Body,
   Get,
-  UseGuards,
   HttpCode,
   HttpStatus,
 } from '@nestjs/common';
@@ -17,7 +16,7 @@ import {
   RefreshTokenDto,
   ResendOTPDto,
 } from './dto/auth.dto';
-import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
+import { Public } from '../../common/decorators/public.decorator';
 import { GetUser } from '../../common/decorators/get-user.decorator';
 import { User } from './entities/user.entity';
 
@@ -26,6 +25,7 @@ import { User } from './entities/user.entity';
 export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
+  @Public()
   @Post('customer/register')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Register customer and send OTP' })
@@ -35,6 +35,7 @@ export class AuthController {
     return this.authService.register({ ...registerDto, role: 'customer' as any });
   }
 
+  @Public()
   @Post('driver/register')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Register driver and send OTP' })
@@ -44,6 +45,7 @@ export class AuthController {
     return this.authService.register({ ...registerDto, role: 'driver' as any });
   }
 
+  @Public()
   @Post('verify-otp')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Verify OTP and complete registration/login' })
@@ -53,6 +55,7 @@ export class AuthController {
     return this.authService.verifyOtp(verifyOtpDto);
   }
 
+  @Public()
   @Post('customer/login')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Customer login - sends OTP' })
@@ -62,6 +65,7 @@ export class AuthController {
     return this.authService.login(loginDto);
   }
 
+  @Public()
   @Post('driver/login')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Driver login - sends OTP' })
@@ -71,6 +75,7 @@ export class AuthController {
     return this.authService.login(loginDto);
   }
 
+  @Public()
   @Post('admin/login')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Admin login with email and password' })
@@ -80,6 +85,7 @@ export class AuthController {
     return this.authService.adminLogin(adminLoginDto);
   }
 
+  @Public()
   @Post('refresh-token')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Get new access token using refresh token' })
@@ -89,6 +95,7 @@ export class AuthController {
     return this.authService.refreshToken(refreshTokenDto);
   }
 
+  @Public()
   @Post('resend-otp')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Resend OTP' })
@@ -98,7 +105,6 @@ export class AuthController {
   }
 
   @Post('logout')
-  @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Logout user' })
@@ -109,7 +115,6 @@ export class AuthController {
   }
 
   @Get('me')
-  @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Get current user details' })
   @ApiResponse({ status: 200, description: 'User details retrieved' })

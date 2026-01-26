@@ -6,7 +6,6 @@ import {
   Body,
   Param,
   Query,
-  UseGuards,
   ParseIntPipe,
   ParseFloatPipe,
   DefaultValuePipe,
@@ -19,15 +18,12 @@ import {
   CancelBookingDto,
   UpdateFinalFareDto,
 } from './dto/booking.dto';
-import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
-import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { GetUser } from '../../common/decorators/get-user.decorator';
 import { User } from '../auth/entities/user.entity';
 
 @ApiTags('Booking')
 @Controller('booking')
-@UseGuards(JwtAuthGuard, RolesGuard)
 @ApiBearerAuth()
 export class BookingController {
   constructor(private readonly bookingService: BookingService) {}

@@ -5,22 +5,18 @@ import {
   Body,
   Param,
   Query,
-  UseGuards,
   ParseIntPipe,
   DefaultValuePipe,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiQuery, ApiBearerAuth } from '@nestjs/swagger';
 import { RatingService } from './rating.service';
 import { SubmitRatingDto } from './dto/rating.dto';
-import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
-import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { GetUser } from '../../common/decorators/get-user.decorator';
 import { User } from '../auth/entities/user.entity';
 
 @ApiTags('Rating')
 @Controller('rating')
-@UseGuards(JwtAuthGuard, RolesGuard)
 @ApiBearerAuth()
 export class RatingController {
   constructor(private readonly ratingService: RatingService) {}

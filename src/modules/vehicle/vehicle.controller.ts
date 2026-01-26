@@ -5,14 +5,12 @@ import {
   Put,
   Body,
   Param,
-  UseGuards,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { VehicleService } from './vehicle.service';
 import { RegisterVehicleDto, UpdateVehicleDto } from './dto/vehicle.dto';
-import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
-import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
+import { Public } from '../../common/decorators/public.decorator';
 import { GetUser } from '../../common/decorators/get-user.decorator';
 import { User } from '../auth/entities/user.entity';
 
@@ -21,6 +19,7 @@ import { User } from '../auth/entities/user.entity';
 export class VehicleController {
   constructor(private readonly vehicleService: VehicleService) {}
 
+  @Public()
   @Get('types')
   @ApiOperation({ summary: 'Get all vehicle types (public)' })
   @ApiResponse({ status: 200, description: 'Vehicle types retrieved successfully' })
@@ -29,7 +28,6 @@ export class VehicleController {
   }
 
   @Post('register')
-  @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('driver')
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Register new vehicle' })
@@ -41,7 +39,6 @@ export class VehicleController {
   }
 
   @Get('my-vehicles')
-  @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('driver')
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Get driver vehicles' })
@@ -52,7 +49,6 @@ export class VehicleController {
   }
 
   @Get(':id')
-  @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('driver')
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Get vehicle details by ID' })
@@ -65,7 +61,6 @@ export class VehicleController {
   }
 
   @Put(':id')
-  @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('driver')
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Update vehicle details' })

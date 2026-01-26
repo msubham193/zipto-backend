@@ -7,20 +7,16 @@ import {
   Body,
   Param,
   ParseIntPipe,
-  UseGuards,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { CustomerService } from './customer.service';
 import { UpdateCustomerDto, SavedLocationDto } from './dto/customer.dto';
-import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
-import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { GetUser } from '../../common/decorators/get-user.decorator';
 import { User } from '../auth/entities/user.entity';
 
 @ApiTags('Customer')
 @Controller('customer')
-@UseGuards(JwtAuthGuard, RolesGuard)
 @Roles('customer')
 @ApiBearerAuth()
 export class CustomerController {

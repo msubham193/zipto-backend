@@ -4,22 +4,18 @@ import {
   Put,
   Body,
   Query,
-  UseGuards,
   ParseIntPipe,
   DefaultValuePipe,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiQuery, ApiBearerAuth } from '@nestjs/swagger';
 import { DriverService } from './driver.service';
 import { UpdateDriverDto, UpdateAvailabilityDto, UpdateLocationDto } from './dto/driver.dto';
-import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
-import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { GetUser } from '../../common/decorators/get-user.decorator';
 import { User } from '../auth/entities/user.entity';
 
 @ApiTags('Driver')
 @Controller('driver')
-@UseGuards(JwtAuthGuard, RolesGuard)
 @Roles('driver')
 @ApiBearerAuth()
 export class DriverController {

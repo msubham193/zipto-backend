@@ -5,22 +5,18 @@ import {
   Body,
   Param,
   Query,
-  UseGuards,
   ParseIntPipe,
   DefaultValuePipe,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiQuery, ApiBearerAuth } from '@nestjs/swagger';
 import { PaymentService } from './payment.service';
 import { CreateOrderDto, VerifyPaymentDto, CashPaymentDto } from './dto/payment.dto';
-import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
-import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { GetUser } from '../../common/decorators/get-user.decorator';
 import { User } from '../auth/entities/user.entity';
 
 @ApiTags('Payment')
 @Controller('payment')
-@UseGuards(JwtAuthGuard, RolesGuard)
 @ApiBearerAuth()
 export class PaymentController {
   constructor(private readonly paymentService: PaymentService) {}

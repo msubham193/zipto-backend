@@ -4,9 +4,13 @@ import { BookingController } from './booking.controller';
 import { BookingService } from './booking.service';
 import { Booking } from './entities/booking.entity';
 import { PricingRule } from './entities/pricing-rule.entity';
+import { AuthModule } from '../auth/auth.module';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Booking, PricingRule])],
+  imports: [
+    TypeOrmModule.forFeature([Booking, PricingRule]),
+    AuthModule,
+  ],
   controllers: [BookingController],
   providers: [BookingService],
   exports: [BookingService],
