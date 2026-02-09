@@ -39,8 +39,8 @@ export class PaymentService {
       throw new BadRequestException('You do not have access to this booking');
     }
 
-    if (booking.status !== BookingStatus.COMPLETED) {
-      throw new BadRequestException('Can only create payment for completed bookings');
+    if (booking.status === BookingStatus.CANCELLED) {
+      throw new BadRequestException('Cannot create payment for cancelled bookings');
     }
 
     // Check if payment already exists
