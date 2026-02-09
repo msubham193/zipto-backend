@@ -7,6 +7,7 @@ import {
   IsLatitude,
   IsLongitude,
   ValidateNested,
+  IsMobilePhone,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
@@ -45,6 +46,22 @@ export class EstimateFareDto {
 }
 
 export class CreateBookingDto {
+  @ApiProperty({ example: 'John Doe' })
+  @IsString()
+  @IsNotEmpty()
+  name: string;
+
+  @ApiProperty({ example: '9876543210' })
+  @IsString()
+  @IsNotEmpty()
+  @IsMobilePhone('en-IN')
+  mobile_number: string;
+
+  @ApiProperty({ example: 'Bhubaneswar' })
+  @IsString()
+  @IsNotEmpty()
+  city: string;
+
   @ApiProperty({ type: LocationDto })
   @ValidateNested()
   @Type(() => LocationDto)

@@ -90,7 +90,7 @@ export class BookingService {
    * Create new booking
    */
   async create(userId: string, createBookingDto: CreateBookingDto) {
-    const { pickup_location, drop_location, vehicle_type, booking_type, scheduled_time } =
+    const { name, mobile_number, city, pickup_location, drop_location, vehicle_type, booking_type, scheduled_time } =
       createBookingDto;
 
     // Validate scheduled time for scheduled bookings
@@ -115,6 +115,9 @@ export class BookingService {
     // Create booking
     const booking = this.bookingRepository.create({
       customer_id: userId,
+      name,
+      mobile_number,
+      city,
       booking_type,
       pickup_address: pickup_location.address,
       drop_address: drop_location.address,

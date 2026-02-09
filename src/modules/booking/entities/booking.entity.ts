@@ -53,6 +53,15 @@ export class Booking {
   @JoinColumn({ name: 'vehicle_id' })
   vehicle: Vehicle;
 
+  @Column({ type: 'varchar', length: 100 })
+  name: string;
+
+  @Column({ type: 'varchar', length: 15 })
+  mobile_number: string;
+
+  @Column({ type: 'varchar', length: 100 })
+  city: string;
+
   @Column({
     type: 'enum',
     enum: BookingType,
