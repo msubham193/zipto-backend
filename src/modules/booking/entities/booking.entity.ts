@@ -13,6 +13,13 @@ import { User } from '../../auth/entities/user.entity';
 import { Vehicle } from '../../vehicle/entities/vehicle.entity';
 import { Payment } from '../../payment/entities/payment.entity';
 
+export enum ServiceCategory {
+  SEND_PACKAGES = 'send_packages',
+  TRANSPORT_GOODS = 'transport_goods',
+  FOOD_DELIVERY = 'food_delivery',
+  MEDICINE = 'medicine',
+}
+
 export enum BookingType {
   INSTANT = 'instant',
   SCHEDULED = 'scheduled',
@@ -63,6 +70,12 @@ export class Booking {
 
   @Column({ type: 'varchar', length: 100 })
   city: string;
+
+  @Column({
+    type: 'enum',
+    enum: ServiceCategory,
+  })
+  service_category: ServiceCategory;
 
   @Column({
     type: 'enum',

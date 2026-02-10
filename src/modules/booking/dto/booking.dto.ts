@@ -12,7 +12,7 @@ import {
 import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { VehicleType } from '../../vehicle/entities/vehicle.entity';
-import { BookingType } from '../entities/booking.entity';
+import { BookingType, ServiceCategory } from '../entities/booking.entity';
 
 export class LocationDto {
   @ApiProperty({ example: 20.2961 })
@@ -61,6 +61,10 @@ export class CreateBookingDto {
   @IsString()
   @IsNotEmpty()
   city: string;
+
+  @ApiProperty({ enum: ServiceCategory, example: ServiceCategory.SEND_PACKAGES, description: 'Service type: send_packages, transport_goods, food_delivery, medicine' })
+  @IsEnum(ServiceCategory)
+  service_category: ServiceCategory;
 
   @ApiProperty({ type: LocationDto })
   @ValidateNested()

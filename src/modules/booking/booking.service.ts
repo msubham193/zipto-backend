@@ -90,7 +90,7 @@ export class BookingService {
    * Create new booking
    */
   async create(userId: string, createBookingDto: CreateBookingDto) {
-    const { name, mobile_number, city, pickup_location, drop_location, vehicle_type, booking_type, scheduled_time } =
+    const { name, mobile_number, city, service_category, pickup_location, drop_location, vehicle_type, booking_type, scheduled_time } =
       createBookingDto;
 
     // Validate scheduled time for scheduled bookings
@@ -118,6 +118,7 @@ export class BookingService {
       name,
       mobile_number,
       city,
+      service_category,
       booking_type,
       pickup_address: pickup_location.address,
       drop_address: drop_location.address,
