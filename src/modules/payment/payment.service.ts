@@ -120,6 +120,9 @@ export class PaymentService {
 
     // Verify Razorpay signature
     const razorpayKeySecret = this.configService.get<string>('externalServices.razorpay.keySecret');
+    if (!razorpayKeySecret) {
+      throw new BadRequestException('Razorpay key secret is not configured');
+    }
     const generatedSignature = crypto
       .createHmac('sha256', razorpayKeySecret)
       .update(`${razorpay_order_id}|${razorpay_payment_id}`)
