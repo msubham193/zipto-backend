@@ -124,12 +124,12 @@ export class PaymentService {
         key: keyId,
       };
     } catch (error: unknown) {
-      const err = error as Error;
-      this.logger.error(`createOrder error: ${err?.message || error}`, err?.stack);
+      this.logger.error(`createOrder error: ${JSON.stringify(error)}`);
       if (error instanceof HttpException) {
         throw error;
       }
-      throw new BadRequestException(err?.message || 'Failed to create payment order');
+      const msg = (error as Error)?.message || 'Failed to create payment order';
+      throw new BadRequestException(msg);
     }
   }
 
