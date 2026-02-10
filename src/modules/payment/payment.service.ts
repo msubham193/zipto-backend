@@ -96,8 +96,12 @@ export class PaymentService {
         key_secret: keySecret,
       });
 
+      // Use 1 rupee (100 paise) for test mode, store actual amount in DB
+      const isTestMode = keyId.startsWith('rzp_test');
+      const razorpayAmount = isTestMode ? 100 : Math.round(amount * 100);
+
       const order = await razorpay.orders.create({
-        amount: Math.round(amount * 100),
+        amount: razorpayAmount,
         currency: 'INR',
         receipt: booking_id,
       });
