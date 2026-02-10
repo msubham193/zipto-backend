@@ -7,6 +7,7 @@ import { Booking, BookingStatus } from '../booking/entities/booking.entity';
 import { CreateOrderDto, VerifyPaymentDto, CashPaymentDto } from './dto/payment.dto';
 import { getPaginationMeta } from '../../common/utils/helpers.util';
 import * as crypto from 'crypto';
+import Razorpay = require('razorpay');
 
 @Injectable()
 export class PaymentService {
@@ -26,7 +27,6 @@ export class PaymentService {
   async createOrder(userId: string, createOrderDto: CreateOrderDto) {
     const { booking_id, amount } = createOrderDto;
 
-    // Verify booking belongs to user and is completed
     const booking = await this.bookingRepository.findOne({
       where: { id: booking_id },
     });
@@ -43,7 +43,7 @@ export class PaymentService {
       throw new BadRequestException('Cannot create payment for cancelled bookings');
     }
 
-    // Check if payment already exists
+    // Check if payment already exists and is completed
     const existingPayment = await this.paymentRepository.findOne({
       where: { booking_id },
     });
@@ -52,23 +52,29 @@ export class PaymentService {
       throw new BadRequestException('Payment already completed for this booking');
     }
 
-    // For now, return mock order (Razorpay integration commented out)
-    // TODO: Integrate actual Razorpay SDK when API keys are available
-    /*
-    const Razorpay = require('razorpay');
+    // If a pending payment order already exists, return it
+    if (existingPayment && existingPayment.payment_status === PaymentStatus.PENDING && existingPayment.razorpay_order_id) {
+      return {
+        order_id: existingPayment.razorpay_order_id,
+        amount: existingPayment.amount,
+        currency: 'INR',
+        key: this.configService.get('externalServices.razorpay.keyId'),
+      };
+    }
+
+    const keyId = this.configService.get<string>('externalServices.razorpay.keyId');
+    const keySecret = this.configService.get<string>('externalServices.razorpay.keySecret');
+
     const razorpay = new Razorpay({
-      key_id: this.configService.get('externalServices.razorpay.keyId'),
-      key_secret: this.configService.get('externalServices.razorpay.keySecret'),
+      key_id: keyId,
+      key_secret: keySecret,
     });
 
     const order = await razorpay.orders.create({
-      amount: Math.round(amount * 100), // Convert to paise
+      amount: Math.round(amount * 100),
       currency: 'INR',
       receipt: `receipt_${booking_id}`,
     });
-    */
-
-    const mockOrderId = `order_${Date.now()}`;
 
     // Create payment record
     const payment = this.paymentRepository.create({
@@ -76,15 +82,18 @@ export class PaymentService {
       amount,
       payment_method: PaymentMethod.UPI,
       payment_status: PaymentStatus.PENDING,
-      razorpay_order_id: mockOrderId,
+      razorpay_order_id: order.id,
     });
 
     await this.paymentRepository.save(payment);
 
+    this.logger.log(`Razorpay order created: ${order.id} for booking: ${booking_id}`);
+
     return {
-      order_id: mockOrderId,
+      order_id: order.id,
       amount,
       currency: 'INR',
+      key: keyId,
     };
   }
 
@@ -109,19 +118,18 @@ export class PaymentService {
       throw new BadRequestException('You do not have access to this payment');
     }
 
-    // Verify signature (mock verification for now)
-    // TODO: Implement actual Razorpay signature verification
-    /*
-    const razorpayKeySecret = this.configService.get('externalServices.razorpay.keySecret');
+    // Verify Razorpay signature
+    const razorpayKeySecret = this.configService.get<string>('externalServices.razorpay.keySecret');
     const generatedSignature = crypto
       .createHmac('sha256', razorpayKeySecret)
       .update(`${razorpay_order_id}|${razorpay_payment_id}`)
       .digest('hex');
 
     if (generatedSignature !== razorpay_signature) {
+      payment.payment_status = PaymentStatus.FAILED;
+      await this.paymentRepository.save(payment);
       throw new BadRequestException('Invalid payment signature');
     }
-    */
 
     // Update payment record
     payment.payment_status = PaymentStatus.COMPLETED;
