@@ -1,11 +1,12 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { Twilio } from 'twilio';
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const twilio = require('twilio');
 
 @Injectable()
 export class SmsService {
   private readonly logger = new Logger(SmsService.name);
-  private readonly client: Twilio;
+  private readonly client: any;
   private readonly verifyServiceSid: string;
 
   constructor(private configService: ConfigService) {
@@ -19,7 +20,7 @@ export class SmsService {
         'externalServices.twilio.verifyServiceSid',
       ) || '';
 
-    this.client = new Twilio(accountSid, authToken);
+    this.client = twilio(accountSid, authToken);
   }
 
   /**
