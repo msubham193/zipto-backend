@@ -33,7 +33,7 @@ export class PaymentService {
    */
   async createOrder(userId: string, createOrderDto: CreateOrderDto) {
     try {
-      const { booking_id, amount } = createOrderDto;
+      const { booking_id, amount, payment_method } = createOrderDto;
       this.logger.log(
         `createOrder called - booking_id: ${booking_id}, amount: ${amount}, userId: ${userId}`,
       );
@@ -112,7 +112,7 @@ export class PaymentService {
       const payment = this.paymentRepository.create({
         booking_id,
         amount,
-        payment_method: PaymentMethod.UPI,
+        payment_method: payment_method || PaymentMethod.UPI,
         payment_status: PaymentStatus.PENDING,
         razorpay_order_id: order.id,
       });
