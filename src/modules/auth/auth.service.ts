@@ -20,6 +20,7 @@ import {
   RefreshTokenDto,
 } from './dto/auth.dto';
 import { generateOTP, formatPhoneNumber, generateRandomUsername } from '../../common/utils/helpers.util';
+import { SmsService } from '../../services/sms.service';
 
 @Injectable()
 export class AuthService {
@@ -32,36 +33,40 @@ export class AuthService {
     private otpRepository: Repository<OTP>,
     private jwtService: JwtService,
     private configService: ConfigService,
+    private smsService: SmsService,
   ) {}
 
   /**
-   * Register new user and send OTP
+   * Register or login user - send OTP
    */
   async register(registerDto: RegisterDto) {
-    const { phone, role } = registerDto;
+    const { phone } = registerDto;
     const formattedPhone = formatPhoneNumber(phone);
 
-    // Check if user already exists
     const existingUser = await this.userRepository.findOne({
       where: { phone: formattedPhone },
     });
 
-    if (existingUser) {
-      throw new ConflictException('User with this phone number already exists');
+    if (existingUser && !existingUser.is_active) {
+      throw new UnauthorizedException('User account is deactivated');
     }
 
-    // Generate and save OTP
-    const otpCode = await this.createOTP(formattedPhone, OTPPurpose.REGISTRATION);
+    // Send OTP via Twilio Verify
+    const sent = await this.smsService.sendVerification(formattedPhone);
+    if (!sent) {
+      throw new BadRequestException('Failed to send OTP. Please try again.');
+    }
 
-    // TODO: Send OTP via SMS
-    this.logger.log(`OTP for ${formattedPhone}: ${otpCode}`);
-
-    const expiryMinutes = this.configService.get<number>('externalServices.otp.expiryMinutes') || 10;
+    const purpose = existingUser
+      ? OTPPurpose.LOGIN
+      : OTPPurpose.REGISTRATION;
+    await this.createOTP(formattedPhone, purpose);
 
     return {
       message: 'OTP sent successfully',
       phone: formattedPhone,
-      expiresIn: `${expiryMinutes} minutes`,
+      isNewUser: !existingUser,
+      expiresIn: '10 minutes',
     };
   }
 
@@ -72,27 +77,20 @@ export class AuthService {
     const { phone, otp } = verifyOtpDto;
     const formattedPhone = formatPhoneNumber(phone);
 
-    // Validate OTP
-    const otpRecord = await this.otpRepository.findOne({
-      where: {
-        phone: formattedPhone,
-        otp_code: otp,
-        is_used: false,
-      },
-      order: { created_at: 'DESC' },
-    });
-
-    if (!otpRecord) {
-      throw new BadRequestException('Invalid OTP');
+    // Verify OTP via Twilio Verify
+    const isValid = await this.smsService.checkVerification(
+      formattedPhone,
+      otp,
+    );
+    if (!isValid) {
+      throw new BadRequestException('Invalid or expired OTP');
     }
 
-    if (new Date() > otpRecord.expires_at) {
-      throw new BadRequestException('OTP has expired');
-    }
-
-    // Mark OTP as used
-    otpRecord.is_used = true;
-    await this.otpRepository.save(otpRecord);
+    // Mark DB OTP records as used
+    await this.otpRepository.update(
+      { phone: formattedPhone, is_used: false },
+      { is_used: true },
+    );
 
     // Check if user exists
     let user = await this.userRepository.findOne({
@@ -107,7 +105,7 @@ export class AuthService {
       user = this.userRepository.create({
         phone: formattedPhone,
         name: userName,
-        role: otpRecord.purpose === OTPPurpose.REGISTRATION ? UserRole.CUSTOMER : UserRole.CUSTOMER,
+        role: UserRole.CUSTOMER,
         is_verified: true,
       });
 
@@ -135,31 +133,30 @@ export class AuthService {
     const { phone } = loginDto;
     const formattedPhone = formatPhoneNumber(phone);
 
-    // Check if user exists
-    const user = await this.userRepository.findOne({
+    const existingUser = await this.userRepository.findOne({
       where: { phone: formattedPhone },
     });
 
-    if (!user) {
-      throw new UnauthorizedException('User not found');
-    }
-
-    if (!user.is_active) {
+    if (existingUser && !existingUser.is_active) {
       throw new UnauthorizedException('User account is deactivated');
     }
 
-    // Generate and save OTP
-    const otpCode = await this.createOTP(formattedPhone, OTPPurpose.LOGIN);
+    // Send OTP via Twilio Verify
+    const sent = await this.smsService.sendVerification(formattedPhone);
+    if (!sent) {
+      throw new BadRequestException('Failed to send OTP. Please try again.');
+    }
 
-    // TODO: Send OTP via SMS
-    this.logger.log(`OTP for ${formattedPhone}: ${otpCode}`);
-
-    const expiryMinutes = this.configService.get<number>('externalServices.otp.expiryMinutes') || 10;
+    const purpose = existingUser
+      ? OTPPurpose.LOGIN
+      : OTPPurpose.REGISTRATION;
+    await this.createOTP(formattedPhone, purpose);
 
     return {
       message: 'OTP sent successfully',
       phone: formattedPhone,
-      expiresIn: `${expiryMinutes} minutes`,
+      isNewUser: !existingUser,
+      expiresIn: '10 minutes',
     };
   }
 
@@ -241,22 +238,23 @@ export class AuthService {
   async resendOtp(phone: string) {
     const formattedPhone = formatPhoneNumber(phone);
 
+    // Send OTP via Twilio Verify
+    const sent = await this.smsService.sendVerification(formattedPhone);
+    if (!sent) {
+      throw new BadRequestException('Failed to send OTP. Please try again.');
+    }
+
     const user = await this.userRepository.findOne({
       where: { phone: formattedPhone },
     });
 
     const purpose = user ? OTPPurpose.LOGIN : OTPPurpose.REGISTRATION;
-    const otpCode = await this.createOTP(formattedPhone, purpose);
-
-    // TODO: Send OTP via SMS
-    this.logger.log(`OTP for ${formattedPhone}: ${otpCode}`);
-
-    const expiryMinutes = this.configService.get<number>('externalServices.otp.expiryMinutes') || 10;
+    await this.createOTP(formattedPhone, purpose);
 
     return {
       message: 'OTP resent successfully',
       phone: formattedPhone,
-      expiresIn: `${expiryMinutes} minutes`,
+      expiresIn: '10 minutes',
     };
   }
 

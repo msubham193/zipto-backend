@@ -8,11 +8,10 @@ export default registerAs('externalServices', () => ({
     keyId: process.env.RAZORPAY_KEY_ID || '',
     keySecret: process.env.RAZORPAY_KEY_SECRET || '',
   },
-  sms: {
-    provider: process.env.SMS_PROVIDER || 'msg91',
-    apiKey: process.env.SMS_API_KEY || '',
-    senderId: process.env.SMS_SENDER_ID || 'SKIDO',
-    route: process.env.SMS_ROUTE || '4',
+  twilio: {
+    accountSid: process.env.TWILIO_ACCOUNT_SID || '',
+    authToken: process.env.TWILIO_AUTH_TOKEN || '',
+    verifyServiceSid: process.env.TWILIO_VERIFY_SERVICE_SID || '',
   },
   fcm: {
     serverKey: process.env.FCM_SERVER_KEY || '',

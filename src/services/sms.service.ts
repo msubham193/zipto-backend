@@ -1,109 +1,75 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import axios from 'axios';
+import { Twilio } from 'twilio';
 
 @Injectable()
 export class SmsService {
   private readonly logger = new Logger(SmsService.name);
-  private readonly provider: string;
-  private readonly apiKey: string;
-  private readonly senderId: string;
-  private readonly route: string;
+  private readonly client: Twilio;
+  private readonly verifyServiceSid: string;
 
   constructor(private configService: ConfigService) {
-    this.provider = this.configService.get<string>('externalServices.sms.provider') || 'msg91';
-    this.apiKey = this.configService.get<string>('externalServices.sms.apiKey') || '';
-    this.senderId = this.configService.get<string>('externalServices.sms.senderId') || 'SKIDO';
-    this.route = this.configService.get<string>('externalServices.sms.route') || '4';
+    const accountSid =
+      this.configService.get<string>('externalServices.twilio.accountSid') ||
+      '';
+    const authToken =
+      this.configService.get<string>('externalServices.twilio.authToken') || '';
+    this.verifyServiceSid =
+      this.configService.get<string>(
+        'externalServices.twilio.verifyServiceSid',
+      ) || '';
+
+    this.client = new Twilio(accountSid, authToken);
   }
 
   /**
-   * Send OTP via SMS
+   * Send OTP via Twilio Verify
    */
-  async sendOTP(phone: string, otp: string): Promise<boolean> {
-    // Format phone number (remove +91 if present)
-    const formattedPhone = phone.replace(/^\+91/, '');
-
-    if (!this.apiKey) {
-      this.logger.warn(`OTP not sent (SMS API not configured). Phone: ${formattedPhone}, OTP: ${otp}`);
-      this.logger.log(`[MOCK SMS] Sending OTP ${otp} to ${formattedPhone}`);
-      return true; // Mock success
+  async sendVerification(phone: string): Promise<boolean> {
+    if (!this.verifyServiceSid) {
+      this.logger.warn(
+        `Twilio Verify not configured. Phone: ${phone}`,
+      );
+      return false;
     }
 
     try {
-      if (this.provider === 'msg91') {
-        return await this.sendMSG91OTP(formattedPhone, otp);
-      } else {
-        this.logger.warn(`Unknown SMS provider: ${this.provider}`);
-        return false;
-      }
-    } catch (error: any) {
-      this.logger.error(`SMS sending failed: ${error.message}`);
+      const verification = await this.client.verify.v2
+        .services(this.verifyServiceSid)
+        .verifications.create({ to: phone, channel: 'sms' });
+
+      this.logger.log(
+        `OTP sent to ${phone} - status: ${verification.status}`,
+      );
+      return verification.status === 'pending';
+    } catch (error: unknown) {
+      const msg = (error as Error)?.message || error;
+      this.logger.error(`Twilio send verification failed: ${msg}`);
       return false;
     }
   }
 
   /**
-   * Send OTP using MSG91 API
+   * Verify OTP via Twilio Verify
    */
-  private async sendMSG91OTP(phone: string, otp: string): Promise<boolean> {
-    try {
-      const message = `Your SkiDO OTP is ${otp}. Valid for 10 minutes. Do not share with anyone.`;
-
-      const response = await axios.get('https://api.msg91.com/api/sendhttp.php', {
-        params: {
-          authkey: this.apiKey,
-          mobiles: phone,
-          message,
-          sender: this.senderId,
-          route: this.route,
-          country: '91',
-        },
-      });
-
-      if (response.data.type === 'success') {
-        this.logger.log(`OTP sent successfully via MSG91 to ${phone}`);
-        return true;
-      } else {
-        this.logger.error(`MSG91 API error: ${response.data.message}`);
-        return false;
-      }
-    } catch (error: any) {
-      this.logger.error(`MSG91 request failed: ${error.message}`);
+  async checkVerification(phone: string, code: string): Promise<boolean> {
+    if (!this.verifyServiceSid) {
+      this.logger.warn('Twilio Verify not configured');
       return false;
-    }
-  }
-
-  /**
-   * Send custom SMS
-   */
-  async sendSMS(phone: string, message: string): Promise<boolean> {
-    const formattedPhone = phone.replace(/^\+91/, '');
-
-    if (!this.apiKey) {
-      this.logger.log(`[MOCK SMS] Sending to ${formattedPhone}: ${message}`);
-      return true;
     }
 
     try {
-      if (this.provider === 'msg91') {
-        const response = await axios.get('https://api.msg91.com/api/sendhttp.php', {
-          params: {
-            authkey: this.apiKey,
-            mobiles: formattedPhone,
-            message,
-            sender: this.senderId,
-            route: this.route,
-            country: '91',
-          },
-        });
+      const check = await this.client.verify.v2
+        .services(this.verifyServiceSid)
+        .verificationChecks.create({ to: phone, code });
 
-        return response.data.type === 'success';
-      }
-
-      return false;
-    } catch (error: any) {
-      this.logger.error(`SMS sending failed: ${error.message}`);
+      this.logger.log(
+        `OTP check for ${phone} - status: ${check.status}`,
+      );
+      return check.status === 'approved';
+    } catch (error: unknown) {
+      const msg = (error as Error)?.message || error;
+      this.logger.error(`Twilio check verification failed: ${msg}`);
       return false;
     }
   }
