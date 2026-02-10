@@ -7,7 +7,8 @@ import { Booking, BookingStatus } from '../booking/entities/booking.entity';
 import { CreateOrderDto, VerifyPaymentDto, CashPaymentDto } from './dto/payment.dto';
 import { getPaginationMeta } from '../../common/utils/helpers.util';
 import * as crypto from 'crypto';
-import Razorpay = require('razorpay');
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const Razorpay = require('razorpay');
 
 @Injectable()
 export class PaymentService {
@@ -65,16 +66,27 @@ export class PaymentService {
     const keyId = this.configService.get<string>('externalServices.razorpay.keyId');
     const keySecret = this.configService.get<string>('externalServices.razorpay.keySecret');
 
-    const razorpay = new Razorpay({
-      key_id: keyId,
-      key_secret: keySecret,
-    });
+    if (!keyId || !keySecret) {
+      this.logger.error('Razorpay credentials not configured');
+      throw new BadRequestException('Payment gateway is not configured');
+    }
 
-    const order = await razorpay.orders.create({
-      amount: Math.round(amount * 100),
-      currency: 'INR',
-      receipt: `receipt_${booking_id}`,
-    });
+    let order: any;
+    try {
+      const razorpay = new Razorpay({
+        key_id: keyId,
+        key_secret: keySecret,
+      });
+
+      order = await razorpay.orders.create({
+        amount: Math.round(amount * 100),
+        currency: 'INR',
+        receipt: `receipt_${booking_id}`,
+      });
+    } catch (err) {
+      this.logger.error(`Razorpay order creation failed: ${err.message}`, err.stack);
+      throw new BadRequestException('Failed to create payment order. Please try again.');
+    }
 
     // Create payment record
     const payment = this.paymentRepository.create({
