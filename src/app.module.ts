@@ -19,6 +19,7 @@ import { PaymentModule } from './modules/payment/payment.module';
 import { RatingModule } from './modules/rating/rating.module';
 import { AdminModule } from './modules/admin/admin.module';
 import { NotificationModule } from './modules/notification/notification.module';
+import { CoinModule } from './modules/coin/coin.module';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { RolesGuard } from './common/guards/roles.guard';
 
@@ -73,6 +74,7 @@ import { RolesGuard } from './common/guards/roles.guard';
     RatingModule,
     AdminModule,
     NotificationModule,
+    CoinModule,
   ],
   controllers: [],
   providers: [

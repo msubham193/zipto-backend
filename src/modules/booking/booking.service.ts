@@ -12,6 +12,7 @@ import { VehicleType } from '../vehicle/entities/vehicle.entity';
 import { EstimateFareDto, CreateBookingDto, CancelBookingDto, UpdateFinalFareDto } from './dto/booking.dto';
 import { getPaginationMeta } from '../../common/utils/helpers.util';
 import { MapboxService } from '../../services/mapbox.service';
+import { CoinService } from '../coin/coin.service';
 
 @Injectable()
 export class BookingService {
@@ -21,6 +22,7 @@ export class BookingService {
     @InjectRepository(PricingRule)
     private pricingRuleRepository: Repository<PricingRule>,
     private mapboxService: MapboxService,
+    private coinService: CoinService,
   ) {}
 
   /**
@@ -304,7 +306,22 @@ export class BookingService {
     booking.completion_time = new Date();
     booking.final_fare = updateDto?.final_fare || booking.estimated_fare;
 
-    return this.bookingRepository.save(booking);
+    const savedBooking = await this.bookingRepository.save(booking);
+
+    // Award coins to customer for successful delivery
+    const coinReward = await this.coinService.awardCoins(
+      booking.customer_id,
+      booking.id,
+      Number(booking.distance) || 0,
+      Number(booking.final_fare),
+      booking.service_category,
+    );
+
+    return {
+      ...savedBooking,
+      coins_earned: coinReward.coins,
+      coins_multiplier: coinReward.multiplier,
+    };
   }
 
   /**

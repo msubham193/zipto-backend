@@ -47,6 +47,9 @@ export class User {
   @Column({ type: 'boolean', default: true })
   is_active: boolean;
 
+  @Column({ type: 'integer', default: 0 })
+  coins: number;
+
   @Column({ type: 'varchar', length: 10, default: 'en' })
   language_preference: string;
 

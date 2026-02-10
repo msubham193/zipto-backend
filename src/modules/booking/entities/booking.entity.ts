@@ -62,18 +62,19 @@ export class Booking {
   @JoinColumn({ name: 'vehicle_id' })
   vehicle: Vehicle;
 
-  @Column({ type: 'varchar', length: 100 })
+  @Column({ type: 'varchar', length: 100, default: '' })
   name: string;
 
-  @Column({ type: 'varchar', length: 15 })
+  @Column({ type: 'varchar', length: 15, default: '' })
   mobile_number: string;
 
-  @Column({ type: 'varchar', length: 100 })
+  @Column({ type: 'varchar', length: 100, default: '' })
   city: string;
 
   @Column({
     type: 'enum',
     enum: ServiceCategory,
+    default: ServiceCategory.SEND_PACKAGES,
   })
   service_category: ServiceCategory;
 
