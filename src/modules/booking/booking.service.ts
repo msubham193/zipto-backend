@@ -314,6 +314,7 @@ export class BookingService {
       .createQueryBuilder('booking')
       .leftJoinAndSelect('booking.driver', 'driver')
       .leftJoinAndSelect('booking.vehicle', 'vehicle')
+      .leftJoinAndSelect('booking.payments', 'payments')
       .where('booking.customer_id = :userId', { userId });
 
     if (status) {

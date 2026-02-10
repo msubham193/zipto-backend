@@ -5,11 +5,13 @@ import {
   CreateDateColumn,
   UpdateDateColumn,
   ManyToOne,
+  OneToMany,
   JoinColumn,
   Index,
 } from 'typeorm';
 import { User } from '../../auth/entities/user.entity';
 import { Vehicle } from '../../vehicle/entities/vehicle.entity';
+import { Payment } from '../../payment/entities/payment.entity';
 
 export enum BookingType {
   INSTANT = 'instant',
@@ -135,4 +137,7 @@ export class Booking {
 
   @UpdateDateColumn()
   updated_at: Date;
+
+  @OneToMany(() => Payment, (payment) => payment.booking)
+  payments: Payment[];
 }
