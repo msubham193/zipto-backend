@@ -1,4 +1,10 @@
-import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  BadRequestException,
+  HttpException,
+  Logger,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { ConfigService } from '@nestjs/config';
@@ -26,87 +32,105 @@ export class PaymentService {
    * Create Razorpay order
    */
   async createOrder(userId: string, createOrderDto: CreateOrderDto) {
-    const { booking_id, amount } = createOrderDto;
-
-    const booking = await this.bookingRepository.findOne({
-      where: { id: booking_id },
-    });
-
-    if (!booking) {
-      throw new NotFoundException('Booking not found');
-    }
-
-    if (booking.customer_id !== userId) {
-      throw new BadRequestException('You do not have access to this booking');
-    }
-
-    if (booking.status === BookingStatus.CANCELLED) {
-      throw new BadRequestException('Cannot create payment for cancelled bookings');
-    }
-
-    // Check if payment already exists and is completed
-    const existingPayment = await this.paymentRepository.findOne({
-      where: { booking_id },
-    });
-
-    if (existingPayment && existingPayment.payment_status === PaymentStatus.COMPLETED) {
-      throw new BadRequestException('Payment already completed for this booking');
-    }
-
-    // If a pending payment order already exists, return it
-    if (existingPayment && existingPayment.payment_status === PaymentStatus.PENDING && existingPayment.razorpay_order_id) {
-      return {
-        order_id: existingPayment.razorpay_order_id,
-        amount: existingPayment.amount,
-        currency: 'INR',
-        key: this.configService.get('externalServices.razorpay.keyId'),
-      };
-    }
-
-    const keyId = this.configService.get<string>('externalServices.razorpay.keyId');
-    const keySecret = this.configService.get<string>('externalServices.razorpay.keySecret');
-
-    if (!keyId || !keySecret) {
-      this.logger.error('Razorpay credentials not configured');
-      throw new BadRequestException('Payment gateway is not configured');
-    }
-
-    let order: any;
     try {
+      const { booking_id, amount } = createOrderDto;
+      this.logger.log(
+        `createOrder called - booking_id: ${booking_id}, amount: ${amount}, userId: ${userId}`,
+      );
+
+      const booking = await this.bookingRepository.findOne({
+        where: { id: booking_id },
+      });
+
+      if (!booking) {
+        throw new NotFoundException('Booking not found');
+      }
+
+      this.logger.log(
+        `Booking found - status: ${booking.status}, customer_id: ${booking.customer_id}`,
+      );
+
+      if (booking.customer_id !== userId) {
+        throw new BadRequestException('You do not have access to this booking');
+      }
+
+      if (booking.status === BookingStatus.CANCELLED) {
+        throw new BadRequestException('Cannot create payment for cancelled bookings');
+      }
+
+      // Check if payment already exists and is completed
+      const existingPayment = await this.paymentRepository.findOne({
+        where: { booking_id },
+      });
+
+      if (existingPayment && existingPayment.payment_status === PaymentStatus.COMPLETED) {
+        throw new BadRequestException('Payment already completed for this booking');
+      }
+
+      // If a pending payment order already exists, return it
+      if (
+        existingPayment &&
+        existingPayment.payment_status === PaymentStatus.PENDING &&
+        existingPayment.razorpay_order_id
+      ) {
+        return {
+          order_id: existingPayment.razorpay_order_id,
+          amount: existingPayment.amount,
+          currency: 'INR',
+          key: this.configService.get('externalServices.razorpay.keyId'),
+        };
+      }
+
+      const keyId = this.configService.get<string>('externalServices.razorpay.keyId');
+      const keySecret = this.configService.get<string>('externalServices.razorpay.keySecret');
+
+      if (!keyId || !keySecret) {
+        this.logger.error('Razorpay credentials not configured');
+        throw new BadRequestException('Payment gateway is not configured');
+      }
+
+      this.logger.log('Creating Razorpay order...');
+
       const razorpay = new Razorpay({
         key_id: keyId,
         key_secret: keySecret,
       });
 
-      order = await razorpay.orders.create({
+      const order = await razorpay.orders.create({
         amount: Math.round(amount * 100),
         currency: 'INR',
         receipt: `receipt_${booking_id}`,
       });
-    } catch (err) {
-      this.logger.error(`Razorpay order creation failed: ${err.message}`, err.stack);
-      throw new BadRequestException('Failed to create payment order. Please try again.');
+
+      this.logger.log(`Razorpay order created: ${order.id}`);
+
+      // Create payment record
+      const payment = this.paymentRepository.create({
+        booking_id,
+        amount,
+        payment_method: PaymentMethod.UPI,
+        payment_status: PaymentStatus.PENDING,
+        razorpay_order_id: order.id,
+      });
+
+      await this.paymentRepository.save(payment);
+
+      this.logger.log(`Payment record saved for booking: ${booking_id}`);
+
+      return {
+        order_id: order.id,
+        amount,
+        currency: 'INR',
+        key: keyId,
+      };
+    } catch (error: unknown) {
+      const err = error as Error;
+      this.logger.error(`createOrder error: ${err?.message || error}`, err?.stack);
+      if (error instanceof HttpException) {
+        throw error;
+      }
+      throw new BadRequestException(err?.message || 'Failed to create payment order');
     }
-
-    // Create payment record
-    const payment = this.paymentRepository.create({
-      booking_id,
-      amount,
-      payment_method: PaymentMethod.UPI,
-      payment_status: PaymentStatus.PENDING,
-      razorpay_order_id: order.id,
-    });
-
-    await this.paymentRepository.save(payment);
-
-    this.logger.log(`Razorpay order created: ${order.id} for booking: ${booking_id}`);
-
-    return {
-      order_id: order.id,
-      amount,
-      currency: 'INR',
-      key: keyId,
-    };
   }
 
   /**
