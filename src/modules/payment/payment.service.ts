@@ -99,7 +99,7 @@ export class PaymentService {
       const order = await razorpay.orders.create({
         amount: Math.round(amount * 100),
         currency: 'INR',
-        receipt: `receipt_${booking_id}`,
+        receipt: booking_id,
       });
 
       this.logger.log(`Razorpay order created: ${order.id}`);
