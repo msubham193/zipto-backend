@@ -1,18 +1,27 @@
+#!/usr/bin/env node
+/**
+ * Script to create admin user on EC2 instance
+ * Run this on your EC2 server after deployment
+ */
+
 const { Client } = require('pg');
 const bcrypt = require('bcryptjs');
 
 async function createAdminUser() {
+  // Read database config from environment variables
   const client = new Client({
-    host: 'localhost',
-    port: 5432,
-    user: 'postgres',
-    password: 'postgres',
-    database: 'skido_db',
+    host: process.env.DATABASE_HOST || 'localhost',
+    port: parseInt(process.env.DATABASE_PORT || '5432'),
+    user: process.env.DATABASE_USERNAME || 'postgres',
+    password: process.env.DATABASE_PASSWORD || 'postgres',
+    database: process.env.DATABASE_NAME || 'skido_db',
   });
 
   try {
     await client.connect();
     console.log('✅ Connected to database');
+    console.log(`   Host: ${client.host}:${client.port}`);
+    console.log(`   Database: ${client.database}\n`);
 
     // Check if admin already exists
     const checkResult = await client.query(
@@ -21,8 +30,13 @@ async function createAdminUser() {
     );
 
     if (checkResult.rows.length > 0) {
-      console.log('\n⚠️  Admin user already exists!');
-      console.log('Existing admin:', checkResult.rows[0]);
+      console.log('⚠️  Admin user already exists!');
+      console.log('Existing admin:', {
+        id: checkResult.rows[0].id,
+        email: checkResult.rows[0].email,
+        phone: checkResult.rows[0].phone,
+        name: checkResult.rows[0].name,
+      });
       
       // Update the existing admin with correct password
       const passwordHash = await bcrypt.hash('Admin@123', 10);
@@ -55,16 +69,24 @@ async function createAdminUser() {
     }
 
     console.log('\n📋 Login Credentials:');
-    console.log('Email: admin@skido.com');
+    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    console.log('Email:    admin@skido.com');
     console.log('Password: Admin@123');
-    console.log('\n🔗 Login endpoint: POST /api/auth/admin/login');
+    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    console.log('\n🔗 Login endpoint: POST /api/auth/admin/login\n');
 
   } catch (error) {
     console.error('❌ Error:', error.message);
-    throw error;
+    if (error.code === 'ECONNREFUSED') {
+      console.error('\n💡 Make sure PostgreSQL is running and accessible');
+    } else if (error.code === '42P01') {
+      console.error('\n💡 The users table does not exist. Run migrations first:');
+      console.error('   npm run migration:run');
+    }
+    process.exit(1);
   } finally {
     await client.end();
-    console.log('\n✅ Database connection closed');
+    console.log('✅ Database connection closed\n');
   }
 }
 
