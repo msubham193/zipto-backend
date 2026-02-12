@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, Between } from 'typeorm';
 import { User, UserRole } from '../auth/entities/user.entity';
 import { Booking, BookingStatus } from '../booking/entities/booking.entity';
 import { Payment, PaymentStatus } from '../payment/entities/payment.entity';
@@ -275,4 +275,357 @@ export class AdminService {
       },
     };
   }
+
+  /**
+   * Helper method to get date range from query
+   */
+  private getDateRange(query: {
+    period?: string;
+    startDate?: string;
+    endDate?: string;
+  }): { start: Date; end: Date } {
+    const today = new Date();
+    const start = new Date(today);
+    const end = new Date(today);
+    
+    // Set end of today
+    end.setHours(23, 59, 59, 999);
+
+    switch (query.period) {
+      case 'today':
+        start.setHours(0, 0, 0, 0);
+        break;
+      case 'yesterday':
+        start.setDate(today.getDate() - 1);
+        start.setHours(0, 0, 0, 0);
+        end.setDate(today.getDate() - 1);
+        end.setHours(23, 59, 59, 999);
+        break;
+      case 'last7days':
+        start.setDate(today.getDate() - 7);
+        start.setHours(0, 0, 0, 0);
+        break;
+      case 'last30days':
+        start.setDate(today.getDate() - 30);
+        start.setHours(0, 0, 0, 0);
+        break;
+      case 'thisMonth':
+        start.setDate(1);
+        start.setHours(0, 0, 0, 0);
+        break;
+      case 'lastMonth':
+        start.setMonth(today.getMonth() - 1);
+        start.setDate(1);
+        start.setHours(0, 0, 0, 0);
+        end.setDate(0); // Last day of previous month
+        end.setHours(23, 59, 59, 999);
+        break;
+      case 'custom':
+        if (query.startDate) {
+          const customStart = new Date(query.startDate);
+          start.setTime(customStart.getTime());
+          start.setHours(0, 0, 0, 0);
+        }
+        if (query.endDate) {
+          const customEnd = new Date(query.endDate);
+          end.setTime(customEnd.getTime());
+          end.setHours(23, 59, 59, 999);
+        }
+        break;
+      default:
+        // Default to last 30 days
+        start.setDate(today.getDate() - 30);
+        start.setHours(0, 0, 0, 0);
+    }
+    
+    return { start, end };
+  }
+
+  /**
+   * Get booking reports
+   */
+  async getBookingReports(query: { period?: string; startDate?: string; endDate?: string; city?: string }) {
+    const { start, end } = this.getDateRange(query);
+    
+    const queryBuilder = this.bookingRepository
+      .createQueryBuilder('booking')
+      .where('booking.created_at BETWEEN :start AND :end', { start, end });
+
+    if (query.city && query.city !== 'all') {
+      queryBuilder.andWhere('booking.city = :city', { city: query.city });
+    }
+
+    // Chart Data
+    const bookingsByDay = await queryBuilder
+      .clone()
+      .select("DATE(booking.created_at)", 'date')
+      .addSelect('COUNT(*)', 'value')
+      .groupBy('DATE(booking.created_at)')
+      .orderBy('date', 'ASC')
+      .getRawMany();
+
+    // Summary Data
+    const totalBookings = await queryBuilder.clone().getCount();
+    const completed = await queryBuilder.clone().andWhere('booking.status = :status', { status: BookingStatus.COMPLETED }).getCount();
+    const cancelled = await queryBuilder.clone().andWhere('booking.status = :status', { status: BookingStatus.CANCELLED }).getCount();
+    
+    // Calculate days difference
+    const diffTime = Math.abs(end.getTime() - start.getTime());
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) || 1;
+
+    return {
+      success: true,
+      data: {
+        chartData: bookingsByDay,
+        summary: {
+          totalBookings,
+          completed,
+          cancelled,
+          completionRate: totalBookings > 0 ? parseFloat(((completed / totalBookings) * 100).toFixed(1)) : 0,
+          avgPerDay: Math.round(totalBookings / diffDays),
+        },
+      },
+    };
+  }
+
+  /**
+   * Get revenue reports
+   */
+  async getRevenueReports(query: { period?: string; startDate?: string; endDate?: string; city?: string }) {
+    const { start, end } = this.getDateRange(query);
+    
+    const queryBuilder = this.paymentRepository
+      .createQueryBuilder('payment')
+      .leftJoin('payment.booking', 'booking')
+      .where('payment.created_at BETWEEN :start AND :end', { start, end })
+      .andWhere('payment.payment_status = :status', { status: PaymentStatus.COMPLETED });
+
+    if (query.city && query.city !== 'all') {
+      // payment table doesn't have city, so join with booking
+      queryBuilder.andWhere('booking.city = :city', { city: query.city });
+    }
+
+    // Chart Data
+    const revenueByDay = await queryBuilder
+      .clone()
+      .select("DATE(payment.created_at)", 'date')
+      .addSelect('SUM(payment.amount)', 'value')
+      .groupBy('DATE(payment.created_at)')
+      .orderBy('date', 'ASC')
+      .getRawMany();
+
+    // Summary Data
+    const summaryResult = await queryBuilder
+      .clone()
+      .select('SUM(payment.amount)', 'totalRevenue')
+      .getRawOne();
+    
+    const totalRevenue = parseFloat(summaryResult?.totalRevenue || '0');
+    // Assuming 20% platform fee if not explicitly tracked
+    const platformFee = totalRevenue * 0.2;
+    const driverPayouts = totalRevenue * 0.8;
+    
+    const totalPayments = await queryBuilder.clone().getCount();
+
+    return {
+      success: true,
+      data: {
+        chartData: revenueByDay,
+        summary: {
+          totalRevenue,
+          platformFee,
+          driverPayouts,
+          avgOrderValue: totalPayments > 0 ? Math.round(totalRevenue / totalPayments) : 0,
+        },
+      },
+    };
+  }
+
+  /**
+   * Get driver reports
+   */
+  async getDriverReports(query: { period?: string; startDate?: string; endDate?: string; city?: string }) {
+    const { start, end } = this.getDateRange(query);
+
+    // Calculate Driver Stats based on bookings in period
+    const topDrivers = await this.bookingRepository
+      .createQueryBuilder('booking')
+      .leftJoin('booking.driver', 'driver') // Join with user
+      .leftJoin('booking.payments', 'payment', 'payment.payment_status = :paymentStatus', { paymentStatus: PaymentStatus.COMPLETED })
+      .select('booking.driver_id', 'id')
+      .addSelect('driver.name', 'name')
+      .addSelect('COUNT(booking.id)', 'trips')
+      .addSelect('COALESCE(SUM(payment.amount) * 0.8, 0)', 'earnings') // Approx 80% earnings
+      // We don't have direct rating on booking, checking driver profile
+      // For now, fetching simplified data
+      .where('booking.created_at BETWEEN :start AND :end', { start, end })
+      .andWhere('booking.status = :status', { status: BookingStatus.COMPLETED })
+      .andWhere('booking.driver_id IS NOT NULL')
+      .groupBy('booking.driver_id')
+      .addGroupBy('driver.name') // Postgres requires this
+      .orderBy('earnings', 'DESC')
+      .limit(10)
+      .getRawMany();
+
+    // Fetch up-to-date ratings from driver profile for these top drivers
+    const driverIds = topDrivers.map(d => d.id);
+    const driverRatingsMap: Record<string, number> = {};
+    if (driverIds.length > 0) {
+      const profiles = await this.driverProfileRepository
+        .createQueryBuilder('profile')
+        .where('profile.user_id IN (:...driverIds)', { driverIds })
+        .select(['profile.user_id', 'profile.average_rating'])
+        .getMany();
+      
+      profiles.forEach(p => {
+        driverRatingsMap[p.user_id] = parseFloat(p.average_rating?.toString() || '0');
+      });
+    }
+
+    const formattedDrivers = topDrivers.map(d => ({
+      id: d.id,
+      name: d.name,
+      trips: parseInt(d.trips),
+      earnings: parseFloat(d.earnings),
+      rating: driverRatingsMap[d.id] || 0
+    }));
+
+    return {
+      success: true,
+      data: {
+        topDrivers: formattedDrivers
+      }
+    };
+  }
+
+  /**
+   * Get customer reports
+   */
+  async getCustomerReports(query: { period?: string; startDate?: string; endDate?: string; city?: string }) {
+    const { start, end } = this.getDateRange(query);
+    
+    // New Customers in period
+    const newCustomers = await this.userRepository.count({
+      where: {
+        role: UserRole.CUSTOMER,
+        created_at: Between(start, end)
+      }
+    });
+    
+    // Active customers (who made a booking in this period)
+    const activeCustomerResult = await this.bookingRepository
+      .createQueryBuilder('booking')
+      .select('COUNT(DISTINCT booking.customer_id)', 'count')
+      .where('booking.created_at BETWEEN :start AND :end', { start, end })
+      .getRawOne();
+    
+    const activeCustomers = parseInt(activeCustomerResult?.count || '0');
+    
+    // Returning customers: Active customers who joined BEFORE this period
+    const returningCustomerResult = await this.bookingRepository
+      .createQueryBuilder('booking')
+      .leftJoin('booking.customer', 'customer')
+      .select('COUNT(DISTINCT booking.customer_id)', 'count')
+      .where('booking.created_at BETWEEN :start AND :end', { start, end })
+      .andWhere('customer.created_at < :start', { start })
+      .getRawOne();
+      
+    const returningCustomers = parseInt(returningCustomerResult?.count || '0');
+
+    // Churn calculation is complex, approximating:
+    // Customers active last period but NOT this period
+    // For simplicity, returning mock-ish data based on available metrics or implementing fully would verify historical data
+    // Let's implement simpler retention: (Returning Customers / (Active Customers at Start of Period)) * 100
+    // Simplified: Retention Rate = (Returning Customers / Total Active Customers) * 100
+    
+    const retentionRate = activeCustomers > 0 
+      ? parseFloat(((returningCustomers / activeCustomers) * 100).toFixed(1)) 
+      : 0;
+
+    const churnRate = parseFloat((100 - retentionRate).toFixed(1));
+
+    // Satisfaction (Average Rating)
+    // Assuming ratings come from bookings or driver profiles. 
+    // Since we don't have explicit review table, using DriverProfile average rating global for now
+    // Or check if bookings have ratings
+    
+    const avgRatingResult = await this.driverProfileRepository
+      .createQueryBuilder('profile')
+      .select('AVG(profile.average_rating)', 'avg')
+      .getRawOne();
+      
+    const averageRating = parseFloat(avgRatingResult?.avg || '0').toFixed(1);
+
+    return {
+      success: true,
+      data: {
+        acquisition: {
+          newCustomers,
+          returningCustomers,
+          retentionRate,
+          churnRate
+        },
+        satisfaction: {
+          averageRating: parseFloat(averageRating),
+          fiveStarReviews: 0, // Placeholder as we lack reviews table
+          supportTickets: 0, // Placeholder
+          resolutionRate: 0 // Placeholder
+        }
+      }
+    };
+  }
+
+  /**
+   * Export reports
+   */
+  async exportReports(query: { type?: string; format?: string; period?: string; startDate?: string; endDate?: string; city?: string }) {
+    // Generate data based on type
+    let data = [];
+    let headers = [];
+
+    switch(query.type) {
+      case 'bookings':
+        const bookingReport = await this.getBookingReports(query);
+        data = bookingReport.data.chartData;
+        headers = ['Date', 'Bookings'];
+        break;
+      case 'revenue':
+        const revenueReport = await this.getRevenueReports(query);
+        data = revenueReport.data.chartData;
+        headers = ['Date', 'Revenue'];
+        break;
+      case 'drivers':
+        const driverReport = await this.getDriverReports(query);
+        data = driverReport.data.topDrivers;
+        headers = ['ID', 'Name', 'Trips', 'Earnings', 'Rating'];
+        break;
+      default:
+        throw new Error('Invalid export type');
+    }
+
+    if (query.format === 'csv') {
+      return this.generateCSV(data, headers);
+    }
+    
+    // PDF Implementation would go here (omitted for brevity)
+    return 'PDF format not supported yet';
+  }
+
+  private generateCSV(data: any[], headers: string[]): string {
+    const headerRow = headers.join(',') + '\n';
+    const rows = data.map(row => {
+      return headers.map(header => {
+        const key = header.toLowerCase();
+        // Handle mapping simple keys
+        if (key === 'date') return row.date;
+        if (key === 'bookings') return row.value;
+        if (key === 'revenue') return row.value;
+        // Handle driver keys
+        return row[key] || '';
+      }).join(',');
+    }).join('\n');
+    
+    return headerRow + rows;
+  }
 }
+

@@ -4,6 +4,7 @@ import { AdminService } from './admin.service';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { GetBookingsDto } from './dto/get-bookings.dto';
 import { PaginationDto } from './dto/pagination.dto';
+import { ReportsQueryDto } from './dto/reports-query.dto';
 
 @ApiTags('Admin')
 @Controller('admin')
@@ -95,5 +96,40 @@ export class AdminController {
   @ApiResponse({ status: 404, description: 'Driver not found' })
   async getDriverById(@Param('id') id: string) {
     return this.adminService.getDriverById(id);
+  }
+
+  @Get('reports/bookings')
+  @ApiOperation({ summary: 'Get booking reports' })
+  @ApiResponse({ status: 200, description: 'Booking reports retrieved' })
+  async getBookingReports(@Query() query: ReportsQueryDto) {
+    return this.adminService.getBookingReports(query);
+  }
+
+  @Get('reports/revenue')
+  @ApiOperation({ summary: 'Get revenue reports' })
+  @ApiResponse({ status: 200, description: 'Revenue reports retrieved' })
+  async getRevenueReports(@Query() query: ReportsQueryDto) {
+    return this.adminService.getRevenueReports(query);
+  }
+
+  @Get('reports/drivers')
+  @ApiOperation({ summary: 'Get driver performance reports' })
+  @ApiResponse({ status: 200, description: 'Driver reports retrieved' })
+  async getDriverReports(@Query() query: ReportsQueryDto) {
+    return this.adminService.getDriverReports(query);
+  }
+
+  @Get('reports/customers')
+  @ApiOperation({ summary: 'Get customer analytics' })
+  @ApiResponse({ status: 200, description: 'Customer reports retrieved' })
+  async getCustomerReports(@Query() query: ReportsQueryDto) {
+    return this.adminService.getCustomerReports(query);
+  }
+
+  @Get('reports/export')
+  @ApiOperation({ summary: 'Export reports' })
+  @ApiResponse({ status: 200, description: 'Report exported' })
+  async exportReports(@Query() query: ReportsQueryDto) {
+    return this.adminService.exportReports(query);
   }
 }

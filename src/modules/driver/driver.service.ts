@@ -3,7 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { DriverProfile, AvailabilityStatus } from './entities/driver-profile.entity';
 import { User } from '../auth/entities/user.entity';
-import { UpdateDriverDto, UpdateAvailabilityDto, UpdateLocationDto } from './dto/driver.dto';
+import { UpdateDriverDto, UpdateAvailabilityDto, UpdateLocationDto, OnboardDriverDto } from './dto/driver.dto';
 import { getPaginationMeta } from '../../common/utils/helpers.util';
 
 @Injectable()
@@ -147,5 +147,76 @@ export class DriverService {
     });
 
     return this.driverProfileRepository.save(profile);
+  }
+
+  /**
+   * Onboard driver with documents
+   */
+  async onboardDriver(
+    userId: string,
+    onboardDriverDto: OnboardDriverDto,
+    files: {
+      aadhar_front?: Express.Multer.File[];
+      aadhar_back?: Express.Multer.File[];
+      driving_license?: Express.Multer.File[];
+      vehicle_rc?: Express.Multer.File[];
+      profile_photo?: Express.Multer.File[];
+    },
+  ) {
+    let profile = await this.driverProfileRepository.findOne({
+      where: { user_id: userId },
+      relations: ['user'],
+    });
+
+    if (!profile) {
+      profile = this.driverProfileRepository.create({
+        user_id: userId,
+        availability_status: AvailabilityStatus.OFFLINE,
+      });
+    }
+
+    // Update User details
+    const { name, email } = onboardDriverDto;
+    if (name || email) {
+      await this.userRepository.update(userId, {
+        ...(name && { name }),
+        ...(email && { email }),
+      });
+    }
+
+    // Update Driver Profile details
+    const { address, license_number, license_expiry } = onboardDriverDto;
+
+    if (address) profile.address = address;
+    if (license_number) profile.license_number = license_number;
+    if (license_expiry) profile.license_expiry = new Date(license_expiry);
+
+    // Handle File Uploads
+    // Assuming Multer saves files and provides 'filename' or 'path'
+    // We will save the relative path or full URL.
+    // Let's use relative path 'uploads/filename' for now, or just filename if served from root.
+    // Better to store full URL if possible or just the filename if we have a robust storage service.
+    // For local dev, let's assume we serve static files from 'uploads'.
+    const baseUrl = process.env.BASE_URL || 'http://localhost:3000';
+
+    if (files.aadhar_front?.[0]) {
+      profile.aadhar_front_image = `${baseUrl}/uploads/${files.aadhar_front[0].filename}`;
+    }
+    if (files.aadhar_back?.[0]) {
+      profile.aadhar_back_image = `${baseUrl}/uploads/${files.aadhar_back[0].filename}`;
+    }
+    if (files.driving_license?.[0]) {
+      profile.driving_license_image = `${baseUrl}/uploads/${files.driving_license[0].filename}`;
+    }
+    if (files.vehicle_rc?.[0]) {
+      profile.vehicle_rc_image = `${baseUrl}/uploads/${files.vehicle_rc[0].filename}`;
+    }
+    if (files.profile_photo?.[0]) {
+      profile.profile_image = `${baseUrl}/uploads/${files.profile_photo[0].filename}`;
+    }
+
+    await this.driverProfileRepository.save(profile);
+
+    return { message: 'Driver onboarded successfully', profile };
   }
 }

@@ -74,7 +74,7 @@ export class AuthService {
    * Verify OTP and complete registration or login
    */
   async verifyOtp(verifyOtpDto: VerifyOtpDto) {
-    const { phone, otp } = verifyOtpDto;
+    const { phone, otp, role } = verifyOtpDto;
     const formattedPhone = formatPhoneNumber(phone);
 
     // Verify OTP via Twilio Verify
@@ -105,7 +105,7 @@ export class AuthService {
       user = this.userRepository.create({
         phone: formattedPhone,
         name: userName,
-        role: UserRole.CUSTOMER,
+        role: role || UserRole.CUSTOMER,
         is_verified: true,
       });
 

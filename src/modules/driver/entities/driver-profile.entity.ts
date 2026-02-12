@@ -34,11 +34,26 @@ export class DriverProfile {
   @JoinColumn({ name: 'user_id' })
   user: User;
 
-  @Column({ type: 'varchar', length: 50 })
+  @Column({ type: 'varchar', length: 50, nullable: true })
   license_number: string;
 
-  @Column({ type: 'date' })
+  @Column({ type: 'date', nullable: true })
   license_expiry: Date;
+
+  @Column({ type: 'varchar', nullable: true })
+  aadhar_front_image: string;
+
+  @Column({ type: 'varchar', nullable: true })
+  aadhar_back_image: string;
+
+  @Column({ type: 'varchar', nullable: true })
+  driving_license_image: string;
+
+  @Column({ type: 'varchar', nullable: true })
+  vehicle_rc_image: string;
+
+  @Column({ type: 'varchar', nullable: true })
+  profile_image: string;
 
   @Column({ type: 'uuid', nullable: true })
   vehicle_id: string;
@@ -73,6 +88,9 @@ export class DriverProfile {
 
   @Column({ type: 'decimal', precision: 3, scale: 2, nullable: true })
   average_rating: number;
+
+  @Column({ type: 'varchar', nullable: true })
+  address: string;
 
   @Column({ type: 'integer', default: 0 })
   total_trips: number;

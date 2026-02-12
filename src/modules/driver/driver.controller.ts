@@ -2,14 +2,18 @@ import {
   Controller,
   Get,
   Put,
+  Post,
   Body,
   Query,
   ParseIntPipe,
   DefaultValuePipe,
+  UseInterceptors,
+  UploadedFiles,
 } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse, ApiQuery, ApiBearerAuth } from '@nestjs/swagger';
+import { FileFieldsInterceptor } from '@nestjs/platform-express';
+import { ApiTags, ApiOperation, ApiResponse, ApiQuery, ApiBearerAuth, ApiConsumes } from '@nestjs/swagger';
 import { DriverService } from './driver.service';
-import { UpdateDriverDto, UpdateAvailabilityDto, UpdateLocationDto } from './dto/driver.dto';
+import { UpdateDriverDto, UpdateAvailabilityDto, UpdateLocationDto, OnboardDriverDto } from './dto/driver.dto';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { GetUser } from '../../common/decorators/get-user.decorator';
 import { User } from '../auth/entities/user.entity';
@@ -79,5 +83,34 @@ export class DriverController {
     @Query('status') status?: string,
   ) {
     return this.driverService.getTripHistory(user.id, page, limit, status);
+  }
+
+  @Post('onboard')
+  @ApiOperation({ summary: 'Onboard driver with documents' })
+  @ApiConsumes('multipart/form-data')
+  @UseInterceptors(
+    FileFieldsInterceptor([
+      { name: 'aadhar_front', maxCount: 1 },
+      { name: 'aadhar_back', maxCount: 1 },
+      { name: 'driving_license', maxCount: 1 },
+      { name: 'vehicle_rc', maxCount: 1 },
+      { name: 'profile_photo', maxCount: 1 },
+    ]),
+  )
+  @ApiResponse({ status: 200, description: 'Driver onboarded successfully' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  async onboardDriver(
+    @GetUser() user: User,
+    @Body() onboardDriverDto: OnboardDriverDto,
+    @UploadedFiles()
+    files: {
+      aadhar_front?: Express.Multer.File[];
+      aadhar_back?: Express.Multer.File[];
+      driving_license?: Express.Multer.File[];
+      vehicle_rc?: Express.Multer.File[];
+      profile_photo?: Express.Multer.File[];
+    },
+  ) {
+    return this.driverService.onboardDriver(user.id, onboardDriverDto, files);
   }
 }

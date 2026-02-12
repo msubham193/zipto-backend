@@ -47,3 +47,30 @@ export class UpdateLocationDto {
   @IsLongitude()
   longitude: number;
 }
+
+export class OnboardDriverDto {
+  @ApiProperty({ example: 'John Driver' })
+  @IsString()
+  @IsOptional()
+  name?: string;
+
+  @ApiProperty({ example: 'driver@example.com' })
+  @IsEmail()
+  @IsOptional()
+  email?: string;
+
+  @ApiProperty({ example: '123 Main St, Bhubaneswar' })
+  @IsString()
+  @IsOptional()
+  address?: string;
+
+  @ApiProperty({ example: 'OD02-20220001234' })
+  @IsString()
+  @IsOptional()
+  license_number?: string;
+
+  @ApiProperty({ example: '2030-12-31' })
+  @IsDateString()
+  @IsOptional()
+  license_expiry?: string;
+}
