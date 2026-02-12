@@ -134,7 +134,9 @@ export class AdminService {
   /**
    * Get all bookings with filters
    */
-  async getAllBookings(status?: BookingStatus, page: number = 1, limit: number = 20) {
+  async getAllBookings(query: { status?: BookingStatus; page?: number; limit?: number }) {
+    const { status, page = 1, limit = 20 } = query;
+    
     const queryBuilder = this.bookingRepository
       .createQueryBuilder('booking')
       .leftJoinAndSelect('booking.customer', 'customer')
@@ -190,6 +192,87 @@ export class AdminService {
     return {
       bookings_by_day: bookingsByDay,
       revenue_by_day: revenueByDay,
+    };
+  }
+
+  /**
+   * Get all customers with pagination
+   */
+  async getAllCustomers(query: { page?: number; limit?: number }) {
+    const { page = 1, limit = 20 } = query;
+
+    const [customers, total] = await this.userRepository.findAndCount({
+      where: { role: UserRole.CUSTOMER },
+      select: ['id', 'phone', 'email', 'name', 'is_verified', 'is_active', 'created_at'],
+      order: { created_at: 'DESC' },
+      skip: (page - 1) * limit,
+      take: limit,
+    });
+
+    return {
+      customers,
+      total,
+      page,
+      pages: Math.ceil(total / limit),
+    };
+  }
+
+  /**
+   * Get all drivers with pagination
+   */
+  async getAllDrivers(query: { page?: number; limit?: number }) {
+    const { page = 1, limit = 20 } = query;
+
+    const [drivers, total] = await this.driverProfileRepository.findAndCount({
+      relations: ['user', 'vehicles'],
+      order: { created_at: 'DESC' },
+      skip: (page - 1) * limit,
+      take: limit,
+    });
+
+    return {
+      drivers,
+      total,
+      page,
+      pages: Math.ceil(total / limit),
+    };
+  }
+
+  /**
+   * Get driver details by ID
+   */
+  async getDriverById(driverId: string) {
+    const driver = await this.driverProfileRepository.findOne({
+      where: { id: driverId },
+      relations: ['user', 'vehicles'],
+    });
+
+    if (!driver) {
+      throw new Error('Driver not found');
+    }
+
+    // Get driver's booking statistics
+    const [totalBookings, completedBookings, totalEarnings] = await Promise.all([
+      this.bookingRepository.count({ where: { driver: { id: driverId } } }),
+      this.bookingRepository.count({
+        where: { driver: { id: driverId }, status: BookingStatus.COMPLETED },
+      }),
+      this.paymentRepository
+        .createQueryBuilder('payment')
+        .leftJoin('payment.booking', 'booking')
+        .where('booking.driver_id = :driverId', { driverId })
+        .andWhere('payment.payment_status = :status', { status: PaymentStatus.COMPLETED })
+        .select('SUM(payment.driver_earnings)', 'total')
+        .getRawOne(),
+    ]);
+
+    return {
+      ...driver,
+      statistics: {
+        total_bookings: totalBookings,
+        completed_bookings: completedBookings,
+        total_earnings: parseFloat(totalEarnings?.total || '0'),
+      },
     };
   }
 }

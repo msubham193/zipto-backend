@@ -1,8 +1,9 @@
 import { Controller, Get, Put, Param, Query } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse, ApiQuery, ApiBearerAuth } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { AdminService } from './admin.service';
 import { Roles } from '../../common/decorators/roles.decorator';
-import { BookingStatus } from '../booking/entities/booking.entity';
+import { GetBookingsDto } from './dto/get-bookings.dto';
+import { PaginationDto } from './dto/pagination.dto';
 
 @ApiTags('Admin')
 @Controller('admin')
@@ -62,16 +63,9 @@ export class AdminController {
 
   @Get('bookings')
   @ApiOperation({ summary: 'Get all bookings with filters' })
-  @ApiQuery({ name: 'status', required: false, enum: BookingStatus })
-  @ApiQuery({ name: 'page', required: false, type: Number })
-  @ApiQuery({ name: 'limit', required: false, type: Number })
   @ApiResponse({ status: 200, description: 'Bookings retrieved' })
-  async getAllBookings(
-    @Query('status') status?: BookingStatus,
-    @Query('page') page?: number,
-    @Query('limit') limit?: number,
-  ) {
-    return this.adminService.getAllBookings(status, page, limit);
+  async getAllBookings(@Query() query: GetBookingsDto) {
+    return this.adminService.getAllBookings(query);
   }
 
   @Get('analytics')
@@ -79,5 +73,27 @@ export class AdminController {
   @ApiResponse({ status: 200, description: 'Analytics retrieved' })
   async getAnalytics() {
     return this.adminService.getAnalytics();
+  }
+
+  @Get('customers')
+  @ApiOperation({ summary: 'Get all customers with pagination' })
+  @ApiResponse({ status: 200, description: 'Customers retrieved' })
+  async getAllCustomers(@Query() query: PaginationDto) {
+    return this.adminService.getAllCustomers(query);
+  }
+
+  @Get('drivers')
+  @ApiOperation({ summary: 'Get all drivers with pagination' })
+  @ApiResponse({ status: 200, description: 'Drivers retrieved' })
+  async getAllDrivers(@Query() query: PaginationDto) {
+    return this.adminService.getAllDrivers(query);
+  }
+
+  @Get('drivers/:id')
+  @ApiOperation({ summary: 'Get driver details by ID' })
+  @ApiResponse({ status: 200, description: 'Driver details retrieved' })
+  @ApiResponse({ status: 404, description: 'Driver not found' })
+  async getDriverById(@Param('id') id: string) {
+    return this.adminService.getDriverById(id);
   }
 }
