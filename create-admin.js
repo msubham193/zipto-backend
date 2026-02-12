@@ -5,8 +5,8 @@ async function createAdminUser() {
   const client = new Client({
     host: 'localhost',
     port: 5432,
-    user: 'postgres',
-    password: 'postgres',
+    user: 'skido_user',
+    password: 'msubham193',
     database: 'skido_db',
   });
 
