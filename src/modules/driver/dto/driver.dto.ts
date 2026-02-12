@@ -9,6 +9,7 @@ import {
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { AvailabilityStatus } from '../entities/driver-profile.entity';
+import { VehicleType } from '../../vehicle/entities/vehicle.entity';
 
 export class UpdateDriverDto {
   @ApiPropertyOptional({ example: 'John Driver' })
@@ -73,4 +74,23 @@ export class OnboardDriverDto {
   @IsDateString()
   @IsOptional()
   license_expiry?: string;
+
+  @ApiProperty({ example: 'OD-02-A-1234' })
+  @IsString()
+  @IsOptional()
+  vehicle_registration_number?: string;
+
+  @ApiProperty({ enum: ['bike', 'tata_ace', 'pickup_van', 'mini_truck'], example: 'bike' })
+  @IsEnum(['bike', 'tata_ace', 'pickup_van', 'mini_truck'])
+  @IsOptional()
+  vehicle_type?: string;
+
+  @ApiProperty({ example: 'Honda Activa' })
+  @IsString()
+  @IsOptional()
+  vehicle_model?: string;
+
+  @ApiProperty({ example: 100 })
+  @IsOptional()
+  vehicle_capacity?: number;
 }

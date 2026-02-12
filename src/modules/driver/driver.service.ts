@@ -2,6 +2,7 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { DriverProfile, AvailabilityStatus } from './entities/driver-profile.entity';
+import { Vehicle, VehicleType } from '../vehicle/entities/vehicle.entity';
 import { User } from '../auth/entities/user.entity';
 import { UpdateDriverDto, UpdateAvailabilityDto, UpdateLocationDto, OnboardDriverDto } from './dto/driver.dto';
 import { getPaginationMeta } from '../../common/utils/helpers.util';
@@ -13,6 +14,8 @@ export class DriverService {
     private driverProfileRepository: Repository<DriverProfile>,
     @InjectRepository(User)
     private userRepository: Repository<User>,
+    @InjectRepository(Vehicle)
+    private vehicleRepository: Repository<Vehicle>,
   ) {}
 
   /**
@@ -216,6 +219,33 @@ export class DriverService {
     }
 
     await this.driverProfileRepository.save(profile);
+
+    // Handle Vehicle Details
+    const { vehicle_registration_number, vehicle_type, vehicle_model, vehicle_capacity } = onboardDriverDto;
+
+    if (vehicle_registration_number) {
+      let vehicle = await this.vehicleRepository.findOne({
+        where: { driver_id: profile.id },
+      });
+
+      if (!vehicle) {
+        vehicle = this.vehicleRepository.create({
+          driver_id: profile.id,
+          registration_number: vehicle_registration_number,
+        });
+      }
+
+      vehicle.registration_number = vehicle_registration_number;
+      if (vehicle_type) vehicle.vehicle_type = vehicle_type as VehicleType;
+      if (vehicle_model) vehicle.vehicle_model = vehicle_model;
+      if (vehicle_capacity) vehicle.capacity = vehicle_capacity;
+
+      if (files.vehicle_rc?.[0]) {
+        vehicle.rc_document_url = `${baseUrl}/uploads/${files.vehicle_rc[0].filename}`;
+      }
+
+      await this.vehicleRepository.save(vehicle);
+    }
 
     return { message: 'Driver onboarded successfully', profile };
   }

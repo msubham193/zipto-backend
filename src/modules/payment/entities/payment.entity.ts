@@ -40,6 +40,9 @@ export class Payment {
   @Column({ type: 'decimal', precision: 10, scale: 2 })
   amount: number;
 
+  @Column({ type: 'decimal', precision: 10, scale: 2, nullable: true })
+  driver_earnings: number;
+
   @Column({
     type: 'enum',
     enum: PaymentMethod,

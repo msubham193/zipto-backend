@@ -6,12 +6,13 @@ import { extname } from 'path';
 import { DriverController } from './driver.controller';
 import { DriverService } from './driver.service';
 import { DriverProfile } from './entities/driver-profile.entity';
+import { Vehicle } from '../vehicle/entities/vehicle.entity';
 import { User } from '../auth/entities/user.entity';
 import { AuthModule } from '../auth/auth.module';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([DriverProfile, User]),
+    TypeOrmModule.forFeature([DriverProfile, User, Vehicle]),
     AuthModule,
     MulterModule.register({
       storage: diskStorage({

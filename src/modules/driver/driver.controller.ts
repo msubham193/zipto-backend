@@ -11,7 +11,7 @@ import {
   UploadedFiles,
 } from '@nestjs/common';
 import { FileFieldsInterceptor } from '@nestjs/platform-express';
-import { ApiTags, ApiOperation, ApiResponse, ApiQuery, ApiBearerAuth, ApiConsumes } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiResponse, ApiQuery, ApiBearerAuth, ApiConsumes, ApiBody } from '@nestjs/swagger';
 import { DriverService } from './driver.service';
 import { UpdateDriverDto, UpdateAvailabilityDto, UpdateLocationDto, OnboardDriverDto } from './dto/driver.dto';
 import { Roles } from '../../common/decorators/roles.decorator';
@@ -88,6 +88,27 @@ export class DriverController {
   @Post('onboard')
   @ApiOperation({ summary: 'Onboard driver with documents' })
   @ApiConsumes('multipart/form-data')
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', example: 'John Driver' },
+        email: { type: 'string', example: 'driver@example.com' },
+        address: { type: 'string', example: '123 Main St, Bhubaneswar' },
+        license_number: { type: 'string', example: 'OD02-20220001234' },
+        license_expiry: { type: 'string', example: '2030-12-31' },
+        vehicle_registration_number: { type: 'string', example: 'OD-02-A-1234' },
+        vehicle_type: { type: 'string', example: 'bike', enum: ['bike', 'tata_ace', 'pickup_van', 'mini_truck'] },
+        vehicle_model: { type: 'string', example: 'Honda Activa' },
+        vehicle_capacity: { type: 'number', example: 100 },
+        aadhar_front: { type: 'string', format: 'binary' },
+        aadhar_back: { type: 'string', format: 'binary' },
+        driving_license: { type: 'string', format: 'binary' },
+        vehicle_rc: { type: 'string', format: 'binary' },
+        profile_photo: { type: 'string', format: 'binary' },
+      },
+    },
+  })
   @UseInterceptors(
     FileFieldsInterceptor([
       { name: 'aadhar_front', maxCount: 1 },
