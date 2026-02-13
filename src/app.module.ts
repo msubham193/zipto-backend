@@ -22,6 +22,7 @@ import { RatingModule } from './modules/rating/rating.module';
 import { AdminModule } from './modules/admin/admin.module';
 import { NotificationModule } from './modules/notification/notification.module';
 import { CoinModule } from './modules/coin/coin.module';
+import { BullModule } from '@nestjs/bull';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { RolesGuard } from './common/guards/roles.guard';
 
@@ -60,6 +61,19 @@ import { RolesGuard } from './common/guards/roles.guard';
             limit: configService.get<number>('externalServices.rateLimit.limit') || 100,
           },
         ],
+      }),
+    }),
+
+    // Queue Configuration
+    BullModule.forRootAsync({
+      imports: [ConfigModule],
+      inject: [ConfigService],
+      useFactory: async (configService: ConfigService) => ({
+        redis: {
+          host: configService.get('redis.host'),
+          port: configService.get('redis.port'),
+          password: configService.get('redis.password'),
+        },
       }),
     }),
 
