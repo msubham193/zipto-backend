@@ -7,6 +7,7 @@ import { PricingRule } from './entities/pricing-rule.entity';
 import { AuthModule } from '../auth/auth.module';
 import { CoinModule } from '../coin/coin.module';
 import { BullModule } from '@nestjs/bull';
+import { CacheModule } from '@nestjs/cache-manager';
 import { BookingGateway } from './booking.gateway';
 import { BookingProcessor } from './booking.processor';
 
@@ -18,6 +19,7 @@ import { BookingProcessor } from './booking.processor';
     BullModule.registerQueue({
       name: 'booking_assignment',
     }),
+    CacheModule.register(),
   ],
   controllers: [BookingController],
   providers: [BookingService, BookingGateway, BookingProcessor],
