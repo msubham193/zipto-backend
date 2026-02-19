@@ -8,7 +8,7 @@ Development: http://localhost:3000/api
 Production: https://api.skido.in/api
 ```
 
-## Authentication Module Tests
+## Authentication Module Testst
 
 ### Test 1: Customer Registration
 **Endpoint**: `POST /auth/register`

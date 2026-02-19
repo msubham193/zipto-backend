@@ -112,8 +112,12 @@ export class AuthService {
       await this.userRepository.save(user);
       this.logger.log(`New user registered: ${user.id} with name: ${userName}`);
     } else {
-      // Update verification status
+      // Update verification status and role if provided
       user.is_verified = true;
+      if (role && user.role !== role) {
+        this.logger.log(`Updating user role from ${user.role} to ${role}`);
+        user.role = role as UserRole;
+      }
       await this.userRepository.save(user);
     }
 
