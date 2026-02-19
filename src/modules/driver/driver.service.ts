@@ -181,10 +181,23 @@ export class DriverService {
     // Update User details
     const { name, email } = onboardDriverDto;
     if (name || email) {
-      await this.userRepository.update(userId, {
-        ...(name && { name }),
-        ...(email && { email }),
-      });
+      try {
+        await this.userRepository.update(userId, {
+          ...(name && { name }),
+          ...(email && { email }),
+        });
+      } catch (err: any) {
+        // Handle duplicate email constraint
+        if (err?.code === '23505' || err?.message?.includes('duplicate key')) {
+          // Still update name if email is taken
+          if (name) {
+            await this.userRepository.update(userId, { name });
+          }
+          // Don't throw — proceed with onboarding, email just won't be updated
+        } else {
+          throw err;
+        }
+      }
     }
 
     // Update Driver Profile details
