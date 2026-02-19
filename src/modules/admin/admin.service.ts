@@ -80,8 +80,21 @@ export class AdminService {
    * Approve driver verification
    */
   async approveDriver(driverProfileId: string) {
+    const profile = await this.driverProfileRepository.findOne({
+      where: { id: driverProfileId },
+    });
+
+    if (!profile) {
+      throw new Error('Driver profile not found');
+    }
+
     await this.driverProfileRepository.update(driverProfileId, {
       verification_status: VerificationStatus.APPROVED,
+    });
+
+    // Also mark the user as verified
+    await this.userRepository.update(profile.user_id, {
+      is_verified: true,
     });
 
     return { message: 'Driver approved successfully' };
@@ -91,8 +104,21 @@ export class AdminService {
    * Reject driver verification
    */
   async rejectDriver(driverProfileId: string) {
+    const profile = await this.driverProfileRepository.findOne({
+      where: { id: driverProfileId },
+    });
+
+    if (!profile) {
+      throw new Error('Driver profile not found');
+    }
+
     await this.driverProfileRepository.update(driverProfileId, {
       verification_status: VerificationStatus.REJECTED,
+    });
+
+    // Also mark the user as not verified
+    await this.userRepository.update(profile.user_id, {
+      is_verified: false,
     });
 
     return { message: 'Driver rejected' };

@@ -102,18 +102,22 @@ export class AuthService {
       // Auto-generate username if not provided (user can edit later)
       const userName = generateRandomUsername();
 
+      const assignedRole = role || UserRole.CUSTOMER;
       user = this.userRepository.create({
         phone: formattedPhone,
         name: userName,
-        role: role || UserRole.CUSTOMER,
-        is_verified: true,
+        role: assignedRole,
+        // Drivers are NOT auto-verified — admin will verify after onboarding
+        is_verified: assignedRole !== UserRole.DRIVER,
       });
 
       await this.userRepository.save(user);
       this.logger.log(`New user registered: ${user.id} with name: ${userName}`);
     } else {
-      // Update verification status and role if provided
-      user.is_verified = true;
+      // Update verification status — but don't auto-verify drivers
+      if (user.role !== UserRole.DRIVER || user.is_verified) {
+        user.is_verified = true;
+      }
       if (role && user.role !== role) {
         this.logger.log(`Updating user role from ${user.role} to ${role}`);
         user.role = role as UserRole;

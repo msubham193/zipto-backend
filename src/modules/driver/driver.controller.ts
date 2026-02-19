@@ -34,6 +34,14 @@ export class DriverController {
     return this.driverService.getProfile(user.id);
   }
 
+  @Get('verification-status')
+  @ApiOperation({ summary: 'Get driver verification status' })
+  @ApiResponse({ status: 200, description: 'Verification status retrieved successfully' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  async getVerificationStatus(@GetUser() user: User) {
+    return this.driverService.getVerificationStatus(user.id);
+  }
+
   @Put('profile')
   @ApiOperation({ summary: 'Update driver profile' })
   @ApiResponse({ status: 200, description: 'Profile updated successfully' })

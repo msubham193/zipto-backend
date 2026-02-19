@@ -1,7 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { DriverProfile, AvailabilityStatus } from './entities/driver-profile.entity';
+import { DriverProfile, AvailabilityStatus, VerificationStatus } from './entities/driver-profile.entity';
 import { Vehicle, VehicleType } from '../vehicle/entities/vehicle.entity';
 import { User } from '../auth/entities/user.entity';
 import { UpdateDriverDto, UpdateAvailabilityDto, UpdateLocationDto, OnboardDriverDto } from './dto/driver.dto';
@@ -261,5 +261,32 @@ export class DriverService {
     }
 
     return { message: 'Driver onboarded successfully', profile };
+  }
+
+  /**
+   * Get driver verification status
+   */
+  async getVerificationStatus(userId: string) {
+    const user = await this.userRepository.findOne({
+      where: { id: userId },
+    });
+
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    const profile = await this.driverProfileRepository.findOne({
+      where: { user_id: userId },
+    });
+
+    return {
+      is_verified: user.is_verified,
+      verification_status: profile?.verification_status || VerificationStatus.PENDING,
+      message: profile?.verification_status === VerificationStatus.APPROVED
+        ? 'Your profile has been verified by the admin.'
+        : profile?.verification_status === VerificationStatus.REJECTED
+          ? 'Your profile has been rejected. Please contact support.'
+          : 'Your profile is pending admin verification.',
+    };
   }
 }
