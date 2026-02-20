@@ -31,7 +31,14 @@ async function bootstrap() {
   
   // CORS
   app.enableCors({
-    origin: ['http://localhost:3000', 'http://localhost:4200'],
+    origin: [
+      'http://localhost:3000',
+      'http://localhost:4200',
+      'http://localhost:5173',           // Vite dev server
+      'https://zipto-admin.vercel.app',  // Production frontend
+    ],
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
     credentials: true,
   });
 
