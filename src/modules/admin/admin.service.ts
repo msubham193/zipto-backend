@@ -250,7 +250,7 @@ export class AdminService {
     const { page = 1, limit = 20 } = query;
 
     const [drivers, total] = await this.driverProfileRepository.findAndCount({
-      relations: ['user', 'vehicles'],
+      relations: ['user'],
       order: { created_at: 'DESC' },
       skip: (page - 1) * limit,
       take: limit,
@@ -270,7 +270,7 @@ export class AdminService {
   async getDriverById(driverId: string) {
     const driver = await this.driverProfileRepository.findOne({
       where: { id: driverId },
-      relations: ['user', 'vehicles'],
+      relations: ['user'],
     });
 
     if (!driver) {
