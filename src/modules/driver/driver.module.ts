@@ -1,8 +1,7 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { MulterModule } from '@nestjs/platform-express';
-import { diskStorage } from 'multer';
-import { extname } from 'path';
+import * as multer from 'multer';
 import { DriverController } from './driver.controller';
 import { DriverService } from './driver.service';
 import { DriverProfile } from './entities/driver-profile.entity';
@@ -15,16 +14,7 @@ import { AuthModule } from '../auth/auth.module';
     TypeOrmModule.forFeature([DriverProfile, User, Vehicle]),
     AuthModule,
     MulterModule.register({
-      storage: diskStorage({
-        destination: './uploads',
-        filename: (req, file, cb) => {
-          const randomName = Array(32)
-            .fill(null)
-            .map(() => Math.round(Math.random() * 16).toString(16))
-            .join('');
-          return cb(null, `${randomName}${extname(file.originalname)}`);
-        },
-      }),
+      storage: multer.memoryStorage(),
     }),
   ],
   controllers: [DriverController],

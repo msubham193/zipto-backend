@@ -6,6 +6,7 @@ import { Vehicle, VehicleType } from '../vehicle/entities/vehicle.entity';
 import { User } from '../auth/entities/user.entity';
 import { UpdateDriverDto, UpdateAvailabilityDto, UpdateLocationDto, OnboardDriverDto } from './dto/driver.dto';
 import { getPaginationMeta } from '../../common/utils/helpers.util';
+import { S3Service } from '../../services/s3.service';
 
 @Injectable()
 export class DriverService {
@@ -16,6 +17,7 @@ export class DriverService {
     private userRepository: Repository<User>,
     @InjectRepository(Vehicle)
     private vehicleRepository: Repository<Vehicle>,
+    private readonly s3Service: S3Service,
   ) {}
 
   /**
@@ -207,28 +209,48 @@ export class DriverService {
     if (license_number) profile.license_number = license_number;
     if (license_expiry) profile.license_expiry = new Date(license_expiry);
 
-    // Handle File Uploads
-    // Assuming Multer saves files and provides 'filename' or 'path'
-    // We will save the relative path or full URL.
-    // Let's use relative path 'uploads/filename' for now, or just filename if served from root.
-    // Better to store full URL if possible or just the filename if we have a robust storage service.
-    // For local dev, let's assume we serve static files from 'uploads'.
-    const baseUrl = process.env.BASE_URL || 'http://localhost:3000';
+    // Handle File Uploads to S3
+    const folder = 'driver-documents';
 
     if (files.aadhar_front?.[0]) {
-      profile.aadhar_front_image = `${baseUrl}/uploads/${files.aadhar_front[0].filename}`;
+      profile.aadhar_front_image = await this.s3Service.uploadFile(
+        files.aadhar_front[0].buffer,
+        files.aadhar_front[0].originalname,
+        files.aadhar_front[0].mimetype,
+        folder,
+      );
     }
     if (files.aadhar_back?.[0]) {
-      profile.aadhar_back_image = `${baseUrl}/uploads/${files.aadhar_back[0].filename}`;
+      profile.aadhar_back_image = await this.s3Service.uploadFile(
+        files.aadhar_back[0].buffer,
+        files.aadhar_back[0].originalname,
+        files.aadhar_back[0].mimetype,
+        folder,
+      );
     }
     if (files.driving_license?.[0]) {
-      profile.driving_license_image = `${baseUrl}/uploads/${files.driving_license[0].filename}`;
+      profile.driving_license_image = await this.s3Service.uploadFile(
+        files.driving_license[0].buffer,
+        files.driving_license[0].originalname,
+        files.driving_license[0].mimetype,
+        folder,
+      );
     }
     if (files.vehicle_rc?.[0]) {
-      profile.vehicle_rc_image = `${baseUrl}/uploads/${files.vehicle_rc[0].filename}`;
+      profile.vehicle_rc_image = await this.s3Service.uploadFile(
+        files.vehicle_rc[0].buffer,
+        files.vehicle_rc[0].originalname,
+        files.vehicle_rc[0].mimetype,
+        folder,
+      );
     }
     if (files.profile_photo?.[0]) {
-      profile.profile_image = `${baseUrl}/uploads/${files.profile_photo[0].filename}`;
+      profile.profile_image = await this.s3Service.uploadFile(
+        files.profile_photo[0].buffer,
+        files.profile_photo[0].originalname,
+        files.profile_photo[0].mimetype,
+        folder,
+      );
     }
 
     await this.driverProfileRepository.save(profile);
@@ -254,7 +276,12 @@ export class DriverService {
       if (vehicle_capacity) vehicle.capacity = vehicle_capacity;
 
       if (files.vehicle_rc?.[0]) {
-        vehicle.rc_document_url = `${baseUrl}/uploads/${files.vehicle_rc[0].filename}`;
+        vehicle.rc_document_url = await this.s3Service.uploadFile(
+          files.vehicle_rc[0].buffer,
+          files.vehicle_rc[0].originalname,
+          files.vehicle_rc[0].mimetype,
+          folder,
+        );
       }
 
       await this.vehicleRepository.save(vehicle);
