@@ -8,6 +8,11 @@ import {
   IsLongitude,
   ValidateNested,
   IsMobilePhone,
+  IsNumber,
+  IsInt,
+  Min,
+  IsBoolean,
+  IsArray,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
@@ -43,6 +48,18 @@ export class EstimateFareDto {
   @ApiProperty({ enum: VehicleType, example: VehicleType.TATA_ACE })
   @IsEnum(VehicleType)
   vehicle_type: VehicleType;
+
+  @ApiPropertyOptional({ example: 0, description: 'Number of loading/unloading helpers (₹300 each)' })
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  number_of_helpers?: number;
+
+  @ApiPropertyOptional({ example: 0, description: 'Number of extra drop-off stops' })
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  extra_stops?: number;
 }
 
 export class CreateBookingDto {
@@ -76,6 +93,13 @@ export class CreateBookingDto {
   @Type(() => LocationDto)
   drop_location: LocationDto;
 
+  @ApiPropertyOptional({ type: [LocationDto], description: 'Additional drop-off locations for multi-stop' })
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => LocationDto)
+  extra_drop_locations?: LocationDto[];
+
   @ApiProperty({ enum: VehicleType, example: VehicleType.TATA_ACE })
   @IsEnum(VehicleType)
   vehicle_type: VehicleType;
@@ -88,6 +112,12 @@ export class CreateBookingDto {
   @IsDateString()
   @IsOptional()
   scheduled_time?: string;
+
+  @ApiPropertyOptional({ example: 0, description: 'Number of loading/unloading helpers (₹300 each)' })
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  number_of_helpers?: number;
 }
 
 export class CancelBookingDto {
@@ -97,6 +127,26 @@ export class CancelBookingDto {
   reason: string;
 }
 
+export class CompleteTripDto {
+  @ApiPropertyOptional({ example: false, description: 'Whether toll was incurred during the trip' })
+  @IsOptional()
+  @IsBoolean()
+  has_toll?: boolean;
+
+  @ApiPropertyOptional({ example: 0, description: 'Toll amount in rupees' })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  toll_amount?: number;
+
+  @ApiPropertyOptional({ example: 0, description: 'Total waiting time in minutes' })
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  waiting_time_minutes?: number;
+}
+
+// Keep for backward compatibility
 export class UpdateFinalFareDto {
   @ApiProperty({ example: 250.00 })
   @IsOptional()

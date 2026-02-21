@@ -12,9 +12,10 @@ import { DriverProfile, VerificationStatus } from '../../driver/entities/driver-
 
 export enum VehicleType {
   BIKE = 'bike',
+  THREE_WHEELER = 'three_wheeler',
   TATA_ACE = 'tata_ace',
-  PICKUP_VAN = 'pickup_van',
-  MINI_TRUCK = 'mini_truck',
+  PICKUP_8FT = 'pickup_8ft',
+  TATA_407 = 'tata_407',
 }
 
 @Entity('vehicles')

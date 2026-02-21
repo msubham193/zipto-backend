@@ -95,25 +95,31 @@ export class VehicleService {
         type: VehicleType.BIKE,
         name: 'Bike',
         capacity_range: '10-50 kg',
+        base_fare: 30,
+      },
+      {
+        type: VehicleType.THREE_WHEELER,
+        name: 'Three Wheeler',
+        capacity_range: '100-300 kg',
         base_fare: 50,
       },
       {
         type: VehicleType.TATA_ACE,
         name: 'Tata Ace',
         capacity_range: '500-750 kg',
-        base_fare: 150,
+        base_fare: 120,
       },
       {
-        type: VehicleType.PICKUP_VAN,
-        name: 'Pickup Van',
+        type: VehicleType.PICKUP_8FT,
+        name: 'Pickup 8ft',
         capacity_range: '1000-1500 kg',
-        base_fare: 250,
+        base_fare: 200,
       },
       {
-        type: VehicleType.MINI_TRUCK,
-        name: 'Mini Truck',
+        type: VehicleType.TATA_407,
+        name: 'Tata 407',
         capacity_range: '2000-3000 kg',
-        base_fare: 400,
+        base_fare: 350,
       },
     ];
   }

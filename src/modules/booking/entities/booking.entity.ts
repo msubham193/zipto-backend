@@ -119,6 +119,51 @@ export class Booking {
   @Column({ type: 'decimal', precision: 10, scale: 2, nullable: true })
   final_fare: number;
 
+  // --- Fare Breakdown & Additional Charges ---
+
+  @Column({ type: 'jsonb', nullable: true })
+  fare_breakdown: {
+    base_fare: number;
+    base_distance_km: number;
+    distance_charge: number;
+    time_charge: number;
+    helper_charge: number;
+    multi_stop_charge: number;
+    night_surcharge: number;
+    waiting_charge: number;
+    toll_amount: number;
+    surge_multiplier: number;
+    subtotal: number;
+    skido_commission: number;
+    driver_earnings: number;
+  };
+
+  @Column({ type: 'integer', default: 0 })
+  number_of_helpers: number;
+
+  @Column({ type: 'integer', default: 0 })
+  extra_stops_count: number;
+
+  @Column({ type: 'boolean', default: false })
+  is_night_booking: boolean;
+
+  @Column({ type: 'integer', default: 0 })
+  waiting_time_minutes: number; // Actual waiting time recorded by driver
+
+  @Column({ type: 'boolean', default: false })
+  has_toll: boolean;
+
+  @Column({ type: 'decimal', precision: 10, scale: 2, default: 0 })
+  toll_amount: number;
+
+  @Column({ type: 'decimal', precision: 10, scale: 2, nullable: true })
+  skido_commission: number; // Skido's 30% cut
+
+  @Column({ type: 'decimal', precision: 10, scale: 2, nullable: true })
+  driver_earnings: number; // Driver's 70% share
+
+  // --- Status & Timing ---
+
   @Column({
     type: 'enum',
     enum: BookingStatus,

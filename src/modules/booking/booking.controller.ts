@@ -16,7 +16,7 @@ import {
   EstimateFareDto,
   CreateBookingDto,
   CancelBookingDto,
-  UpdateFinalFareDto,
+  CompleteTripDto,
 } from './dto/booking.dto';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { GetUser } from '../../common/decorators/get-user.decorator';
@@ -147,9 +147,9 @@ export class BookingController {
   async completeTrip(
     @Param('id') id: string,
     @GetUser() user: User,
-    @Body() updateDto?: UpdateFinalFareDto,
+    @Body() completeTripDto?: CompleteTripDto,
   ) {
-    return this.bookingService.completeTrip(id, user.id, updateDto);
+    return this.bookingService.completeTrip(id, user.id, completeTripDto);
   }
 
   @Get('driver/history')

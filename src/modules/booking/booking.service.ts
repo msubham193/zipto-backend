@@ -10,7 +10,7 @@ import { Repository } from 'typeorm';
 import { Booking, BookingStatus, BookingType } from './entities/booking.entity';
 import { PricingRule } from './entities/pricing-rule.entity';
 import { VehicleType } from '../vehicle/entities/vehicle.entity';
-import { EstimateFareDto, CreateBookingDto, CancelBookingDto, UpdateFinalFareDto } from './dto/booking.dto';
+import { EstimateFareDto, CreateBookingDto, CancelBookingDto, CompleteTripDto } from './dto/booking.dto';
 import { getPaginationMeta } from '../../common/utils/helpers.util';
 import { MapboxService } from '../../services/mapbox.service';
 import { CoinService } from '../coin/coin.service';
@@ -36,10 +36,31 @@ export class BookingService {
   ) {}
 
   /**
+   * Check if a booking time falls in night hours (11PM - 6AM)
+   */
+  private isNightTime(date: Date = new Date()): boolean {
+    const hours = date.getHours();
+    return hours >= 23 || hours < 6;
+  }
+
+  /**
+   * Round to 2 decimal places
+   */
+  private round(value: number): number {
+    return Math.round(value * 100) / 100;
+  }
+
+  /**
    * Estimate fare for a trip
    */
   async estimateFare(estimateFareDto: EstimateFareDto) {
-    const { pickup_location, drop_location, vehicle_type } = estimateFareDto;
+    const {
+      pickup_location,
+      drop_location,
+      vehicle_type,
+      number_of_helpers = 0,
+      extra_stops = 0,
+    } = estimateFareDto;
 
     // Get distance and duration from Mapbox Directions API
     const routeData = await this.mapboxService.getDistanceMatrix(
@@ -62,38 +83,86 @@ export class BookingService {
       throw new NotFoundException(`Pricing rule not found for vehicle type: ${vehicle_type}`);
     }
 
-    // Calculate fare
+    // --- Calculate fare breakdown ---
     const baseFare = Number(pricingRule.base_fare);
-    const perKmCharge = Number(pricingRule.per_km_rate) * distance;
-    const perMinuteCharge = pricingRule.per_minute_rate
-      ? Number(pricingRule.per_minute_rate) * duration
+    const baseDistanceKm = Number(pricingRule.base_distance_km);
+    const perKmRate = Number(pricingRule.per_km_rate);
+    const perMinuteRate = pricingRule.per_minute_rate ? Number(pricingRule.per_minute_rate) : 0;
+    const helperChargePerPerson = Number(pricingRule.helper_charge_per_person);
+    const multiStopFee = Number(pricingRule.multi_stop_fee);
+    const nightSurchargePercent = Number(pricingRule.night_surcharge_percent);
+    const commissionPercent = Number(pricingRule.commission_percent);
+
+    // 1. Distance charge: only for KMs beyond base distance
+    const extraDistance = Math.max(0, distance - baseDistanceKm);
+    const distanceCharge = this.round(extraDistance * perKmRate);
+
+    // 2. Time charge: per minute for total trip duration
+    const timeCharge = this.round(duration * perMinuteRate);
+
+    // 3. Helper charge: ₹300 per helper
+    const helperCharge = this.round(number_of_helpers * helperChargePerPerson);
+
+    // 4. Multi-stop charge: fee per extra drop-off
+    const multiStopCharge = this.round(extra_stops * multiStopFee);
+
+    // 5. Subtotal before night surcharge
+    let subtotal = baseFare + distanceCharge + timeCharge + helperCharge + multiStopCharge;
+
+    // 6. Night surcharge (11PM - 6AM)
+    const isNight = this.isNightTime();
+    const nightSurcharge = isNight
+      ? this.round(subtotal * (nightSurchargePercent / 100))
       : 0;
-    
-    let estimatedFare = baseFare + perKmCharge + perMinuteCharge;
 
-    // Apply surge multiplier
-    if (pricingRule.surge_multiplier && pricingRule.surge_multiplier > 1) {
-      estimatedFare *= Number(pricingRule.surge_multiplier);
+    // 7. Estimated fare
+    let estimatedFare = subtotal + nightSurcharge;
+
+    // 8. Apply surge multiplier
+    const surgeMultiplier = Number(pricingRule.surge_multiplier);
+    if (surgeMultiplier && surgeMultiplier > 1) {
+      estimatedFare = this.round(estimatedFare * surgeMultiplier);
     }
 
-    // Apply minimum fare
-    if (pricingRule.minimum_fare && estimatedFare < Number(pricingRule.minimum_fare)) {
-      estimatedFare = Number(pricingRule.minimum_fare);
+    // 9. Apply minimum fare floor
+    const minimumFare = pricingRule.minimum_fare ? Number(pricingRule.minimum_fare) : null;
+    if (minimumFare && estimatedFare < minimumFare) {
+      estimatedFare = minimumFare;
     }
 
-    // Round to 2 decimal places
-    estimatedFare = Math.round(estimatedFare * 100) / 100;
+    estimatedFare = this.round(estimatedFare);
+
+    // 10. Calculate commission split (for display purposes)
+    const skidoCommission = this.round(estimatedFare * (commissionPercent / 100));
+    const driverEarnings = this.round(estimatedFare - skidoCommission);
 
     return {
-      distance: Math.round(distance * 100) / 100,
+      distance: this.round(distance),
       duration,
       estimated_fare: estimatedFare,
+      is_night_booking: isNight,
       breakdown: {
         base_fare: baseFare,
-        distance_charge: Math.round(perKmCharge * 100) / 100,
-        time_charge: Math.round(perMinuteCharge * 100) / 100,
-        surge_multiplier: Number(pricingRule.surge_multiplier),
-        minimum_fare: pricingRule.minimum_fare ? Number(pricingRule.minimum_fare) : null,
+        base_distance_km: baseDistanceKm,
+        distance_charge: distanceCharge,
+        time_charge: timeCharge,
+        helper_charge: helperCharge,
+        multi_stop_charge: multiStopCharge,
+        night_surcharge: nightSurcharge,
+        waiting_charge: 0, // Calculated at trip completion
+        toll_amount: 0, // Added at trip completion
+        surge_multiplier: surgeMultiplier,
+        subtotal: this.round(subtotal),
+        skido_commission: skidoCommission,
+        driver_earnings: driverEarnings,
+      },
+      pricing_info: {
+        free_waiting_minutes: Number(pricingRule.free_waiting_minutes),
+        waiting_charge_per_minute: Number(pricingRule.waiting_charge_per_minute),
+        helper_charge_per_person: helperChargePerPerson,
+        multi_stop_fee: multiStopFee,
+        night_surcharge_percent: nightSurchargePercent,
+        commission_percent: commissionPercent,
       },
     };
   }
@@ -102,8 +171,19 @@ export class BookingService {
    * Create new booking
    */
   async create(userId: string, createBookingDto: CreateBookingDto) {
-    const { name, mobile_number, city, service_category, pickup_location, drop_location, vehicle_type, booking_type, scheduled_time } =
-      createBookingDto;
+    const {
+      name,
+      mobile_number,
+      city,
+      service_category,
+      pickup_location,
+      drop_location,
+      vehicle_type,
+      booking_type,
+      scheduled_time,
+      number_of_helpers = 0,
+      extra_drop_locations = [],
+    } = createBookingDto;
 
     // Validate scheduled time for scheduled bookings
     if (booking_type === BookingType.SCHEDULED) {
@@ -117,11 +197,13 @@ export class BookingService {
       }
     }
 
-    // Get fare estimation
+    // Get fare estimation with helpers and extra stops
     const fareEstimate = await this.estimateFare({
       pickup_location,
       drop_location,
       vehicle_type,
+      number_of_helpers,
+      extra_stops: extra_drop_locations.length,
     });
 
     // Create booking
@@ -137,7 +219,11 @@ export class BookingService {
       distance: fareEstimate.distance,
       duration: fareEstimate.duration,
       estimated_fare: fareEstimate.estimated_fare,
-      status: BookingStatus.PENDING, // Initial status is PENDING (Searching)
+      fare_breakdown: fareEstimate.breakdown,
+      number_of_helpers,
+      extra_stops_count: extra_drop_locations.length,
+      is_night_booking: fareEstimate.is_night_booking,
+      status: BookingStatus.PENDING,
       scheduled_time: scheduled_time ? new Date(scheduled_time) : undefined,
     });
 
@@ -180,18 +266,11 @@ export class BookingService {
     const booking = await this.bookingRepository.findOne({ where: { id: bookingId } });
     if (!booking || booking.status !== BookingStatus.PENDING) return;
 
-    // Find nearest driver not in excluded list
-    // This requires a geospatial query excluding strict IDs.
-    // Since TypeORM's query builder with complex exclusions and PostGIS can be tricky,
-    // we'll fetch nearby drivers and filter in memory if the list is small,
-    // or use a raw query.
-    // For MVP, let's fetch nearby active drivers and find the first one not excluded.
-
     const pickup = booking.pickup_location as any;
     const nearbyDrivers = await this.findNearbyDrivers(
-      pickup.coordinates[1], // Latitude
-      pickup.coordinates[0], // Longitude
-      5 // 5km radius
+      pickup.coordinates[1],
+      pickup.coordinates[0],
+      5,
     );
 
     const eligibleDrivers = nearbyDrivers.filter(
@@ -199,10 +278,6 @@ export class BookingService {
     );
 
     if (eligibleDrivers.length === 0) {
-      // No drivers found
-      // Update booking status or notify admin/user?
-      // For now, maybe retry or just leave it pending
-      // Or notify user "No drivers available" via socket
       this.bookingGateway.notifyUser(booking.customer_id, 'no_drivers_found', { bookingId });
       return;
     }
@@ -210,7 +285,7 @@ export class BookingService {
     const nearestDriver = eligibleDrivers[0];
 
     // Set offer in Redis (TTL 7 seconds + buffer)
-    await this.cacheManager.set(`booking:${bookingId}:offer`, nearestDriver.user_id, 10000); // 10s ttl
+    await this.cacheManager.set(`booking:${bookingId}:offer`, nearestDriver.user_id, 10000);
 
     // Send offer to driver
     this.bookingGateway.emitBookingOffer(nearestDriver.user_id, {
@@ -219,7 +294,7 @@ export class BookingService {
       drop: booking.drop_address,
       fare: booking.estimated_fare,
       distance: booking.distance,
-      timeLeft: 7, // seconds
+      timeLeft: 7,
     });
 
     // Schedule timeout job
@@ -230,7 +305,7 @@ export class BookingService {
         driverId: nearestDriver.user_id,
         excludedDriverIds: [...excludedDriverIds, nearestDriver.user_id],
       },
-      { delay: 7000 }, // 7 seconds delay
+      { delay: 7000 },
     );
   }
 
@@ -239,21 +314,12 @@ export class BookingService {
    */
   async handleOfferTimeout(bookingId: string, driverId: string, excludedDriverIds: string[]) {
     const booking = await this.bookingRepository.findOne({ where: { id: bookingId } });
-    
-    // If booking is already accepted or cancelled, stop.
     if (!booking || booking.status !== BookingStatus.PENDING) return;
 
-    // Check if the current offer is still for this driver (it should be, unless cleared)
     const currentOfferDriver = await this.cacheManager.get(`booking:${bookingId}:offer`);
-    
-    // If the offer matches the driver who didn't respond
+
     if (currentOfferDriver === driverId) {
-      // Clear the offer
       await this.cacheManager.del(`booking:${bookingId}:offer`);
-      
-      // Notify driver offer expired (optional)
-      
-      // Search for next driver
       await this.bookingQueue.add('search_driver', {
         bookingId,
         excludedDriverIds,
@@ -262,17 +328,9 @@ export class BookingService {
   }
 
   /**
-   * Helper to find nearby drivers (Simplified)
+   * Helper to find nearby drivers
    */
   private async findNearbyDrivers(lat: number, lng: number, radiusKm: number) {
-    // This should query the User/DriverProfile table with location
-    // Assuming Driver has location stored. 
-    // Wait, location is in DriverProfile (lat/lng columns).
-    // linking to DriverProfile...
-    // We need to inject DriverProfileRepository or use raw query.
-    // For now, let's assume we can use a raw query on driver_profiles table.
-    // Note: ensure table name is correct.
-    
     return this.bookingRepository.manager.query(
       `
       SELECT user_id, 
@@ -290,7 +348,7 @@ export class BookingService {
       ORDER BY distance ASC
       LIMIT 10
       `,
-      [lng, lat, radiusKm * 1000]
+      [lng, lat, radiusKm * 1000],
     );
   }
 
@@ -307,7 +365,6 @@ export class BookingService {
       throw new NotFoundException('Booking not found');
     }
 
-    // Check if user has access to this booking
     if (booking.customer_id !== userId && booking.driver_id !== userId) {
       throw new ForbiddenException('You do not have access to this booking');
     }
@@ -321,7 +378,6 @@ export class BookingService {
   async cancel(bookingId: string, userId: string, cancelDto: CancelBookingDto) {
     const booking = await this.getById(bookingId, userId);
 
-    // Only allow cancellation if booking is not ongoing or completed
     if ([BookingStatus.ONGOING, BookingStatus.COMPLETED].includes(booking.status)) {
       throw new BadRequestException(`Cannot cancel booking with status: ${booking.status}`);
     }
@@ -336,7 +392,6 @@ export class BookingService {
    * Get nearby bookings for driver (within radius)
    */
   async getNearbyBookings(latitude: number, longitude: number, radius: number = 5) {
-    // radius in km
     const bookings = await this.bookingRepository
       .createQueryBuilder('booking')
       .where('booking.status = :status', { status: BookingStatus.PENDING })
@@ -346,7 +401,7 @@ export class BookingService {
           ST_SetSRID(ST_MakePoint(:longitude, :latitude), 4326)::geography,
           :radius
         )`,
-        { latitude, longitude, radius: radius * 1000 }, // Convert km to meters
+        { latitude, longitude, radius: radius * 1000 },
       )
       .orderBy('booking.created_at', 'ASC')
       .limit(20)
@@ -386,14 +441,9 @@ export class BookingService {
       throw new BadRequestException('Booking is no longer available');
     }
 
-    // Check if this driver is the one who was offered the booking
     const offeredDriverId = await this.cacheManager.get(`booking:${bookingId}:offer`);
     if (offeredDriverId !== driverId) {
-       // Ideally we should check this, but if the cache expired or system restarted,
-       // we might block a valid accept if we are too strict.
-       // However, for strict "nearest driver logic", we MUST enforce this.
-       // If null, it means offer expired or wasn't set.
-       throw new BadRequestException('Booking offer expired or not assigned to you');
+      throw new BadRequestException('Booking offer expired or not assigned to you');
     }
 
     booking.status = BookingStatus.ACCEPTED;
@@ -403,14 +453,11 @@ export class BookingService {
 
     const savedBooking = await this.bookingRepository.save(booking);
 
-    // Clear offer
     await this.cacheManager.del(`booking:${bookingId}:offer`);
 
-    // Notify user
     this.bookingGateway.notifyUser(booking.customer_id, 'booking_accepted', {
-       bookingId: booking.id,
-       driverId,
-       // Add driver details here if needed
+      bookingId: booking.id,
+      driverId,
     });
 
     return savedBooking;
@@ -420,40 +467,10 @@ export class BookingService {
    * Reject booking (driver)
    */
   async rejectBooking(bookingId: string, driverId: string, reason: string) {
-    // If driver rejects, we should immediately trigger the next search
-    // instead of waiting for timeout.
-    
-    // Check if this was the assigned driver
     const offeredDriverId = await this.cacheManager.get(`booking:${bookingId}:offer`);
-    
+
     if (offeredDriverId === driverId) {
       await this.cacheManager.del(`booking:${bookingId}:offer`);
-      
-      // We need to know previous excluded drivers to add this one.
-      // This is tricky because we don't store excluded drivers in redis easily exposed here.
-      // We can iterate the running jobs to find the 'offer_timeout' job id... too complex.
-      // SIMPLIFICATION: just let the timeout handle it?
-      // No, user wants fast.
-      // Solution: Store excluded drivers in Redis list too?
-      // Or just re-trigger search and let it find this driver again?
-      // If we re-trigger, we need to pass excluded list.
-      // For now, let's keep it simple: rejection just clears offer.
-      // The timeout job will eventually fire. (Wait, if we clear offer, timeout job will see null and do nothing?)
-      // Ah, create a new job 'search_driver' immediately.
-      // But we need the excluded list from the previous job context.
-      
-      // Alternative: let the timeout handle it (7s is short).
-      // OR: emit an event to the processor to cancel the timeout and proceed.
-      
-      // For this MVP step: Driver rejects -> clear offer -> wait for timeout to pick up next?
-      // No, timeout checks if offer is still valid. If we clear it, timeout handles it?
-      // In `handleOfferTimeout`: `if (currentOfferDriver === driverId)`
-      // If we cleared it, it won't match.
-      
-      // Better approach:
-      // Store excluded drivers in Redis `booking:{id}:excluded`.
-      // When searching, pull from Redis.
-      // When rejecting, add to Redis, and trigger search immediately.
     }
 
     return { message: 'Booking rejected' };
@@ -482,9 +499,9 @@ export class BookingService {
   }
 
   /**
-   * Complete trip
+   * Complete trip — Calculates final fare with waiting charges, toll, and Skido commission
    */
-  async completeTrip(bookingId: string, driverId: string, updateDto?: UpdateFinalFareDto) {
+  async completeTrip(bookingId: string, driverId: string, completeTripDto?: CompleteTripDto) {
     const booking = await this.bookingRepository.findOne({
       where: { id: bookingId, driver_id: driverId },
     });
@@ -497,9 +514,51 @@ export class BookingService {
       throw new BadRequestException(`Cannot complete trip with status: ${booking.status}`);
     }
 
+    // Get pricing rule for waiting charge calculation
+    const pricingRule = await this.pricingRuleRepository.findOne({
+      where: { is_active: true },
+    });
+
+    // Extract completion data
+    const hasToll = completeTripDto?.has_toll || false;
+    const tollAmount = hasToll ? (completeTripDto?.toll_amount || 0) : 0;
+    const waitingTimeMinutes = completeTripDto?.waiting_time_minutes || 0;
+
+    // Calculate waiting charge
+    let waitingCharge = 0;
+    if (pricingRule && waitingTimeMinutes > 0) {
+      const freeWaitingMinutes = Number(pricingRule.free_waiting_minutes);
+      const waitingChargePerMinute = Number(pricingRule.waiting_charge_per_minute);
+      const chargeableMinutes = Math.max(0, waitingTimeMinutes - freeWaitingMinutes);
+      waitingCharge = this.round(chargeableMinutes * waitingChargePerMinute);
+    }
+
+    // Calculate final fare: estimated + waiting + toll
+    const estimatedFare = Number(booking.estimated_fare);
+    const finalFare = this.round(estimatedFare + waitingCharge + tollAmount);
+
+    // Calculate Skido commission and driver earnings
+    const commissionPercent = pricingRule ? Number(pricingRule.commission_percent) : 30;
+    const skidoCommission = this.round(finalFare * (commissionPercent / 100));
+    const driverEarnings = this.round(finalFare - skidoCommission);
+
+    // Update fare breakdown
+    const fareBreakdown = booking.fare_breakdown || {} as any;
+    fareBreakdown.waiting_charge = waitingCharge;
+    fareBreakdown.toll_amount = tollAmount;
+    fareBreakdown.skido_commission = skidoCommission;
+    fareBreakdown.driver_earnings = driverEarnings;
+
+    // Update booking
     booking.status = BookingStatus.COMPLETED;
     booking.completion_time = new Date();
-    booking.final_fare = updateDto?.final_fare || booking.estimated_fare;
+    booking.final_fare = finalFare;
+    booking.fare_breakdown = fareBreakdown;
+    booking.has_toll = hasToll;
+    booking.toll_amount = tollAmount;
+    booking.waiting_time_minutes = waitingTimeMinutes;
+    booking.skido_commission = skidoCommission;
+    booking.driver_earnings = driverEarnings;
 
     const savedBooking = await this.bookingRepository.save(booking);
 
@@ -516,6 +575,14 @@ export class BookingService {
       ...savedBooking,
       coins_earned: coinReward.coins,
       coins_multiplier: coinReward.multiplier,
+      fare_summary: {
+        estimated_fare: estimatedFare,
+        waiting_charge: waitingCharge,
+        toll_amount: tollAmount,
+        final_fare: finalFare,
+        skido_commission: skidoCommission,
+        driver_earnings: driverEarnings,
+      },
     };
   }
 
@@ -558,18 +625,77 @@ export class BookingService {
       take: limit,
     });
 
-    // Calculate total earnings
+    // Calculate total earnings (driver's share only)
     const completedBookings = await this.bookingRepository
       .createQueryBuilder('booking')
       .where('booking.driver_id = :userId', { userId })
       .andWhere('booking.status = :status', { status: BookingStatus.COMPLETED })
-      .select('SUM(booking.final_fare)', 'total')
+      .select('SUM(booking.driver_earnings)', 'total_earnings')
+      .addSelect('SUM(booking.final_fare)', 'total_fare')
+      .addSelect('SUM(booking.skido_commission)', 'total_commission')
       .getRawOne();
 
     return {
       bookings,
-      total_earnings: completedBookings?.total || 0,
+      total_earnings: completedBookings?.total_earnings || 0,
+      total_fare: completedBookings?.total_fare || 0,
+      total_commission: completedBookings?.total_commission || 0,
       ...getPaginationMeta(total, page, limit),
     };
+  }
+
+  /**
+   * Get all pricing rules (for admin)
+   */
+  async getAllPricingRules() {
+    return this.pricingRuleRepository.find({
+      order: { vehicle_type: 'ASC' },
+    });
+  }
+
+  /**
+   * Create pricing rule (for admin)
+   */
+  async createPricingRule(data: Partial<PricingRule>) {
+    const existing = await this.pricingRuleRepository.findOne({
+      where: { vehicle_type: data.vehicle_type, city: data.city || 'Bhubaneswar', is_active: true },
+    });
+
+    if (existing) {
+      throw new BadRequestException(
+        `Active pricing rule already exists for ${data.vehicle_type} in ${data.city || 'Bhubaneswar'}`,
+      );
+    }
+
+    const pricingRule = this.pricingRuleRepository.create(data);
+    return this.pricingRuleRepository.save(pricingRule);
+  }
+
+  /**
+   * Update pricing rule (for admin)
+   */
+  async updatePricingRule(id: string, data: Partial<PricingRule>) {
+    const pricingRule = await this.pricingRuleRepository.findOne({ where: { id } });
+
+    if (!pricingRule) {
+      throw new NotFoundException('Pricing rule not found');
+    }
+
+    Object.assign(pricingRule, data);
+    return this.pricingRuleRepository.save(pricingRule);
+  }
+
+  /**
+   * Delete pricing rule (for admin)
+   */
+  async deletePricingRule(id: string) {
+    const pricingRule = await this.pricingRuleRepository.findOne({ where: { id } });
+
+    if (!pricingRule) {
+      throw new NotFoundException('Pricing rule not found');
+    }
+
+    await this.pricingRuleRepository.remove(pricingRule);
+    return { message: 'Pricing rule deleted successfully' };
   }
 }

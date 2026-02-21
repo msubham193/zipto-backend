@@ -8,11 +8,13 @@ import { Payment } from '../payment/entities/payment.entity';
 import { DriverProfile } from '../driver/entities/driver-profile.entity';
 import { Vehicle } from '../vehicle/entities/vehicle.entity';
 import { AuthModule } from '../auth/auth.module';
+import { BookingModule } from '../booking/booking.module';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([User, Booking, Payment, DriverProfile, Vehicle]),
     AuthModule,
+    BookingModule,
   ],
   controllers: [AdminController],
   providers: [AdminService],
