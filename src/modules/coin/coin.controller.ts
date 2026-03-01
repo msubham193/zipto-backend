@@ -1,10 +1,4 @@
-import {
-  Controller,
-  Get,
-  Query,
-  ParseIntPipe,
-  DefaultValuePipe,
-} from '@nestjs/common';
+import { Controller, Get, Query, ParseIntPipe, DefaultValuePipe } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiQuery, ApiBearerAuth } from '@nestjs/swagger';
 import { CoinService } from './coin.service';
 import { Roles } from '../../common/decorators/roles.decorator';

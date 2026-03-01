@@ -1,13 +1,4 @@
-import {
-  Controller,
-  Get,
-  Put,
-  Post,
-  Delete,
-  Body,
-  Param,
-  ParseIntPipe,
-} from '@nestjs/common';
+import { Controller, Get, Put, Post, Delete, Body, Param, ParseIntPipe } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { CustomerService } from './customer.service';
 import { UpdateCustomerDto, SavedLocationDto } from './dto/customer.dto';

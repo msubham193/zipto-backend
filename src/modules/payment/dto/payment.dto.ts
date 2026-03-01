@@ -7,11 +7,15 @@ export class CreateOrderDto {
   @IsUUID()
   booking_id: string;
 
-  @ApiProperty({ example: 250.50 })
+  @ApiProperty({ example: 250.5 })
   @IsNumber()
   amount: number;
 
-  @ApiPropertyOptional({ enum: PaymentMethod, example: PaymentMethod.UPI, description: 'Payment method: upi, card, or wallet' })
+  @ApiPropertyOptional({
+    enum: PaymentMethod,
+    example: PaymentMethod.UPI,
+    description: 'Payment method: upi, card, or wallet',
+  })
   @IsOptional()
   @IsEnum(PaymentMethod, { message: 'payment_method must be one of: upi, card, wallet' })
   payment_method?: PaymentMethod;
@@ -43,7 +47,7 @@ export class CashPaymentDto {
   @IsUUID()
   booking_id: string;
 
-  @ApiProperty({ example: 250.00 })
+  @ApiProperty({ example: 250.0 })
   @IsNumber()
   amount: number;
 }

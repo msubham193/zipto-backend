@@ -49,7 +49,10 @@ export class EstimateFareDto {
   @IsEnum(VehicleType)
   vehicle_type: VehicleType;
 
-  @ApiPropertyOptional({ example: 0, description: 'Number of loading/unloading helpers (₹300 each)' })
+  @ApiPropertyOptional({
+    example: 0,
+    description: 'Number of loading/unloading helpers (₹300 each)',
+  })
   @IsOptional()
   @IsInt()
   @Min(0)
@@ -79,7 +82,11 @@ export class CreateBookingDto {
   @IsNotEmpty()
   city: string;
 
-  @ApiProperty({ enum: ServiceCategory, example: ServiceCategory.SEND_PACKAGES, description: 'Service type: send_packages, transport_goods, food_delivery, medicine' })
+  @ApiProperty({
+    enum: ServiceCategory,
+    example: ServiceCategory.SEND_PACKAGES,
+    description: 'Service type: send_packages, transport_goods, food_delivery, medicine',
+  })
   @IsEnum(ServiceCategory)
   service_category: ServiceCategory;
 
@@ -93,7 +100,10 @@ export class CreateBookingDto {
   @Type(() => LocationDto)
   drop_location: LocationDto;
 
-  @ApiPropertyOptional({ type: [LocationDto], description: 'Additional drop-off locations for multi-stop' })
+  @ApiPropertyOptional({
+    type: [LocationDto],
+    description: 'Additional drop-off locations for multi-stop',
+  })
   @IsOptional()
   @IsArray()
   @ValidateNested({ each: true })
@@ -113,7 +123,10 @@ export class CreateBookingDto {
   @IsOptional()
   scheduled_time?: string;
 
-  @ApiPropertyOptional({ example: 0, description: 'Number of loading/unloading helpers (₹300 each)' })
+  @ApiPropertyOptional({
+    example: 0,
+    description: 'Number of loading/unloading helpers (₹300 each)',
+  })
   @IsOptional()
   @IsInt()
   @Min(0)
@@ -148,7 +161,7 @@ export class CompleteTripDto {
 
 // Keep for backward compatibility
 export class UpdateFinalFareDto {
-  @ApiProperty({ example: 250.00 })
+  @ApiProperty({ example: 250.0 })
   @IsOptional()
   final_fare?: number;
 }

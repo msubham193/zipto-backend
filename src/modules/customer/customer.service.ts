@@ -102,7 +102,7 @@ export class CustomerService {
     const profile = await this.getProfile(userId);
 
     const locations = profile.saved_locations || [];
-    
+
     if (index < 0 || index >= locations.length) {
       throw new NotFoundException('Location not found');
     }

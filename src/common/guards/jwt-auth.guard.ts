@@ -40,7 +40,9 @@ export class JwtAuthGuard extends AuthGuard('jwt') {
   }
 
   handleRequest(err: any, user: any, info: any, context: ExecutionContext) {
-    this.logger.log(`handleRequest - err: ${err}, user: ${user?.id || 'null'}, info: ${JSON.stringify(info)}`);
+    this.logger.log(
+      `handleRequest - err: ${err}, user: ${user?.id || 'null'}, info: ${JSON.stringify(info)}`,
+    );
 
     if (err || !user) {
       throw err || new UnauthorizedException(info?.message || 'Invalid or expired token');

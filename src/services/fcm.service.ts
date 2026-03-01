@@ -20,7 +20,7 @@ export class FcmService {
     if (this.serverKey) {
       try {
         const admin = require('firebase-admin');
-        
+
         // Initialize with server key (for testing)
         // In production, use service account JSON
         admin.initializeApp({

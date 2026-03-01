@@ -134,7 +134,7 @@ export class BookingController {
 
   @Put(':id/start')
   @Roles('driver')
-  @ApiOperation({ summary: 'Start the trip'})
+  @ApiOperation({ summary: 'Start the trip' })
   @ApiResponse({ status: 200, description: 'Trip started successfully' })
   async startTrip(@Param('id') id: string, @GetUser() user: User) {
     return this.bookingService.startTrip(id, user.id);

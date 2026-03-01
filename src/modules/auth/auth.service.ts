@@ -19,7 +19,11 @@ import {
   AdminLoginDto,
   RefreshTokenDto,
 } from './dto/auth.dto';
-import { generateOTP, formatPhoneNumber, generateRandomUsername } from '../../common/utils/helpers.util';
+import {
+  generateOTP,
+  formatPhoneNumber,
+  generateRandomUsername,
+} from '../../common/utils/helpers.util';
 import { SmsService } from '../../services/sms.service';
 
 @Injectable()
@@ -57,9 +61,7 @@ export class AuthService {
       throw new BadRequestException('Failed to send OTP. Please try again.');
     }
 
-    const purpose = existingUser
-      ? OTPPurpose.LOGIN
-      : OTPPurpose.REGISTRATION;
+    const purpose = existingUser ? OTPPurpose.LOGIN : OTPPurpose.REGISTRATION;
     await this.createOTP(formattedPhone, purpose);
 
     return {
@@ -78,19 +80,13 @@ export class AuthService {
     const formattedPhone = formatPhoneNumber(phone);
 
     // Verify OTP via Twilio Verify
-    const isValid = await this.smsService.checkVerification(
-      formattedPhone,
-      otp,
-    );
+    const isValid = await this.smsService.checkVerification(formattedPhone, otp);
     if (!isValid) {
       throw new BadRequestException('Invalid or expired OTP');
     }
 
     // Mark DB OTP records as used
-    await this.otpRepository.update(
-      { phone: formattedPhone, is_used: false },
-      { is_used: true },
-    );
+    await this.otpRepository.update({ phone: formattedPhone, is_used: false }, { is_used: true });
 
     // Check if user exists
     let user = await this.userRepository.findOne({
@@ -155,9 +151,7 @@ export class AuthService {
       throw new BadRequestException('Failed to send OTP. Please try again.');
     }
 
-    const purpose = existingUser
-      ? OTPPurpose.LOGIN
-      : OTPPurpose.REGISTRATION;
+    const purpose = existingUser ? OTPPurpose.LOGIN : OTPPurpose.REGISTRATION;
     await this.createOTP(formattedPhone, purpose);
 
     return {
@@ -271,7 +265,8 @@ export class AuthService {
    */
   private async createOTP(phone: string, purpose: OTPPurpose): Promise<string> {
     const otpLength = this.configService.get<number>('externalServices.otp.length') || 6;
-    const expiryMinutes = this.configService.get<number>('externalServices.otp.expiryMinutes') || 10;
+    const expiryMinutes =
+      this.configService.get<number>('externalServices.otp.expiryMinutes') || 10;
 
     const otpCode = generateOTP(otpLength);
     const expiresAt = new Date();

@@ -1,10 +1,20 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { DriverProfile, AvailabilityStatus, VerificationStatus } from './entities/driver-profile.entity';
+import {
+  DriverProfile,
+  AvailabilityStatus,
+  VerificationStatus,
+} from './entities/driver-profile.entity';
 import { Vehicle, VehicleType } from '../vehicle/entities/vehicle.entity';
 import { User } from '../auth/entities/user.entity';
-import { UpdateDriverDto, UpdateAvailabilityDto, UpdateLocationDto, OnboardDriverDto } from './dto/driver.dto';
+import { Booking, BookingStatus } from '../booking/entities/booking.entity';
+import {
+  UpdateDriverDto,
+  UpdateAvailabilityDto,
+  UpdateLocationDto,
+  OnboardDriverDto,
+} from './dto/driver.dto';
 import { getPaginationMeta } from '../../common/utils/helpers.util';
 import { S3Service } from '../../services/s3.service';
 
@@ -17,6 +27,8 @@ export class DriverService {
     private userRepository: Repository<User>,
     @InjectRepository(Vehicle)
     private vehicleRepository: Repository<Vehicle>,
+    @InjectRepository(Booking)
+    private bookingRepository: Repository<Booking>,
     private readonly s3Service: S3Service,
   ) {}
 
@@ -111,14 +123,42 @@ export class DriverService {
   }
 
   /**
+   * Get driver daily stats
+   */
+  async getDailyStats(userId: string) {
+    // Ensure the driver profile exists
+    await this.getProfile(userId);
+
+    const startOfDay = new Date();
+    startOfDay.setHours(0, 0, 0, 0);
+
+    const endOfDay = new Date();
+    endOfDay.setHours(23, 59, 59, 999);
+
+    const bookings = await this.bookingRepository
+      .createQueryBuilder('booking')
+      .where('booking.driver_id = :userId', { userId })
+      .andWhere('booking.status = :status', { status: BookingStatus.COMPLETED })
+      .andWhere('booking.completion_time >= :startOfDay', { startOfDay })
+      .andWhere('booking.completion_time <= :endOfDay', { endOfDay })
+      .getMany();
+
+    const todayEarnings = bookings.reduce(
+      (sum, booking) => sum + Number(booking.driver_earnings || 0),
+      0,
+    );
+    const todayOrders = bookings.length;
+
+    return {
+      today_earnings: todayEarnings,
+      today_orders: todayOrders,
+    };
+  }
+
+  /**
    * Get trip history with pagination
    */
-  async getTripHistory(
-    userId: string,
-    page: number = 1,
-    limit: number = 10,
-    status?: string,
-  ) {
+  async getTripHistory(userId: string, page: number = 1, limit: number = 10, status?: string) {
     const driverProfile = await this.getProfile(userId);
 
     // TODO: This will be implemented when Booking module is created
@@ -256,7 +296,8 @@ export class DriverService {
     await this.driverProfileRepository.save(profile);
 
     // Handle Vehicle Details
-    const { vehicle_registration_number, vehicle_type, vehicle_model, vehicle_capacity } = onboardDriverDto;
+    const { vehicle_registration_number, vehicle_type, vehicle_model, vehicle_capacity } =
+      onboardDriverDto;
 
     if (vehicle_registration_number) {
       let vehicle = await this.vehicleRepository.findOne({
@@ -315,11 +356,12 @@ export class DriverService {
     return {
       is_verified: user.is_verified,
       verification_status: profile?.verification_status || VerificationStatus.PENDING,
-      message: profile?.verification_status === VerificationStatus.APPROVED
-        ? 'Your profile has been verified by the admin.'
-        : profile?.verification_status === VerificationStatus.REJECTED
-          ? 'Your profile has been rejected. Please contact support.'
-          : 'Your profile is pending admin verification.',
+      message:
+        profile?.verification_status === VerificationStatus.APPROVED
+          ? 'Your profile has been verified by the admin.'
+          : profile?.verification_status === VerificationStatus.REJECTED
+            ? 'Your profile has been rejected. Please contact support.'
+            : 'Your profile is pending admin verification.',
     };
   }
 }

@@ -40,7 +40,7 @@ export class Rating {
   driver: User;
 
   @Column({ type: 'decimal', precision: 2, scale: 1 })
-  rating: number;  // 1.0 to 5.0
+  rating: number; // 1.0 to 5.0
 
   @Column({ type: 'text', nullable: true })
   comment: string;

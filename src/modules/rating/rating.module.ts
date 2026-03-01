@@ -8,10 +8,7 @@ import { DriverProfile } from '../driver/entities/driver-profile.entity';
 import { AuthModule } from '../auth/auth.module';
 
 @Module({
-  imports: [
-    TypeOrmModule.forFeature([Rating, Booking, DriverProfile]),
-    AuthModule,
-  ],
+  imports: [TypeOrmModule.forFeature([Rating, Booking, DriverProfile]), AuthModule],
   controllers: [RatingController],
   providers: [RatingService],
   exports: [RatingService],

@@ -42,7 +42,7 @@ export class Vehicle {
   registration_number: string;
 
   @Column({ type: 'integer' })
-  capacity: number;  // in kg
+  capacity: number; // in kg
 
   @Column({ type: 'varchar', length: 100, nullable: true })
   vehicle_model: string;

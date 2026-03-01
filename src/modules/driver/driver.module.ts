@@ -8,10 +8,11 @@ import { DriverProfile } from './entities/driver-profile.entity';
 import { Vehicle } from '../vehicle/entities/vehicle.entity';
 import { User } from '../auth/entities/user.entity';
 import { AuthModule } from '../auth/auth.module';
+import { Booking } from '../booking/entities/booking.entity';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([DriverProfile, User, Vehicle]),
+    TypeOrmModule.forFeature([DriverProfile, User, Vehicle, Booking]),
     AuthModule,
     MulterModule.register({
       storage: multer.memoryStorage(),

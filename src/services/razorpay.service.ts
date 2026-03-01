@@ -71,11 +71,7 @@ export class RazorpayService {
   /**
    * Verify payment signature
    */
-  verifyPaymentSignature(
-    orderId: string,
-    paymentId: string,
-    signature: string,
-  ): boolean {
+  verifyPaymentSignature(orderId: string, paymentId: string, signature: string): boolean {
     if (!this.keySecret) {
       this.logger.warn('Razorpay key secret not configured, skipping verification');
       return true; // Skip verification in mock mode
@@ -87,7 +83,7 @@ export class RazorpayService {
       .digest('hex');
 
     const isValid = generatedSignature === signature;
-    
+
     if (isValid) {
       this.logger.log(`Payment signature verified for order: ${orderId}`);
     } else {

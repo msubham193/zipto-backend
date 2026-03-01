@@ -10,17 +10,14 @@ export class SmsService {
   private readonly verifyServiceSid: string;
 
   constructor(private configService: ConfigService) {
-    const accountSid =
-      this.configService.get<string>('externalServices.twilio.accountSid') ||
-      '';
-    const authToken =
-      this.configService.get<string>('externalServices.twilio.authToken') || '';
+    const accountSid = this.configService.get<string>('externalServices.twilio.accountSid') || '';
+    const authToken = this.configService.get<string>('externalServices.twilio.authToken') || '';
     this.verifyServiceSid =
-      this.configService.get<string>(
-        'externalServices.twilio.verifyServiceSid',
-      ) || '';
+      this.configService.get<string>('externalServices.twilio.verifyServiceSid') || '';
 
-    this.logger.log(`Twilio config - accountSid: ${accountSid ? accountSid.substring(0, 6) + '...' : 'MISSING'}, authToken: ${authToken ? '***set***' : 'MISSING'}, verifyServiceSid: ${this.verifyServiceSid || 'MISSING'}`);
+    this.logger.log(
+      `Twilio config - accountSid: ${accountSid ? accountSid.substring(0, 6) + '...' : 'MISSING'}, authToken: ${authToken ? '***set***' : 'MISSING'}, verifyServiceSid: ${this.verifyServiceSid || 'MISSING'}`,
+    );
     this.client = twilio(accountSid, authToken);
   }
 
@@ -28,12 +25,12 @@ export class SmsService {
    * Send OTP via Twilio Verify
    */
   async sendVerification(phone: string): Promise<boolean> {
-    this.logger.log(`sendVerification called - phone: ${phone}, serviceSid: ${this.verifyServiceSid}`);
+    this.logger.log(
+      `sendVerification called - phone: ${phone}, serviceSid: ${this.verifyServiceSid}`,
+    );
 
     if (!this.verifyServiceSid) {
-      this.logger.warn(
-        `Twilio Verify not configured. Phone: ${phone}`,
-      );
+      this.logger.warn(`Twilio Verify not configured. Phone: ${phone}`);
       return false;
     }
 
@@ -42,15 +39,15 @@ export class SmsService {
         .services(this.verifyServiceSid)
         .verifications.create({ to: phone, channel: 'sms' });
 
-      this.logger.log(
-        `OTP sent to ${phone} - status: ${verification.status}`,
-      );
+      this.logger.log(`OTP sent to ${phone} - status: ${verification.status}`);
       return verification.status === 'pending';
     } catch (error: unknown) {
       const msg = (error as Error)?.message || JSON.stringify(error);
       const code = (error as any)?.code;
       const status = (error as any)?.status;
-      this.logger.error(`Twilio send verification failed - code: ${code}, status: ${status}, message: ${msg}`);
+      this.logger.error(
+        `Twilio send verification failed - code: ${code}, status: ${status}, message: ${msg}`,
+      );
       return false;
     }
   }
@@ -69,9 +66,7 @@ export class SmsService {
         .services(this.verifyServiceSid)
         .verificationChecks.create({ to: phone, code });
 
-      this.logger.log(
-        `OTP check for ${phone} - status: ${check.status}`,
-      );
+      this.logger.log(`OTP check for ${phone} - status: ${check.status}`);
       return check.status === 'approved';
     } catch (error: unknown) {
       const msg = (error as Error)?.message || error;

@@ -11,9 +11,22 @@ import {
   UploadedFiles,
 } from '@nestjs/common';
 import { FileFieldsInterceptor } from '@nestjs/platform-express';
-import { ApiTags, ApiOperation, ApiResponse, ApiQuery, ApiBearerAuth, ApiConsumes, ApiBody } from '@nestjs/swagger';
+import {
+  ApiTags,
+  ApiOperation,
+  ApiResponse,
+  ApiQuery,
+  ApiBearerAuth,
+  ApiConsumes,
+  ApiBody,
+} from '@nestjs/swagger';
 import { DriverService } from './driver.service';
-import { UpdateDriverDto, UpdateAvailabilityDto, UpdateLocationDto, OnboardDriverDto } from './dto/driver.dto';
+import {
+  UpdateDriverDto,
+  UpdateAvailabilityDto,
+  UpdateLocationDto,
+  OnboardDriverDto,
+} from './dto/driver.dto';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { GetUser } from '../../common/decorators/get-user.decorator';
 import { User } from '../auth/entities/user.entity';
@@ -77,6 +90,14 @@ export class DriverController {
     return this.driverService.getEarnings(user.id);
   }
 
+  @Get('daily-stats')
+  @ApiOperation({ summary: 'Get driver daily statistics (earnings and orders)' })
+  @ApiResponse({ status: 200, description: 'Daily stats retrieved successfully' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  async getDailyStats(@GetUser() user: User) {
+    return this.driverService.getDailyStats(user.id);
+  }
+
   @Get('trips')
   @ApiOperation({ summary: 'Get driver trip history with pagination' })
   @ApiQuery({ name: 'page', required: false, type: Number, example: 1 })
@@ -106,7 +127,11 @@ export class DriverController {
         license_number: { type: 'string', example: 'OD02-20220001234' },
         license_expiry: { type: 'string', example: '2030-12-31' },
         vehicle_registration_number: { type: 'string', example: 'OD-02-A-1234' },
-        vehicle_type: { type: 'string', example: 'bike', enum: ['bike', 'tata_ace', 'pickup_van', 'mini_truck'] },
+        vehicle_type: {
+          type: 'string',
+          example: 'bike',
+          enum: ['bike', 'tata_ace', 'pickup_van', 'mini_truck'],
+        },
         vehicle_model: { type: 'string', example: 'Honda Activa' },
         vehicle_capacity: { type: 'number', example: 100 },
         aadhar_front: { type: 'string', format: 'binary' },

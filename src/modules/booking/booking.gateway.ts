@@ -31,10 +31,10 @@ export class BookingGateway implements OnGatewayConnection, OnGatewayDisconnect 
         client.disconnect();
         return;
       }
-      
+
       const payload = this.jwtService.verify(token.replace('Bearer ', ''));
       client.data.user = payload;
-      
+
       // Join room based on user ID
       await client.join(`user_${payload.sub}`);
       console.log(`Client connected: ${client.id}, User: ${payload.sub}`);

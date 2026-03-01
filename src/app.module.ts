@@ -31,14 +31,7 @@ import { RolesGuard } from './common/guards/roles.guard';
     // Configuration
     ConfigModule.forRoot({
       isGlobal: true,
-      load: [
-        appConfig,
-        databaseConfig,
-        jwtConfig,
-        redisConfig,
-        awsConfig,
-        externalServicesConfig,
-      ],
+      load: [appConfig, databaseConfig, jwtConfig, redisConfig, awsConfig, externalServicesConfig],
     }),
 
     // Database

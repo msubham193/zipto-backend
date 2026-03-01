@@ -18,24 +18,26 @@ async function bootstrap() {
   const appName = configService.get<string>('app.name') || 'SkiDO';
 
   // Security - Configure Helmet to allow Swagger docs
-  app.use(helmet({
-    contentSecurityPolicy: {
-      directives: {
-        defaultSrc: [`'self'`],
-        styleSrc: [`'self'`, `'unsafe-inline'`],
-        scriptSrc: [`'self'`, `'unsafe-inline'`, `'unsafe-eval'`],
-        imgSrc: [`'self'`, 'data:', 'validator.swagger.io'],
+  app.use(
+    helmet({
+      contentSecurityPolicy: {
+        directives: {
+          defaultSrc: [`'self'`],
+          styleSrc: [`'self'`, `'unsafe-inline'`],
+          scriptSrc: [`'self'`, `'unsafe-inline'`, `'unsafe-eval'`],
+          imgSrc: [`'self'`, 'data:', 'validator.swagger.io'],
+        },
       },
-    },
-  }));
-  
+    }),
+  );
+
   // CORS
   app.enableCors({
     origin: [
       'http://localhost:3000',
       'http://localhost:4200',
-      'http://localhost:5173',           // Vite dev server
-      'https://zipto-admin.vercel.app',  // Production frontend
+      'http://localhost:5173', // Vite dev server
+      'https://zipto-admin.vercel.app', // Production frontend
     ],
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization'],

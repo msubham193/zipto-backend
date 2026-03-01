@@ -157,10 +157,7 @@ export class AdminController {
   @Put('pricing-rules/:id')
   @ApiOperation({ summary: 'Update a pricing rule' })
   @ApiResponse({ status: 200, description: 'Pricing rule updated' })
-  async updatePricingRule(
-    @Param('id') id: string,
-    @Body() data: Partial<PricingRule>,
-  ) {
+  async updatePricingRule(@Param('id') id: string, @Body() data: Partial<PricingRule>) {
     return this.bookingService.updatePricingRule(id, data);
   }
 

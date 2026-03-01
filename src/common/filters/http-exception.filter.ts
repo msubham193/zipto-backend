@@ -33,10 +33,7 @@ export class HttpExceptionFilter implements ExceptionFilter {
       }
     } else if (exception instanceof Error) {
       message = exception.message;
-      this.logger.error(
-        `Unhandled error: ${exception.message}`,
-        exception.stack,
-      );
+      this.logger.error(`Unhandled error: ${exception.message}`, exception.stack);
     } else {
       this.logger.error(
         `Unknown exception type: ${typeof exception} - ${JSON.stringify(exception)}`,
@@ -44,9 +41,7 @@ export class HttpExceptionFilter implements ExceptionFilter {
     }
 
     // Log error details (not sensitive data)
-    this.logger.error(
-      `${request.method} ${request.url} - Status: ${status} - ${message}`,
-    );
+    this.logger.error(`${request.method} ${request.url} - Status: ${status} - ${message}`);
 
     // Send response
     response.status(status).json({

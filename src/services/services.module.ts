@@ -7,19 +7,7 @@ import { S3Service } from './s3.service';
 
 @Global()
 @Module({
-  providers: [
-    MapboxService,
-    RazorpayService,
-    SmsService,
-    FcmService,
-    S3Service,
-  ],
-  exports: [
-    MapboxService,
-    RazorpayService,
-    SmsService,
-    FcmService,
-    S3Service,
-  ],
+  providers: [MapboxService, RazorpayService, SmsService, FcmService, S3Service],
+  exports: [MapboxService, RazorpayService, SmsService, FcmService, S3Service],
 })
 export class ServicesModule {}

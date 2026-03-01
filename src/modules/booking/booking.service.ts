@@ -10,7 +10,12 @@ import { Repository } from 'typeorm';
 import { Booking, BookingStatus, BookingType } from './entities/booking.entity';
 import { PricingRule } from './entities/pricing-rule.entity';
 import { VehicleType } from '../vehicle/entities/vehicle.entity';
-import { EstimateFareDto, CreateBookingDto, CancelBookingDto, CompleteTripDto } from './dto/booking.dto';
+import {
+  EstimateFareDto,
+  CreateBookingDto,
+  CancelBookingDto,
+  CompleteTripDto,
+} from './dto/booking.dto';
 import { getPaginationMeta } from '../../common/utils/helpers.util';
 import { MapboxService } from '../../services/mapbox.service';
 import { CoinService } from '../coin/coin.service';
@@ -19,7 +24,6 @@ import { Queue } from 'bull';
 import { BookingGateway } from './booking.gateway';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import { Cache } from 'cache-manager';
-
 
 @Injectable()
 export class BookingService {
@@ -111,9 +115,7 @@ export class BookingService {
 
     // 6. Night surcharge (11PM - 6AM)
     const isNight = this.isNightTime();
-    const nightSurcharge = isNight
-      ? this.round(subtotal * (nightSurchargePercent / 100))
-      : 0;
+    const nightSurcharge = isNight ? this.round(subtotal * (nightSurchargePercent / 100)) : 0;
 
     // 7. Estimated fare
     let estimatedFare = subtotal + nightSurcharge;
@@ -521,7 +523,7 @@ export class BookingService {
 
     // Extract completion data
     const hasToll = completeTripDto?.has_toll || false;
-    const tollAmount = hasToll ? (completeTripDto?.toll_amount || 0) : 0;
+    const tollAmount = hasToll ? completeTripDto?.toll_amount || 0 : 0;
     const waitingTimeMinutes = completeTripDto?.waiting_time_minutes || 0;
 
     // Calculate waiting charge
@@ -543,7 +545,7 @@ export class BookingService {
     const driverEarnings = this.round(finalFare - skidoCommission);
 
     // Update fare breakdown
-    const fareBreakdown = booking.fare_breakdown || {} as any;
+    const fareBreakdown = booking.fare_breakdown || ({} as any);
     fareBreakdown.waiting_charge = waitingCharge;
     fareBreakdown.toll_amount = tollAmount;
     fareBreakdown.skido_commission = skidoCommission;

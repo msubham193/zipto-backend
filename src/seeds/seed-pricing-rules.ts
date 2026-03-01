@@ -124,10 +124,18 @@ async function seed() {
             updated_at = NOW()
           WHERE id = $13`,
           [
-            rule.base_fare, rule.base_distance_km, rule.per_km_rate, rule.per_minute_rate,
-            rule.minimum_fare, rule.surge_multiplier, rule.free_waiting_minutes,
-            rule.waiting_charge_per_minute, rule.night_surcharge_percent,
-            rule.multi_stop_fee, rule.helper_charge_per_person, rule.commission_percent,
+            rule.base_fare,
+            rule.base_distance_km,
+            rule.per_km_rate,
+            rule.per_minute_rate,
+            rule.minimum_fare,
+            rule.surge_multiplier,
+            rule.free_waiting_minutes,
+            rule.waiting_charge_per_minute,
+            rule.night_surcharge_percent,
+            rule.multi_stop_fee,
+            rule.helper_charge_per_person,
+            rule.commission_percent,
             existing.rows[0].id,
           ],
         );
@@ -142,11 +150,20 @@ async function seed() {
             commission_percent, city, is_active
           ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, true)`,
           [
-            rule.vehicle_type, rule.base_fare, rule.base_distance_km, rule.per_km_rate,
-            rule.per_minute_rate, rule.minimum_fare, rule.surge_multiplier,
-            rule.free_waiting_minutes, rule.waiting_charge_per_minute,
-            rule.night_surcharge_percent, rule.multi_stop_fee, rule.helper_charge_per_person,
-            rule.commission_percent, rule.city,
+            rule.vehicle_type,
+            rule.base_fare,
+            rule.base_distance_km,
+            rule.per_km_rate,
+            rule.per_minute_rate,
+            rule.minimum_fare,
+            rule.surge_multiplier,
+            rule.free_waiting_minutes,
+            rule.waiting_charge_per_minute,
+            rule.night_surcharge_percent,
+            rule.multi_stop_fee,
+            rule.helper_charge_per_person,
+            rule.commission_percent,
+            rule.city,
           ],
         );
         console.log(`✅ Created pricing rule for ${rule.vehicle_type} (${rule.city})`);

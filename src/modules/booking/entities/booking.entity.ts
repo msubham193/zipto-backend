@@ -108,10 +108,10 @@ export class Booking {
   drop_address: string;
 
   @Column({ type: 'decimal', precision: 10, scale: 2, nullable: true })
-  distance: number;  // in km
+  distance: number; // in km
 
   @Column({ type: 'integer', nullable: true })
-  duration: number;  // in minutes
+  duration: number; // in minutes
 
   @Column({ type: 'decimal', precision: 10, scale: 2 })
   estimated_fare: number;

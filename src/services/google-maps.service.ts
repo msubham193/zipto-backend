@@ -53,7 +53,7 @@ export class GoogleMapsService {
       }
 
       const element = response.data.rows[0]?.elements[0];
-      
+
       if (element.status !== 'OK') {
         throw new Error(`Route not found: ${element.status}`);
       }

@@ -162,7 +162,7 @@ export class AdminService {
    */
   async getAllBookings(query: { status?: BookingStatus; page?: number; limit?: number }) {
     const { status, page = 1, limit = 20 } = query;
-    
+
     const queryBuilder = this.bookingRepository
       .createQueryBuilder('booking')
       .leftJoinAndSelect('booking.customer', 'customer')
@@ -197,7 +197,7 @@ export class AdminService {
     const [bookingsByDay, revenueByDay] = await Promise.all([
       this.bookingRepository
         .createQueryBuilder('booking')
-        .select("DATE(booking.created_at)", 'date')
+        .select('DATE(booking.created_at)', 'date')
         .addSelect('COUNT(*)', 'count')
         .where('booking.created_at >= :startDate', { startDate: last30Days })
         .groupBy('DATE(booking.created_at)')
@@ -206,7 +206,7 @@ export class AdminService {
 
       this.paymentRepository
         .createQueryBuilder('payment')
-        .select("DATE(payment.created_at)", 'date')
+        .select('DATE(payment.created_at)', 'date')
         .addSelect('SUM(payment.amount)', 'revenue')
         .where('payment.created_at >= :startDate', { startDate: last30Days })
         .andWhere('payment.payment_status = :status', { status: PaymentStatus.COMPLETED })
@@ -280,7 +280,7 @@ export class AdminService {
     // Recover missing vehicle_id for older driver profiles
     if (!driver.vehicle_id) {
       const vehicle = await this.vehicleRepository.findOne({
-        where: { driver_id: driverId }
+        where: { driver_id: driverId },
       });
       if (vehicle) {
         driver.vehicle_id = vehicle.id;
@@ -316,15 +316,14 @@ export class AdminService {
   /**
    * Helper method to get date range from query
    */
-  private getDateRange(query: {
-    period?: string;
-    startDate?: string;
-    endDate?: string;
-  }): { start: Date; end: Date } {
+  private getDateRange(query: { period?: string; startDate?: string; endDate?: string }): {
+    start: Date;
+    end: Date;
+  } {
     const today = new Date();
     const start = new Date(today);
     const end = new Date(today);
-    
+
     // Set end of today
     end.setHours(23, 59, 59, 999);
 
@@ -374,16 +373,21 @@ export class AdminService {
         start.setDate(today.getDate() - 30);
         start.setHours(0, 0, 0, 0);
     }
-    
+
     return { start, end };
   }
 
   /**
    * Get booking reports
    */
-  async getBookingReports(query: { period?: string; startDate?: string; endDate?: string; city?: string }) {
+  async getBookingReports(query: {
+    period?: string;
+    startDate?: string;
+    endDate?: string;
+    city?: string;
+  }) {
     const { start, end } = this.getDateRange(query);
-    
+
     const queryBuilder = this.bookingRepository
       .createQueryBuilder('booking')
       .where('booking.created_at BETWEEN :start AND :end', { start, end });
@@ -395,7 +399,7 @@ export class AdminService {
     // Chart Data
     const bookingsByDay = await queryBuilder
       .clone()
-      .select("DATE(booking.created_at)", 'date')
+      .select('DATE(booking.created_at)', 'date')
       .addSelect('COUNT(*)', 'value')
       .groupBy('DATE(booking.created_at)')
       .orderBy('date', 'ASC')
@@ -403,9 +407,15 @@ export class AdminService {
 
     // Summary Data
     const totalBookings = await queryBuilder.clone().getCount();
-    const completed = await queryBuilder.clone().andWhere('booking.status = :status', { status: BookingStatus.COMPLETED }).getCount();
-    const cancelled = await queryBuilder.clone().andWhere('booking.status = :status', { status: BookingStatus.CANCELLED }).getCount();
-    
+    const completed = await queryBuilder
+      .clone()
+      .andWhere('booking.status = :status', { status: BookingStatus.COMPLETED })
+      .getCount();
+    const cancelled = await queryBuilder
+      .clone()
+      .andWhere('booking.status = :status', { status: BookingStatus.CANCELLED })
+      .getCount();
+
     // Calculate days difference
     const diffTime = Math.abs(end.getTime() - start.getTime());
     const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) || 1;
@@ -418,7 +428,8 @@ export class AdminService {
           totalBookings,
           completed,
           cancelled,
-          completionRate: totalBookings > 0 ? parseFloat(((completed / totalBookings) * 100).toFixed(1)) : 0,
+          completionRate:
+            totalBookings > 0 ? parseFloat(((completed / totalBookings) * 100).toFixed(1)) : 0,
           avgPerDay: Math.round(totalBookings / diffDays),
         },
       },
@@ -428,9 +439,14 @@ export class AdminService {
   /**
    * Get revenue reports
    */
-  async getRevenueReports(query: { period?: string; startDate?: string; endDate?: string; city?: string }) {
+  async getRevenueReports(query: {
+    period?: string;
+    startDate?: string;
+    endDate?: string;
+    city?: string;
+  }) {
     const { start, end } = this.getDateRange(query);
-    
+
     const queryBuilder = this.paymentRepository
       .createQueryBuilder('payment')
       .leftJoin('payment.booking', 'booking')
@@ -445,7 +461,7 @@ export class AdminService {
     // Chart Data
     const revenueByDay = await queryBuilder
       .clone()
-      .select("DATE(payment.created_at)", 'date')
+      .select('DATE(payment.created_at)', 'date')
       .addSelect('SUM(payment.amount)', 'value')
       .groupBy('DATE(payment.created_at)')
       .orderBy('date', 'ASC')
@@ -456,12 +472,12 @@ export class AdminService {
       .clone()
       .select('SUM(payment.amount)', 'totalRevenue')
       .getRawOne();
-    
+
     const totalRevenue = parseFloat(summaryResult?.totalRevenue || '0');
     // Assuming 20% platform fee if not explicitly tracked
     const platformFee = totalRevenue * 0.2;
     const driverPayouts = totalRevenue * 0.8;
-    
+
     const totalPayments = await queryBuilder.clone().getCount();
 
     return {
@@ -481,14 +497,21 @@ export class AdminService {
   /**
    * Get driver reports
    */
-  async getDriverReports(query: { period?: string; startDate?: string; endDate?: string; city?: string }) {
+  async getDriverReports(query: {
+    period?: string;
+    startDate?: string;
+    endDate?: string;
+    city?: string;
+  }) {
     const { start, end } = this.getDateRange(query);
 
     // Calculate Driver Stats based on bookings in period
     const topDrivers = await this.bookingRepository
       .createQueryBuilder('booking')
       .leftJoin('booking.driver', 'driver') // Join with user
-      .leftJoin('booking.payments', 'payment', 'payment.payment_status = :paymentStatus', { paymentStatus: PaymentStatus.COMPLETED })
+      .leftJoin('booking.payments', 'payment', 'payment.payment_status = :paymentStatus', {
+        paymentStatus: PaymentStatus.COMPLETED,
+      })
       .select('booking.driver_id', 'id')
       .addSelect('driver.name', 'name')
       .addSelect('COUNT(booking.id)', 'trips')
@@ -505,7 +528,7 @@ export class AdminService {
       .getRawMany();
 
     // Fetch up-to-date ratings from driver profile for these top drivers
-    const driverIds = topDrivers.map(d => d.id);
+    const driverIds = topDrivers.map((d) => d.id);
     const driverRatingsMap: Record<string, number> = {};
     if (driverIds.length > 0) {
       const profiles = await this.driverProfileRepository
@@ -513,51 +536,56 @@ export class AdminService {
         .where('profile.user_id IN (:...driverIds)', { driverIds })
         .select(['profile.user_id', 'profile.average_rating'])
         .getMany();
-      
-      profiles.forEach(p => {
+
+      profiles.forEach((p) => {
         driverRatingsMap[p.user_id] = parseFloat(p.average_rating?.toString() || '0');
       });
     }
 
-    const formattedDrivers = topDrivers.map(d => ({
+    const formattedDrivers = topDrivers.map((d) => ({
       id: d.id,
       name: d.name,
       trips: parseInt(d.trips),
       earnings: parseFloat(d.earnings),
-      rating: driverRatingsMap[d.id] || 0
+      rating: driverRatingsMap[d.id] || 0,
     }));
 
     return {
       success: true,
       data: {
-        topDrivers: formattedDrivers
-      }
+        topDrivers: formattedDrivers,
+      },
     };
   }
 
   /**
    * Get customer reports
    */
-  async getCustomerReports(query: { period?: string; startDate?: string; endDate?: string; city?: string }) {
+  async getCustomerReports(query: {
+    period?: string;
+    startDate?: string;
+    endDate?: string;
+    city?: string;
+  }) {
     const { start, end } = this.getDateRange(query);
-    
+
     // New Customers in period
     const newCustomers = await this.userRepository.count({
       where: {
         role: UserRole.CUSTOMER,
-        created_at: Between(start, end)
-      }
+        created_at: Between(start, end),
+      },
     });
-    
+
     // Active customers (who made a booking in this period)
     const activeCustomerResult = await this.bookingRepository
       .createQueryBuilder('booking')
       .select('COUNT(DISTINCT booking.customer_id)', 'count')
       .where('booking.created_at BETWEEN :start AND :end', { start, end })
       .getRawOne();
-    
+
     const activeCustomers = parseInt(activeCustomerResult?.count || '0');
-    
+
     // Returning customers: Active customers who joined BEFORE this period
     const returningCustomerResult = await this.bookingRepository
       .createQueryBuilder('booking')
@@ -566,7 +594,7 @@ export class AdminService {
       .where('booking.created_at BETWEEN :start AND :end', { start, end })
       .andWhere('customer.created_at < :start', { start })
       .getRawOne();
-      
+
     const returningCustomers = parseInt(returningCustomerResult?.count || '0');
 
     // Churn calculation is complex, approximating:
@@ -574,23 +602,24 @@ export class AdminService {
     // For simplicity, returning mock-ish data based on available metrics or implementing fully would verify historical data
     // Let's implement simpler retention: (Returning Customers / (Active Customers at Start of Period)) * 100
     // Simplified: Retention Rate = (Returning Customers / Total Active Customers) * 100
-    
-    const retentionRate = activeCustomers > 0 
-      ? parseFloat(((returningCustomers / activeCustomers) * 100).toFixed(1)) 
-      : 0;
+
+    const retentionRate =
+      activeCustomers > 0
+        ? parseFloat(((returningCustomers / activeCustomers) * 100).toFixed(1))
+        : 0;
 
     const churnRate = parseFloat((100 - retentionRate).toFixed(1));
 
     // Satisfaction (Average Rating)
-    // Assuming ratings come from bookings or driver profiles. 
+    // Assuming ratings come from bookings or driver profiles.
     // Since we don't have explicit review table, using DriverProfile average rating global for now
     // Or check if bookings have ratings
-    
+
     const avgRatingResult = await this.driverProfileRepository
       .createQueryBuilder('profile')
       .select('AVG(profile.average_rating)', 'avg')
       .getRawOne();
-      
+
     const averageRating = parseFloat(avgRatingResult?.avg || '0').toFixed(1);
 
     return {
@@ -600,27 +629,34 @@ export class AdminService {
           newCustomers,
           returningCustomers,
           retentionRate,
-          churnRate
+          churnRate,
         },
         satisfaction: {
           averageRating: parseFloat(averageRating),
           fiveStarReviews: 0, // Placeholder as we lack reviews table
           supportTickets: 0, // Placeholder
-          resolutionRate: 0 // Placeholder
-        }
-      }
+          resolutionRate: 0, // Placeholder
+        },
+      },
     };
   }
 
   /**
    * Export reports
    */
-  async exportReports(query: { type?: string; format?: string; period?: string; startDate?: string; endDate?: string; city?: string }) {
+  async exportReports(query: {
+    type?: string;
+    format?: string;
+    period?: string;
+    startDate?: string;
+    endDate?: string;
+    city?: string;
+  }) {
     // Generate data based on type
     let data = [];
     let headers = [];
 
-    switch(query.type) {
+    switch (query.type) {
       case 'bookings':
         const bookingReport = await this.getBookingReports(query);
         data = bookingReport.data.chartData;
@@ -643,26 +679,29 @@ export class AdminService {
     if (query.format === 'csv') {
       return this.generateCSV(data, headers);
     }
-    
+
     // PDF Implementation would go here (omitted for brevity)
     return 'PDF format not supported yet';
   }
 
   private generateCSV(data: any[], headers: string[]): string {
     const headerRow = headers.join(',') + '\n';
-    const rows = data.map(row => {
-      return headers.map(header => {
-        const key = header.toLowerCase();
-        // Handle mapping simple keys
-        if (key === 'date') return row.date;
-        if (key === 'bookings') return row.value;
-        if (key === 'revenue') return row.value;
-        // Handle driver keys
-        return row[key] || '';
-      }).join(',');
-    }).join('\n');
-    
+    const rows = data
+      .map((row) => {
+        return headers
+          .map((header) => {
+            const key = header.toLowerCase();
+            // Handle mapping simple keys
+            if (key === 'date') return row.date;
+            if (key === 'bookings') return row.value;
+            if (key === 'revenue') return row.value;
+            // Handle driver keys
+            return row[key] || '';
+          })
+          .join(',');
+      })
+      .join('\n');
+
     return headerRow + rows;
   }
 }
-

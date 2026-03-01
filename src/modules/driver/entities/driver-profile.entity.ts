@@ -81,7 +81,7 @@ export class DriverProfile {
     nullable: true,
   })
   @Index({ spatial: true })
-  current_location: string;  // Will store as GeoJSON Point
+  current_location: string; // Will store as GeoJSON Point
 
   @Column({ type: 'decimal', precision: 10, scale: 2, default: 0 })
   wallet_balance: number;
