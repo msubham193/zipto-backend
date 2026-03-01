@@ -277,6 +277,17 @@ export class AdminService {
       throw new Error('Driver not found');
     }
 
+    // Recover missing vehicle_id for older driver profiles
+    if (!driver.vehicle_id) {
+      const vehicle = await this.vehicleRepository.findOne({
+        where: { driver_id: driverId }
+      });
+      if (vehicle) {
+        driver.vehicle_id = vehicle.id;
+        await this.driverProfileRepository.update(driverId, { vehicle_id: vehicle.id });
+      }
+    }
+
     // Get driver's booking statistics
     const [totalBookings, completedBookings, totalEarnings] = await Promise.all([
       this.bookingRepository.count({ where: { driver: { id: driverId } } }),

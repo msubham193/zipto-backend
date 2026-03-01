@@ -284,7 +284,13 @@ export class DriverService {
         );
       }
 
-      await this.vehicleRepository.save(vehicle);
+      const savedVehicle = await this.vehicleRepository.save(vehicle);
+
+      // Update the driver profile with the vehicle ID if not already set
+      if (profile.vehicle_id !== savedVehicle.id) {
+        profile.vehicle_id = savedVehicle.id;
+        await this.driverProfileRepository.save(profile);
+      }
     }
 
     return { message: 'Driver onboarded successfully', profile };
