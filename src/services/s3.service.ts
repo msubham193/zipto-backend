@@ -54,7 +54,6 @@ export class S3Service {
         Key: key,
         Body: file,
         ContentType: contentType,
-        ACL: 'public-read',
       };
 
       const result = await this.s3.upload(params).promise();
