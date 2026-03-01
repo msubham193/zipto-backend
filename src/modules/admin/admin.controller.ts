@@ -53,6 +53,21 @@ export class AdminController {
     return this.adminService.getPendingVehicleVerifications();
   }
 
+  @Get('vehicles')
+  @ApiOperation({ summary: 'Get all vehicles with pagination' })
+  @ApiResponse({ status: 200, description: 'Vehicles retrieved' })
+  async getAllVehicles(@Query() query: PaginationDto) {
+    return this.adminService.getAllVehicles(query);
+  }
+
+  @Get('vehicles/:id')
+  @ApiOperation({ summary: 'Get vehicle complete details by ID' })
+  @ApiResponse({ status: 200, description: 'Vehicle details retrieved successfully' })
+  @ApiResponse({ status: 404, description: 'Vehicle not found' })
+  async getVehicleById(@Param('id') id: string) {
+    return this.adminService.getVehicleById(id);
+  }
+
   @Put('vehicles/:id/approve')
   @ApiOperation({ summary: 'Approve vehicle' })
   @ApiResponse({ status: 200, description: 'Vehicle approved' })

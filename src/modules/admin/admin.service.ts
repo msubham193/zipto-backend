@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, Between } from 'typeorm';
 import { User, UserRole } from '../auth/entities/user.entity';
@@ -130,9 +130,46 @@ export class AdminService {
   async getPendingVehicleVerifications() {
     return this.vehicleRepository.find({
       where: { verification_status: VerificationStatus.PENDING },
-      relations: ['driver'],
+      relations: ['driver', 'driver.user'],
       order: { created_at: 'ASC' },
     });
+  }
+
+  /**
+   * Get all vehicles with pagination
+   */
+  async getAllVehicles(query: { page?: number; limit?: number }) {
+    const { page = 1, limit = 20 } = query;
+
+    const [vehicles, total] = await this.vehicleRepository.findAndCount({
+      relations: ['driver', 'driver.user'],
+      order: { created_at: 'DESC' },
+      skip: (page - 1) * limit,
+      take: limit,
+    });
+
+    return {
+      vehicles,
+      total,
+      page,
+      pages: Math.ceil(total / limit),
+    };
+  }
+
+  /**
+   * Get vehicle details by ID
+   */
+  async getVehicleById(vehicleId: string) {
+    const vehicle = await this.vehicleRepository.findOne({
+      where: { id: vehicleId },
+      relations: ['driver', 'driver.user'],
+    });
+
+    if (!vehicle) {
+      throw new NotFoundException('Vehicle not found');
+    }
+
+    return vehicle;
   }
 
   /**
