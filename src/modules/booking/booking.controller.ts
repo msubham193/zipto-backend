@@ -21,6 +21,7 @@ import {
 import { Roles } from '../../common/decorators/roles.decorator';
 import { GetUser } from '../../common/decorators/get-user.decorator';
 import { User } from '../auth/entities/user.entity';
+import { Public } from '../../common/decorators/public.decorator';
 
 @ApiTags('Booking')
 @Controller('booking')
@@ -28,7 +29,15 @@ import { User } from '../auth/entities/user.entity';
 export class BookingController {
   constructor(private readonly bookingService: BookingService) {}
 
-  // Customer Endpoints
+  // Public/Customer Endpoints
+
+  @Public()
+  @Get('vehicles/pricing')
+  @ApiOperation({ summary: 'Get all active vehicle pricing rules' })
+  @ApiResponse({ status: 200, description: 'Vehicle pricing details retrieved successfully' })
+  async getVehiclePricing() {
+    return this.bookingService.getAllPricingRules();
+  }
 
   @Post('estimate-fare')
   @Roles('customer')

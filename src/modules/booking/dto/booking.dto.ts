@@ -51,7 +51,7 @@ export class EstimateFareDto {
 
   @ApiPropertyOptional({
     example: 0,
-    description: 'Number of loading/unloading helpers (₹300 each)',
+    description: 'Number of loading/unloading helpers (₹200 each)',
   })
   @IsOptional()
   @IsInt()
@@ -125,7 +125,7 @@ export class CreateBookingDto {
 
   @ApiPropertyOptional({
     example: 0,
-    description: 'Number of loading/unloading helpers (₹300 each)',
+    description: 'Number of loading/unloading helpers (₹200 each)',
   })
   @IsOptional()
   @IsInt()

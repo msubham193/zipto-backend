@@ -12,6 +12,11 @@ import { DriverProfile, VerificationStatus } from '../../driver/entities/driver-
 
 export enum VehicleType {
   BIKE = 'bike',
+  SCOOTY = 'scooty',
+  AUTO = 'auto',
+  PICKUP = 'pickup',
+  MINI_TRUCK = 'mini_truck',
+  // Legacy options kept for backward compatibility if any exist in DB
   THREE_WHEELER = 'three_wheeler',
   TATA_ACE = 'tata_ace',
   PICKUP_8FT = 'pickup_8ft',

@@ -155,6 +155,13 @@ export class AdminController {
 
   // --- Pricing Rules CRUD ---
 
+  @Post('pricing-rules/seed')
+  @ApiOperation({ summary: 'Seed default pricing rules' })
+  @ApiResponse({ status: 201, description: 'Pricing rules seeded' })
+  async seedPricingRules() {
+    return this.adminService.seedPricingRules();
+  }
+
   @Get('pricing-rules')
   @ApiOperation({ summary: 'Get all pricing rules' })
   @ApiResponse({ status: 200, description: 'Pricing rules retrieved' })

@@ -7,6 +7,9 @@ import { Payment, PaymentStatus } from '../payment/entities/payment.entity';
 import { DriverProfile, VerificationStatus } from '../driver/entities/driver-profile.entity';
 import { Vehicle } from '../vehicle/entities/vehicle.entity';
 
+import { PricingRule } from '../booking/entities/pricing-rule.entity';
+import { VehicleType } from '../vehicle/entities/vehicle.entity';
+
 @Injectable()
 export class AdminService {
   constructor(
@@ -20,6 +23,8 @@ export class AdminService {
     private driverProfileRepository: Repository<DriverProfile>,
     @InjectRepository(Vehicle)
     private vehicleRepository: Repository<Vehicle>,
+    @InjectRepository(PricingRule)
+    private pricingRuleRepository: Repository<PricingRule>,
   ) {}
 
   /**
@@ -740,5 +745,75 @@ export class AdminService {
       .join('\n');
 
     return headerRow + rows;
+  }
+
+  /**
+   * Seed Pricing Rules
+   */
+  async seedPricingRules() {
+    const defaultCity = 'Bhubaneswar';
+    const rules = [
+      {
+        vehicle_type: VehicleType.BIKE,
+        base_fare: 20,
+        per_km_rate: 6,
+        capacity_max: 8,
+        best_for: 'Documents, food, medicines',
+      },
+      {
+        vehicle_type: VehicleType.SCOOTY,
+        base_fare: 20,
+        per_km_rate: 7,
+        capacity_max: 10,
+        best_for: 'Small parcels, groceries',
+      },
+      {
+        vehicle_type: VehicleType.AUTO,
+        base_fare: 40,
+        per_km_rate: 12, // 10-14, using 12 avg
+        capacity_min: 50,
+        capacity_max: 150,
+        best_for: 'Shop deliveries, bulk groceries',
+      },
+      {
+        vehicle_type: VehicleType.PICKUP,
+        base_fare: 70,
+        per_km_rate: 16, // 14-18
+        capacity_min: 300,
+        capacity_max: 700,
+        best_for: 'Furniture, appliances',
+      },
+      {
+        vehicle_type: VehicleType.MINI_TRUCK,
+        base_fare: 90,
+        per_km_rate: 22, // 18-25
+        capacity_min: 700,
+        capacity_max: 1500,
+        best_for: 'Warehouse to shop, heavy goods',
+      },
+    ];
+
+    const results = [];
+    for (const rule of rules) {
+      const existing = await this.pricingRuleRepository.findOne({
+        where: { vehicle_type: rule.vehicle_type, city: defaultCity },
+      });
+
+      if (existing) {
+        Object.assign(existing, rule);
+        results.push(await this.pricingRuleRepository.save(existing));
+      } else {
+        const newRule = this.pricingRuleRepository.create({
+          ...rule,
+          city: defaultCity,
+          helper_charge_per_person: 200, // Explicitly set to 200 as per requirement
+          base_distance_km: 2.0, // Assuming first 2km is base fare
+          commission_percent: 30, // Skido default commission
+        });
+        results.push(await this.pricingRuleRepository.save(newRule));
+      }
+    }
+
+    return { message: 'Pricing rules seeded successfully', count: results.length, data: results };
   }
 }
