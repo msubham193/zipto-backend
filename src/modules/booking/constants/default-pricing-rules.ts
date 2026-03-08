@@ -105,7 +105,7 @@ export function getDefaultPricingRules(city: string = DEFAULT_PRICING_CITY): Def
       capacity_max: 700,
       best_for: 'Furniture, appliances',
       multi_stop_fee: 30,
-      helper_charge_per_person: 300,
+      helper_charge_per_person: 200,
     },
     {
       ...COMMON_RULE_FIELDS,
@@ -119,7 +119,7 @@ export function getDefaultPricingRules(city: string = DEFAULT_PRICING_CITY): Def
       capacity_max: 1500,
       best_for: 'Warehouse to shop, heavy goods',
       multi_stop_fee: 30,
-      helper_charge_per_person: 300,
+      helper_charge_per_person: 200,
     },
   ];
 }
