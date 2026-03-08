@@ -80,10 +80,10 @@ export class OnboardDriverDto {
   @IsOptional()
   vehicle_registration_number?: string;
 
-  @ApiProperty({ enum: ['bike', 'tata_ace', 'pickup_van', 'mini_truck'], example: 'bike' })
-  @IsEnum(['bike', 'tata_ace', 'pickup_van', 'mini_truck'])
+  @ApiProperty({ enum: VehicleType, example: VehicleType.SCOOTY })
+  @IsEnum(VehicleType)
   @IsOptional()
-  vehicle_type?: string;
+  vehicle_type?: VehicleType;
 
   @ApiProperty({ example: 'Honda Activa' })
   @IsString()

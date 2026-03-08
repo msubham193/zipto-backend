@@ -30,6 +30,7 @@ import {
 import { Roles } from '../../common/decorators/roles.decorator';
 import { GetUser } from '../../common/decorators/get-user.decorator';
 import { User } from '../auth/entities/user.entity';
+import { VehicleType } from '../vehicle/entities/vehicle.entity';
 
 @ApiTags('Driver')
 @Controller('driver')
@@ -129,8 +130,8 @@ export class DriverController {
         vehicle_registration_number: { type: 'string', example: 'OD-02-A-1234' },
         vehicle_type: {
           type: 'string',
-          example: 'bike',
-          enum: ['bike', 'tata_ace', 'pickup_van', 'mini_truck'],
+          example: VehicleType.SCOOTY,
+          enum: Object.values(VehicleType),
         },
         vehicle_model: { type: 'string', example: 'Honda Activa' },
         vehicle_capacity: { type: 'number', example: 100 },

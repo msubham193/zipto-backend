@@ -36,7 +36,7 @@ export class BookingController {
   @ApiOperation({ summary: 'Get all active vehicle pricing rules' })
   @ApiResponse({ status: 200, description: 'Vehicle pricing details retrieved successfully' })
   async getVehiclePricing() {
-    return this.bookingService.getAllPricingRules();
+    return this.bookingService.getPublicPricingRules();
   }
 
   @Post('estimate-fare')

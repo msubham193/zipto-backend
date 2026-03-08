@@ -8,7 +8,11 @@ import { DriverProfile, VerificationStatus } from '../driver/entities/driver-pro
 import { Vehicle } from '../vehicle/entities/vehicle.entity';
 
 import { PricingRule } from '../booking/entities/pricing-rule.entity';
-import { VehicleType } from '../vehicle/entities/vehicle.entity';
+import {
+  DEFAULT_PRICING_CITY,
+  getDefaultPricingRules,
+  LEGACY_VEHICLE_TYPES,
+} from '../booking/constants/default-pricing-rules';
 
 @Injectable()
 export class AdminService {
@@ -751,68 +755,30 @@ export class AdminService {
    * Seed Pricing Rules
    */
   async seedPricingRules() {
-    const defaultCity = 'Bhubaneswar';
-    const rules = [
-      {
-        vehicle_type: VehicleType.BIKE,
-        base_fare: 20,
-        per_km_rate: 6,
-        capacity_max: 8,
-        best_for: 'Documents, food, medicines',
-      },
-      {
-        vehicle_type: VehicleType.SCOOTY,
-        base_fare: 20,
-        per_km_rate: 7,
-        capacity_max: 10,
-        best_for: 'Small parcels, groceries',
-      },
-      {
-        vehicle_type: VehicleType.AUTO,
-        base_fare: 40,
-        per_km_rate: 12, // 10-14, using 12 avg
-        capacity_min: 50,
-        capacity_max: 150,
-        best_for: 'Shop deliveries, bulk groceries',
-      },
-      {
-        vehicle_type: VehicleType.PICKUP,
-        base_fare: 70,
-        per_km_rate: 16, // 14-18
-        capacity_min: 300,
-        capacity_max: 700,
-        best_for: 'Furniture, appliances',
-      },
-      {
-        vehicle_type: VehicleType.MINI_TRUCK,
-        base_fare: 90,
-        per_km_rate: 22, // 18-25
-        capacity_min: 700,
-        capacity_max: 1500,
-        best_for: 'Warehouse to shop, heavy goods',
-      },
-    ];
-
+    const rules = getDefaultPricingRules(DEFAULT_PRICING_CITY);
     const results = [];
+
     for (const rule of rules) {
       const existing = await this.pricingRuleRepository.findOne({
-        where: { vehicle_type: rule.vehicle_type, city: defaultCity },
+        where: { vehicle_type: rule.vehicle_type, city: rule.city },
       });
 
       if (existing) {
-        Object.assign(existing, rule);
+        Object.assign(existing, rule, { is_active: true });
         results.push(await this.pricingRuleRepository.save(existing));
       } else {
-        const newRule = this.pricingRuleRepository.create({
-          ...rule,
-          city: defaultCity,
-          helper_charge_per_person: 200, // Explicitly set to 200 as per requirement
-          base_distance_km: 2.0, // Assuming first 2km is base fare
-          commission_percent: 30, // Skido default commission
-        });
+        const newRule = this.pricingRuleRepository.create(rule);
         results.push(await this.pricingRuleRepository.save(newRule));
       }
     }
+
+    await this.pricingRuleRepository
+      .createQueryBuilder()
+      .update(PricingRule)
+      .set({ is_active: false })
+      .where('city = :city', { city: DEFAULT_PRICING_CITY })
+      .andWhere('vehicle_type IN (:...legacyTypes)', { legacyTypes: LEGACY_VEHICLE_TYPES })
+      .execute();
 
     return { message: 'Pricing rules seeded successfully', count: results.length, data: results };
   }

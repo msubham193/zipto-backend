@@ -7,91 +7,16 @@
  * Or run with: node -r ts-node/register src/seeds/seed-pricing-rules.ts
  */
 
+import {
+  DEFAULT_PRICING_CITY,
+  getDefaultPricingRules,
+  LEGACY_VEHICLE_TYPES,
+} from '../modules/booking/constants/default-pricing-rules';
+
 const { Client } = require('pg');
 require('dotenv').config();
 
-const pricingRules = [
-  {
-    vehicle_type: 'bike',
-    base_fare: 30,
-    base_distance_km: 2,
-    per_km_rate: 10,
-    per_minute_rate: 1.5,
-    minimum_fare: 30,
-    surge_multiplier: 1.0,
-    free_waiting_minutes: 70,
-    waiting_charge_per_minute: 1.5,
-    night_surcharge_percent: 15,
-    multi_stop_fee: 20,
-    helper_charge_per_person: 0,
-    commission_percent: 30,
-    city: 'Bhubaneswar',
-  },
-  {
-    vehicle_type: 'three_wheeler',
-    base_fare: 50,
-    base_distance_km: 2,
-    per_km_rate: 14,
-    per_minute_rate: 2.0,
-    minimum_fare: 50,
-    surge_multiplier: 1.0,
-    free_waiting_minutes: 70,
-    waiting_charge_per_minute: 2.0,
-    night_surcharge_percent: 15,
-    multi_stop_fee: 25,
-    helper_charge_per_person: 200,
-    commission_percent: 30,
-    city: 'Bhubaneswar',
-  },
-  {
-    vehicle_type: 'tata_ace',
-    base_fare: 120,
-    base_distance_km: 2,
-    per_km_rate: 16,
-    per_minute_rate: 2.0,
-    minimum_fare: 120,
-    surge_multiplier: 1.0,
-    free_waiting_minutes: 70,
-    waiting_charge_per_minute: 2.0,
-    night_surcharge_percent: 15,
-    multi_stop_fee: 30,
-    helper_charge_per_person: 300,
-    commission_percent: 30,
-    city: 'Bhubaneswar',
-  },
-  {
-    vehicle_type: 'pickup_8ft',
-    base_fare: 200,
-    base_distance_km: 2,
-    per_km_rate: 20,
-    per_minute_rate: 2.5,
-    minimum_fare: 200,
-    surge_multiplier: 1.0,
-    free_waiting_minutes: 70,
-    waiting_charge_per_minute: 2.5,
-    night_surcharge_percent: 15,
-    multi_stop_fee: 40,
-    helper_charge_per_person: 300,
-    commission_percent: 30,
-    city: 'Bhubaneswar',
-  },
-  {
-    vehicle_type: 'tata_407',
-    base_fare: 350,
-    base_distance_km: 2,
-    per_km_rate: 24,
-    per_minute_rate: 3.0,
-    minimum_fare: 350,
-    surge_multiplier: 1.0,
-    free_waiting_minutes: 70,
-    waiting_charge_per_minute: 3.0,
-    night_surcharge_percent: 15,
-    multi_stop_fee: 50,
-    helper_charge_per_person: 300,
-    commission_percent: 30,
-    city: 'Bhubaneswar',
-  },
-];
+const pricingRules = getDefaultPricingRules(DEFAULT_PRICING_CITY);
 
 async function seed() {
   const client = new Client({
@@ -169,6 +94,13 @@ async function seed() {
         console.log(`✅ Created pricing rule for ${rule.vehicle_type} (${rule.city})`);
       }
     }
+
+    await client.query(
+      `UPDATE pricing_rules
+       SET is_active = false, updated_at = NOW()
+       WHERE city = $1 AND vehicle_type = ANY($2)`,
+      [DEFAULT_PRICING_CITY, LEGACY_VEHICLE_TYPES],
+    );
 
     console.log('\n🎉 All pricing rules seeded successfully!');
     console.log('\nDefault rates:');

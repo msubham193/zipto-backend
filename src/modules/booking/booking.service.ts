@@ -6,7 +6,7 @@ import {
   ForbiddenException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import { Booking, BookingStatus, BookingType } from './entities/booking.entity';
 import { PricingRule } from './entities/pricing-rule.entity';
 import { VehicleType } from '../vehicle/entities/vehicle.entity';
@@ -24,9 +24,19 @@ import { Queue } from 'bull';
 import { BookingGateway } from './booking.gateway';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import { Cache } from 'cache-manager';
+import {
+  DEFAULT_PRICING_CITY,
+  getDefaultPricingRules,
+  getVehicleTypeSortOrder,
+  LEGACY_VEHICLE_TYPES,
+  PUBLIC_VEHICLE_TYPES,
+} from './constants/default-pricing-rules';
 
 @Injectable()
 export class BookingService {
+  private pricingRulesInitialized = false;
+  private pricingRulesSyncPromise?: Promise<void>;
+
   constructor(
     @InjectRepository(Booking)
     private bookingRepository: Repository<Booking>,
@@ -38,6 +48,44 @@ export class BookingService {
     private bookingGateway: BookingGateway,
     @Inject(CACHE_MANAGER) private cacheManager: Cache,
   ) {}
+
+  private async ensureDefaultPricingRules() {
+    if (this.pricingRulesInitialized) {
+      return;
+    }
+
+    if (!this.pricingRulesSyncPromise) {
+      this.pricingRulesSyncPromise = this.syncDefaultPricingRules();
+    }
+
+    await this.pricingRulesSyncPromise;
+    this.pricingRulesInitialized = true;
+  }
+
+  private async syncDefaultPricingRules() {
+    for (const rule of getDefaultPricingRules()) {
+      const existing = await this.pricingRuleRepository.findOne({
+        where: { vehicle_type: rule.vehicle_type, city: rule.city },
+      });
+
+      if (existing) {
+        Object.assign(existing, rule, { is_active: true });
+        await this.pricingRuleRepository.save(existing);
+        continue;
+      }
+
+      const pricingRule = this.pricingRuleRepository.create(rule);
+      await this.pricingRuleRepository.save(pricingRule);
+    }
+
+    await this.pricingRuleRepository
+      .createQueryBuilder()
+      .update(PricingRule)
+      .set({ is_active: false })
+      .where('city = :city', { city: DEFAULT_PRICING_CITY })
+      .andWhere('vehicle_type IN (:...legacyTypes)', { legacyTypes: LEGACY_VEHICLE_TYPES })
+      .execute();
+  }
 
   /**
    * Check if a booking time falls in night hours (11PM - 6AM)
@@ -58,6 +106,8 @@ export class BookingService {
    * Estimate fare for a trip
    */
   async estimateFare(estimateFareDto: EstimateFareDto) {
+    await this.ensureDefaultPricingRules();
+
     const {
       pickup_location,
       drop_location,
@@ -80,7 +130,7 @@ export class BookingService {
 
     // Get pricing rule for vehicle type
     const pricingRule = await this.pricingRuleRepository.findOne({
-      where: { vehicle_type, is_active: true },
+      where: { vehicle_type, city: DEFAULT_PRICING_CITY, is_active: true },
     });
 
     if (!pricingRule) {
@@ -504,8 +554,11 @@ export class BookingService {
    * Complete trip — Calculates final fare with waiting charges, toll, and Skido commission
    */
   async completeTrip(bookingId: string, driverId: string, completeTripDto?: CompleteTripDto) {
+    await this.ensureDefaultPricingRules();
+
     const booking = await this.bookingRepository.findOne({
       where: { id: bookingId, driver_id: driverId },
+      relations: ['vehicle'],
     });
 
     if (!booking) {
@@ -517,9 +570,15 @@ export class BookingService {
     }
 
     // Get pricing rule for waiting charge calculation
-    const pricingRule = await this.pricingRuleRepository.findOne({
-      where: { is_active: true },
-    });
+    const pricingRule = booking.vehicle?.vehicle_type
+      ? await this.pricingRuleRepository.findOne({
+          where: {
+            vehicle_type: booking.vehicle.vehicle_type,
+            city: booking.city || DEFAULT_PRICING_CITY,
+            is_active: true,
+          },
+        })
+      : null;
 
     // Extract completion data
     const hasToll = completeTripDto?.has_toll || false;
@@ -653,6 +712,22 @@ export class BookingService {
     return this.pricingRuleRepository.find({
       order: { vehicle_type: 'ASC' },
     });
+  }
+
+  async getPublicPricingRules() {
+    await this.ensureDefaultPricingRules();
+
+    const rules = await this.pricingRuleRepository.find({
+      where: {
+        city: DEFAULT_PRICING_CITY,
+        is_active: true,
+        vehicle_type: In([...PUBLIC_VEHICLE_TYPES]),
+      },
+    });
+
+    return rules.sort(
+      (left, right) => getVehicleTypeSortOrder(left.vehicle_type) - getVehicleTypeSortOrder(right.vehicle_type),
+    );
   }
 
   /**

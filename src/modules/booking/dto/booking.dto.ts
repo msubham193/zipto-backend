@@ -45,7 +45,7 @@ export class EstimateFareDto {
   @Type(() => LocationDto)
   drop_location: LocationDto;
 
-  @ApiProperty({ enum: VehicleType, example: VehicleType.TATA_ACE })
+  @ApiProperty({ enum: VehicleType, example: VehicleType.SCOOTY })
   @IsEnum(VehicleType)
   vehicle_type: VehicleType;
 
@@ -110,7 +110,7 @@ export class CreateBookingDto {
   @Type(() => LocationDto)
   extra_drop_locations?: LocationDto[];
 
-  @ApiProperty({ enum: VehicleType, example: VehicleType.TATA_ACE })
+  @ApiProperty({ enum: VehicleType, example: VehicleType.SCOOTY })
   @IsEnum(VehicleType)
   vehicle_type: VehicleType;
 
