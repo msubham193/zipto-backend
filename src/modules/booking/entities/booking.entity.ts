@@ -129,11 +129,13 @@ export class Booking {
     time_charge: number;
     helper_charge: number;
     multi_stop_charge: number;
+    demand_adjustment: number;
     night_surcharge: number;
     waiting_charge: number;
     toll_amount: number;
     surge_multiplier: number;
     subtotal: number;
+    minimum_fare_applied: boolean;
     skido_commission: number;
     driver_earnings: number;
   };
@@ -157,10 +159,10 @@ export class Booking {
   toll_amount: number;
 
   @Column({ type: 'decimal', precision: 10, scale: 2, nullable: true })
-  skido_commission: number; // Skido's 30% cut
+  skido_commission: number; // Platform commission from the final fare
 
   @Column({ type: 'decimal', precision: 10, scale: 2, nullable: true })
-  driver_earnings: number; // Driver's 70% share
+  driver_earnings: number; // Driver's share after platform commission
 
   // --- Status & Timing ---
 

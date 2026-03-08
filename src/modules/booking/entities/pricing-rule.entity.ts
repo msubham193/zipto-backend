@@ -23,16 +23,16 @@ export class PricingRule {
   // --- Core Fare ---
 
   @Column({ type: 'decimal', precision: 10, scale: 2 })
-  base_fare: number; // Fixed charge for first base_distance_km
+  base_fare: number; // Fixed starting charge for the trip
 
-  @Column({ type: 'decimal', precision: 5, scale: 2, default: 2.0 })
-  base_distance_km: number; // KMs included in base fare
+  @Column({ type: 'decimal', precision: 5, scale: 2, default: 0 })
+  base_distance_km: number; // Retained for compatibility; public pricing uses full-distance per-km
 
   @Column({ type: 'decimal', precision: 10, scale: 2 })
-  per_km_rate: number; // Rate per KM beyond base distance
+  per_km_rate: number; // Rate per KM for the full trip distance
 
   @Column({ type: 'decimal', precision: 10, scale: 2, nullable: true })
-  per_minute_rate: number; // Trip duration charge per minute
+  per_minute_rate: number; // Legacy field; time cost is not part of the active pricing formula
 
   @Column({ type: 'decimal', precision: 10, scale: 2, nullable: true })
   minimum_fare: number;
@@ -72,8 +72,8 @@ export class PricingRule {
 
   // --- Commission ---
 
-  @Column({ type: 'decimal', precision: 5, scale: 2, default: 30.0 })
-  commission_percent: number; // Skido's commission from driver earnings
+  @Column({ type: 'decimal', precision: 5, scale: 2, default: 25.0 })
+  commission_percent: number; // Platform commission from driver earnings
 
   // --- Metadata ---
 

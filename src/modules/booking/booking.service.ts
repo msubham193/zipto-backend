@@ -139,9 +139,7 @@ export class BookingService {
 
     // --- Calculate fare breakdown ---
     const baseFare = Number(pricingRule.base_fare);
-    const baseDistanceKm = Number(pricingRule.base_distance_km);
     const perKmRate = Number(pricingRule.per_km_rate);
-    const perMinuteRate = pricingRule.per_minute_rate ? Number(pricingRule.per_minute_rate) : 0;
     const helperChargePerPerson = Number(pricingRule.helper_charge_per_person);
     const multiStopFee = Number(pricingRule.multi_stop_fee);
     const nightSurchargePercent = Number(pricingRule.night_surcharge_percent);
@@ -152,30 +150,30 @@ export class BookingService {
       throw new BadRequestException(`Helpers are not available for vehicle type: ${vehicle_type}`);
     }
 
-    // 1. Distance charge: only for KMs beyond base distance
-    const extraDistance = Math.max(0, distance - baseDistanceKm);
-    const distanceCharge = this.round(extraDistance * perKmRate);
+    // 1. Distance charge: per-km pricing applies on the full trip distance
+    const distanceCharge = this.round(distance * perKmRate);
 
-    // 2. Time charge: per minute for total trip duration
-    const timeCharge = this.round(duration * perMinuteRate);
+    // 2. Time cost removed from pricing model
+    const timeCharge = 0;
 
-    // 3. Helper charge: ₹300 per helper
+    // 3. Helper charge: ₹200 per helper where helpers are available
     const helperCharge = this.round(number_of_helpers * helperChargePerPerson);
 
     // 4. Multi-stop charge: fee per extra drop-off
     const multiStopCharge = this.round(extra_stops * multiStopFee);
 
-    // 5. Subtotal before night surcharge
-    let subtotal = baseFare + distanceCharge + timeCharge + helperCharge + multiStopCharge;
+    // 5. Subtotal before demand adjustment
+    let subtotal = baseFare + distanceCharge + helperCharge + multiStopCharge;
 
-    // 6. Night surcharge (11PM - 6AM)
+    // 6. Demand adjustment (currently applied during night deliveries)
     const isNight = this.isNightTime();
-    const nightSurcharge = isNight ? this.round(subtotal * (nightSurchargePercent / 100)) : 0;
+    const demandAdjustmentPercent = isNight ? nightSurchargePercent : 0;
+    const demandAdjustment = isNight ? this.round(subtotal * (demandAdjustmentPercent / 100)) : 0;
 
     // 7. Estimated fare
-    let estimatedFare = subtotal + nightSurcharge;
+    let estimatedFare = subtotal + demandAdjustment;
 
-    // 8. Apply surge multiplier
+    // 8. Apply any configured surge multiplier
     const surgeMultiplier = Number(pricingRule.surge_multiplier);
     if (surgeMultiplier && surgeMultiplier > 1) {
       estimatedFare = this.round(estimatedFare * surgeMultiplier);
@@ -200,25 +198,29 @@ export class BookingService {
       is_night_booking: isNight,
       breakdown: {
         base_fare: baseFare,
-        base_distance_km: baseDistanceKm,
+        base_distance_km: Number(pricingRule.base_distance_km),
         distance_charge: distanceCharge,
         time_charge: timeCharge,
         helper_charge: helperCharge,
         multi_stop_charge: multiStopCharge,
-        night_surcharge: nightSurcharge,
+        demand_adjustment: demandAdjustment,
+        night_surcharge: demandAdjustment,
         waiting_charge: 0, // Calculated at trip completion
         toll_amount: 0, // Added at trip completion
         surge_multiplier: surgeMultiplier,
         subtotal: this.round(subtotal),
+        minimum_fare_applied: minimumFare ? estimatedFare === minimumFare : false,
         skido_commission: skidoCommission,
         driver_earnings: driverEarnings,
       },
       pricing_info: {
+        minimum_fare: minimumFare,
         free_waiting_minutes: Number(pricingRule.free_waiting_minutes),
         waiting_charge_per_minute: Number(pricingRule.waiting_charge_per_minute),
         helper_charge_per_person: helperChargePerPerson,
         helper_available: helperAvailable,
         multi_stop_fee: multiStopFee,
+        demand_adjustment_percent: demandAdjustmentPercent,
         night_surcharge_percent: nightSurchargePercent,
         commission_percent: commissionPercent,
       },
@@ -604,8 +606,8 @@ export class BookingService {
     const estimatedFare = Number(booking.estimated_fare);
     const finalFare = this.round(estimatedFare + waitingCharge + tollAmount);
 
-    // Calculate Skido commission and driver earnings
-    const commissionPercent = pricingRule ? Number(pricingRule.commission_percent) : 30;
+    // Calculate platform commission and driver earnings
+    const commissionPercent = pricingRule ? Number(pricingRule.commission_percent) : 25;
     const skidoCommission = this.round(finalFare * (commissionPercent / 100));
     const driverEarnings = this.round(finalFare - skidoCommission);
 
