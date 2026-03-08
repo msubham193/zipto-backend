@@ -146,6 +146,11 @@ export class BookingService {
     const multiStopFee = Number(pricingRule.multi_stop_fee);
     const nightSurchargePercent = Number(pricingRule.night_surcharge_percent);
     const commissionPercent = Number(pricingRule.commission_percent);
+    const helperAvailable = helperChargePerPerson > 0;
+
+    if (number_of_helpers > 0 && !helperAvailable) {
+      throw new BadRequestException(`Helpers are not available for vehicle type: ${vehicle_type}`);
+    }
 
     // 1. Distance charge: only for KMs beyond base distance
     const extraDistance = Math.max(0, distance - baseDistanceKm);
@@ -212,6 +217,7 @@ export class BookingService {
         free_waiting_minutes: Number(pricingRule.free_waiting_minutes),
         waiting_charge_per_minute: Number(pricingRule.waiting_charge_per_minute),
         helper_charge_per_person: helperChargePerPerson,
+        helper_available: helperAvailable,
         multi_stop_fee: multiStopFee,
         night_surcharge_percent: nightSurchargePercent,
         commission_percent: commissionPercent,
@@ -725,9 +731,15 @@ export class BookingService {
       },
     });
 
-    return rules.sort(
-      (left, right) => getVehicleTypeSortOrder(left.vehicle_type) - getVehicleTypeSortOrder(right.vehicle_type),
-    );
+    return rules
+      .sort(
+        (left, right) =>
+          getVehicleTypeSortOrder(left.vehicle_type) - getVehicleTypeSortOrder(right.vehicle_type),
+      )
+      .map((rule) => ({
+        ...rule,
+        helper_available: Number(rule.helper_charge_per_person) > 0,
+      }));
   }
 
   /**
