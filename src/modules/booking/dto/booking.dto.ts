@@ -49,6 +49,10 @@ export class EstimateFareDto {
   @IsEnum(VehicleType)
   vehicle_type: VehicleType;
 
+  /** @deprecated labour/helper option has been removed */
+  @IsOptional()
+  number_of_helpers?: number;
+
   @ApiPropertyOptional({ example: 0, description: 'Number of extra drop-off stops' })
   @IsOptional()
   @IsInt()
@@ -114,6 +118,9 @@ export class CreateBookingDto {
   @IsOptional()
   scheduled_time?: string;
 
+  /** @deprecated labour/helper option has been removed */
+  @IsOptional()
+  number_of_helpers?: number;
 }
 
 export class CancelBookingDto {
