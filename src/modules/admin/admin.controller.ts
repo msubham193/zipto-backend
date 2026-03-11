@@ -6,7 +6,7 @@ import { Roles } from '../../common/decorators/roles.decorator';
 import { GetBookingsDto } from './dto/get-bookings.dto';
 import { PaginationDto } from './dto/pagination.dto';
 import { ReportsQueryDto } from './dto/reports-query.dto';
-import { PricingRule } from '../booking/entities/pricing-rule.entity';
+import { CreatePricingRuleDto, UpdatePricingRuleDto } from './dto/pricing-rule.dto';
 
 @ApiTags('Admin')
 @Controller('admin')
@@ -172,14 +172,14 @@ export class AdminController {
   @Post('pricing-rules')
   @ApiOperation({ summary: 'Create a pricing rule' })
   @ApiResponse({ status: 201, description: 'Pricing rule created' })
-  async createPricingRule(@Body() data: Partial<PricingRule>) {
+  async createPricingRule(@Body() data: CreatePricingRuleDto) {
     return this.bookingService.createPricingRule(data);
   }
 
   @Put('pricing-rules/:id')
   @ApiOperation({ summary: 'Update a pricing rule' })
   @ApiResponse({ status: 200, description: 'Pricing rule updated' })
-  async updatePricingRule(@Param('id') id: string, @Body() data: Partial<PricingRule>) {
+  async updatePricingRule(@Param('id') id: string, @Body() data: UpdatePricingRuleDto) {
     return this.bookingService.updatePricingRule(id, data);
   }
 

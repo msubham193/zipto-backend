@@ -150,8 +150,10 @@ export class BookingService {
       throw new BadRequestException(`Helpers are not available for vehicle type: ${vehicle_type}`);
     }
 
-    // 1. Distance charge: per-km pricing applies on the full trip distance
-    const distanceCharge = this.round(distance * perKmRate);
+    // 1. Distance charge: Fare = BaseFare + (Distance - BaseKM) × PerKM
+    const baseDistanceKm = Number(pricingRule.base_distance_km);
+    const chargeableDistance = Math.max(0, distance - baseDistanceKm);
+    const distanceCharge = this.round(chargeableDistance * perKmRate);
 
     // 2. Time cost removed from pricing model
     const timeCharge = 0;
