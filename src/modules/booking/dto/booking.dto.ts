@@ -49,15 +49,6 @@ export class EstimateFareDto {
   @IsEnum(VehicleType)
   vehicle_type: VehicleType;
 
-  @ApiPropertyOptional({
-    example: 0,
-    description: 'Number of loading/unloading helpers (₹200 each)',
-  })
-  @IsOptional()
-  @IsInt()
-  @Min(0)
-  number_of_helpers?: number;
-
   @ApiPropertyOptional({ example: 0, description: 'Number of extra drop-off stops' })
   @IsOptional()
   @IsInt()
@@ -123,14 +114,6 @@ export class CreateBookingDto {
   @IsOptional()
   scheduled_time?: string;
 
-  @ApiPropertyOptional({
-    example: 0,
-    description: 'Number of loading/unloading helpers (₹200 each)',
-  })
-  @IsOptional()
-  @IsInt()
-  @Min(0)
-  number_of_helpers?: number;
 }
 
 export class CancelBookingDto {

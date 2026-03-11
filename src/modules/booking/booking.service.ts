@@ -9,7 +9,6 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
 import { Booking, BookingStatus, BookingType } from './entities/booking.entity';
 import { PricingRule } from './entities/pricing-rule.entity';
-import { VehicleType } from '../vehicle/entities/vehicle.entity';
 import {
   EstimateFareDto,
   CreateBookingDto,
@@ -112,7 +111,6 @@ export class BookingService {
       pickup_location,
       drop_location,
       vehicle_type,
-      number_of_helpers = 0,
       extra_stops = 0,
     } = estimateFareDto;
 
@@ -140,15 +138,9 @@ export class BookingService {
     // --- Calculate fare breakdown ---
     const baseFare = Number(pricingRule.base_fare);
     const perKmRate = Number(pricingRule.per_km_rate);
-    const helperChargePerPerson = Number(pricingRule.helper_charge_per_person);
     const multiStopFee = Number(pricingRule.multi_stop_fee);
     const nightSurchargePercent = Number(pricingRule.night_surcharge_percent);
     const commissionPercent = Number(pricingRule.commission_percent);
-    const helperAvailable = helperChargePerPerson > 0;
-
-    if (number_of_helpers > 0 && !helperAvailable) {
-      throw new BadRequestException(`Helpers are not available for vehicle type: ${vehicle_type}`);
-    }
 
     // 1. Distance charge: Fare = BaseFare + (Distance - BaseKM) × PerKM
     const baseDistanceKm = Number(pricingRule.base_distance_km);
@@ -158,14 +150,11 @@ export class BookingService {
     // 2. Time cost removed from pricing model
     const timeCharge = 0;
 
-    // 3. Helper charge: ₹200 per helper where helpers are available
-    const helperCharge = this.round(number_of_helpers * helperChargePerPerson);
-
-    // 4. Multi-stop charge: fee per extra drop-off
+    // 3. Multi-stop charge: fee per extra drop-off
     const multiStopCharge = this.round(extra_stops * multiStopFee);
 
-    // 5. Subtotal before demand adjustment
-    let subtotal = baseFare + distanceCharge + helperCharge + multiStopCharge;
+    // 4. Subtotal before demand adjustment
+    let subtotal = baseFare + distanceCharge + multiStopCharge;
 
     // 6. Demand adjustment (currently applied during night deliveries)
     const isNight = this.isNightTime();
@@ -203,7 +192,6 @@ export class BookingService {
         base_distance_km: Number(pricingRule.base_distance_km),
         distance_charge: distanceCharge,
         time_charge: timeCharge,
-        helper_charge: helperCharge,
         multi_stop_charge: multiStopCharge,
         demand_adjustment: demandAdjustment,
         night_surcharge: demandAdjustment,
@@ -219,8 +207,6 @@ export class BookingService {
         minimum_fare: minimumFare,
         free_waiting_minutes: Number(pricingRule.free_waiting_minutes),
         waiting_charge_per_minute: Number(pricingRule.waiting_charge_per_minute),
-        helper_charge_per_person: helperChargePerPerson,
-        helper_available: helperAvailable,
         multi_stop_fee: multiStopFee,
         demand_adjustment_percent: demandAdjustmentPercent,
         night_surcharge_percent: nightSurchargePercent,
@@ -243,7 +229,6 @@ export class BookingService {
       vehicle_type,
       booking_type,
       scheduled_time,
-      number_of_helpers = 0,
       extra_drop_locations = [],
     } = createBookingDto;
 
@@ -259,12 +244,10 @@ export class BookingService {
       }
     }
 
-    // Get fare estimation with helpers and extra stops
     const fareEstimate = await this.estimateFare({
       pickup_location,
       drop_location,
       vehicle_type,
-      number_of_helpers,
       extra_stops: extra_drop_locations.length,
     });
 
@@ -282,7 +265,7 @@ export class BookingService {
       duration: fareEstimate.duration,
       estimated_fare: fareEstimate.estimated_fare,
       fare_breakdown: fareEstimate.breakdown,
-      number_of_helpers,
+      number_of_helpers: 0,
       extra_stops_count: extra_drop_locations.length,
       is_night_booking: fareEstimate.is_night_booking,
       status: BookingStatus.PENDING,
@@ -735,15 +718,10 @@ export class BookingService {
       },
     });
 
-    return rules
-      .sort(
-        (left, right) =>
-          getVehicleTypeSortOrder(left.vehicle_type) - getVehicleTypeSortOrder(right.vehicle_type),
-      )
-      .map((rule) => ({
-        ...rule,
-        helper_available: Number(rule.helper_charge_per_person) > 0,
-      }));
+    return rules.sort(
+      (left, right) =>
+        getVehicleTypeSortOrder(left.vehicle_type) - getVehicleTypeSortOrder(right.vehicle_type),
+    );
   }
 
   /**

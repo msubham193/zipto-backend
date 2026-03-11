@@ -81,12 +81,6 @@ export class CreatePricingRuleDto {
   @Min(0)
   multi_stop_fee?: number;
 
-  @ApiPropertyOptional({ example: 0 })
-  @IsOptional()
-  @IsNumber()
-  @Min(0)
-  helper_charge_per_person?: number;
-
   @ApiPropertyOptional({ example: 25 })
   @IsOptional()
   @IsNumber()
@@ -181,12 +175,6 @@ export class UpdatePricingRuleDto {
   @IsNumber()
   @Min(0)
   multi_stop_fee?: number;
-
-  @ApiPropertyOptional({ example: 0 })
-  @IsOptional()
-  @IsNumber()
-  @Min(0)
-  helper_charge_per_person?: number;
 
   @ApiPropertyOptional({ example: 25 })
   @IsOptional()
