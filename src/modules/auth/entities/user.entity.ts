@@ -47,6 +47,9 @@ export class User {
   @Column({ type: 'boolean', default: true })
   is_active: boolean;
 
+  @Column({ type: 'boolean', default: false })
+  is_profile_complete: boolean;
+
   @Column({ type: 'integer', default: 0 })
   coins: number;
 

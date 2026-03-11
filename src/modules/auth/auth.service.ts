@@ -93,8 +93,11 @@ export class AuthService {
       where: { phone: formattedPhone },
     });
 
+    let isNewUser = false;
+
     // Create new user if doesn't exist (registration)
     if (!user) {
+      isNewUser = true;
       // Auto-generate username if not provided (user can edit later)
       const userName = generateRandomUsername();
 
@@ -103,6 +106,7 @@ export class AuthService {
         phone: formattedPhone,
         name: userName,
         role: assignedRole,
+        is_profile_complete: false,
         // Drivers are NOT auto-verified — admin will verify after onboarding
         is_verified: assignedRole !== UserRole.DRIVER,
       });
@@ -126,6 +130,7 @@ export class AuthService {
 
     return {
       user: this.sanitizeUser(user),
+      is_new_user: isNewUser,
       ...tokens,
     };
   }

@@ -58,7 +58,7 @@ export class DriverService {
     const { name, email } = updateDriverDto;
     if (name || email) {
       await this.userRepository.update(userId, {
-        ...(name && { name }),
+        ...(name && { name, is_profile_complete: true }),
         ...(email && { email }),
       });
     }

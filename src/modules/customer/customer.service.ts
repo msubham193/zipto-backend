@@ -55,7 +55,7 @@ export class CustomerService {
     const { name, email, language_preference } = updateCustomerDto;
     if (name || email || language_preference) {
       await this.userRepository.update(userId, {
-        ...(name && { name }),
+        ...(name && { name, is_profile_complete: true }),
         ...(email && { email }),
         ...(language_preference && { language_preference }),
       });
