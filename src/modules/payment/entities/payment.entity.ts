@@ -33,7 +33,7 @@ export class Payment {
   @Index()
   booking_id: string;
 
-  @ManyToOne(() => Booking)
+  @ManyToOne(() => Booking, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'booking_id' })
   booking: Booking;
 

@@ -43,7 +43,7 @@ export class Booking {
   @Index()
   customer_id: string;
 
-  @ManyToOne(() => User)
+  @ManyToOne(() => User, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'customer_id' })
   customer: User;
 
@@ -51,7 +51,7 @@ export class Booking {
   @Index()
   driver_id: string;
 
-  @ManyToOne(() => User)
+  @ManyToOne(() => User, { onDelete: 'SET NULL' })
   @JoinColumn({ name: 'driver_id' })
   driver: User;
 

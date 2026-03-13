@@ -19,7 +19,7 @@ export class Rating {
   @Index()
   booking_id: string;
 
-  @ManyToOne(() => Booking)
+  @ManyToOne(() => Booking, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'booking_id' })
   booking: Booking;
 
@@ -27,7 +27,7 @@ export class Rating {
   @Index()
   customer_id: string;
 
-  @ManyToOne(() => User)
+  @ManyToOne(() => User, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'customer_id' })
   customer: User;
 
@@ -35,7 +35,7 @@ export class Rating {
   @Index()
   driver_id: string;
 
-  @ManyToOne(() => User)
+  @ManyToOne(() => User, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'driver_id' })
   driver: User;
 

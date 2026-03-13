@@ -32,7 +32,7 @@ export class Vehicle {
   @Index()
   driver_id: string;
 
-  @ManyToOne(() => DriverProfile)
+  @ManyToOne(() => DriverProfile, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'driver_id' })
   driver: DriverProfile;
 
