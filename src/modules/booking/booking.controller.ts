@@ -133,12 +133,8 @@ export class BookingController {
   @Roles('driver')
   @ApiOperation({ summary: 'Reject booking request' })
   @ApiResponse({ status: 200, description: 'Booking rejected' })
-  async rejectBooking(
-    @Param('id') id: string,
-    @GetUser() user: User,
-    @Body('reason') reason: string,
-  ) {
-    return this.bookingService.rejectBooking(id, user.id, reason);
+  async rejectBooking(@Param('id') id: string, @GetUser() user: User) {
+    return this.bookingService.rejectBooking(id, user.id);
   }
 
   @Put(':id/start')

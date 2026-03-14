@@ -10,7 +10,7 @@ import {
   Index,
 } from 'typeorm';
 import { User } from '../../auth/entities/user.entity';
-import { Vehicle } from '../../vehicle/entities/vehicle.entity';
+import { Vehicle, VehicleType } from '../../vehicle/entities/vehicle.entity';
 import { Payment } from '../../payment/entities/payment.entity';
 
 export enum ServiceCategory {
@@ -61,6 +61,9 @@ export class Booking {
   @ManyToOne(() => Vehicle)
   @JoinColumn({ name: 'vehicle_id' })
   vehicle: Vehicle;
+
+  @Column({ type: 'enum', enum: VehicleType, nullable: true })
+  vehicle_type: VehicleType; // Required vehicle type chosen by customer
 
   @Column({ type: 'varchar', length: 100, default: '' })
   name: string;

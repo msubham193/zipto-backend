@@ -259,6 +259,7 @@ export class BookingService {
       city,
       service_category,
       booking_type,
+      vehicle_type,
       pickup_address: pickup_location.address,
       drop_address: drop_location.address,
       distance: fareEstimate.distance,
@@ -295,9 +296,17 @@ export class BookingService {
 
     // If immediate booking, start searching for drivers
     if (createdBooking && booking_type === BookingType.INSTANT) {
+      // Optimistically notify customer that search has started
+      this.bookingGateway.notifyUser(userId, 'searching_for_driver', {
+        bookingId: createdBooking.id,
+        message: 'Finding the nearest driver for you...',
+      });
+
       await this.bookingQueue.add('search_driver', {
         bookingId: createdBooking.id,
+        vehicleType: vehicle_type,
         excludedDriverIds: [],
+        attempt: 1,
       });
     }
 
@@ -307,15 +316,36 @@ export class BookingService {
   /**
    * Process Driver Search (Job Processor)
    */
-  async processDriverSearch(bookingId: string, excludedDriverIds: string[]) {
+  async processDriverSearch(
+    bookingId: string,
+    excludedDriverIds: string[],
+    vehicleType?: string,
+    attempt: number = 1,
+  ) {
+    const MAX_ATTEMPTS = 10;
+
     const booking = await this.bookingRepository.findOne({ where: { id: bookingId } });
     if (!booking || booking.status !== BookingStatus.PENDING) return;
 
+    // Auto-cancel after max attempts
+    if (attempt > MAX_ATTEMPTS) {
+      booking.status = BookingStatus.CANCELLED;
+      booking.cancellation_reason = 'No drivers available in your area';
+      await this.bookingRepository.save(booking);
+      this.bookingGateway.notifyUser(booking.customer_id, 'no_drivers_found', {
+        bookingId,
+        message: 'No drivers available in your area. Booking cancelled.',
+      });
+      return;
+    }
+
+    const resolvedVehicleType = vehicleType || booking.vehicle_type;
     const pickup = booking.pickup_location as any;
     const nearbyDrivers = await this.findNearbyDrivers(
       pickup.coordinates[1],
       pickup.coordinates[0],
       5,
+      resolvedVehicleType,
     );
 
     const eligibleDrivers = nearbyDrivers.filter(
@@ -323,14 +353,27 @@ export class BookingService {
     );
 
     if (eligibleDrivers.length === 0) {
-      this.bookingGateway.notifyUser(booking.customer_id, 'no_drivers_found', { bookingId });
+      booking.status = BookingStatus.CANCELLED;
+      booking.cancellation_reason = 'No drivers available in your area';
+      await this.bookingRepository.save(booking);
+      this.bookingGateway.notifyUser(booking.customer_id, 'no_drivers_found', {
+        bookingId,
+        message: 'No drivers available in your area. Booking cancelled.',
+      });
       return;
     }
 
     const nearestDriver = eligibleDrivers[0];
+    const newExcluded = [...excludedDriverIds, nearestDriver.user_id];
 
-    // Set offer in Redis (TTL 7 seconds + buffer)
-    await this.cacheManager.set(`booking:${bookingId}:offer`, nearestDriver.user_id, 10000);
+    // Cache offer + excluded list so reject can pick it up (TTL 15s)
+    await this.cacheManager.set(`booking:${bookingId}:offer`, nearestDriver.user_id, 15000);
+    await this.cacheManager.set(`booking:${bookingId}:excluded`, newExcluded, 15000);
+    await this.cacheManager.set(
+      `booking:${bookingId}:vehicle_type`,
+      resolvedVehicleType,
+      15000,
+    );
 
     // Send offer to driver
     this.bookingGateway.emitBookingOffer(nearestDriver.user_id, {
@@ -339,25 +382,34 @@ export class BookingService {
       drop: booking.drop_address,
       fare: booking.estimated_fare,
       distance: booking.distance,
-      timeLeft: 7,
+      vehicleType: resolvedVehicleType,
+      timeLeft: 30,
     });
 
-    // Schedule timeout job
+    // Schedule timeout job (30s window)
     await this.bookingQueue.add(
       'offer_timeout',
       {
         bookingId,
         driverId: nearestDriver.user_id,
-        excludedDriverIds: [...excludedDriverIds, nearestDriver.user_id],
+        excludedDriverIds: newExcluded,
+        vehicleType: resolvedVehicleType,
+        attempt: attempt + 1,
       },
-      { delay: 7000 },
+      { delay: 30000 },
     );
   }
 
   /**
    * Handle Offer Timeout (Job Processor)
    */
-  async handleOfferTimeout(bookingId: string, driverId: string, excludedDriverIds: string[]) {
+  async handleOfferTimeout(
+    bookingId: string,
+    driverId: string,
+    excludedDriverIds: string[],
+    vehicleType?: string,
+    attempt: number = 1,
+  ) {
     const booking = await this.bookingRepository.findOne({ where: { id: bookingId } });
     if (!booking || booking.status !== BookingStatus.PENDING) return;
 
@@ -365,35 +417,59 @@ export class BookingService {
 
     if (currentOfferDriver === driverId) {
       await this.cacheManager.del(`booking:${bookingId}:offer`);
+      await this.cacheManager.del(`booking:${bookingId}:excluded`);
+      await this.cacheManager.del(`booking:${bookingId}:vehicle_type`);
+
+      // Notify driver that offer expired
+      this.bookingGateway.notifyUser(driverId, 'offer_expired', { bookingId });
+
       await this.bookingQueue.add('search_driver', {
         bookingId,
         excludedDriverIds,
+        vehicleType,
+        attempt,
       });
     }
   }
 
   /**
-   * Helper to find nearby drivers
+   * Helper to find nearby drivers filtered by vehicle type
    */
-  private async findNearbyDrivers(lat: number, lng: number, radiusKm: number) {
+  private async findNearbyDrivers(
+    lat: number,
+    lng: number,
+    radiusKm: number,
+    vehicleType?: string,
+  ) {
+    const params: any[] = [lng, lat, radiusKm * 1000];
+    let vehicleFilter = '';
+
+    if (vehicleType) {
+      params.push(vehicleType);
+      vehicleFilter = `AND v.vehicle_type = $4`;
+    }
+
     return this.bookingRepository.manager.query(
       `
-      SELECT user_id, 
+      SELECT dp.user_id,
              ST_Distance(
-               location, 
+               dp.current_location,
                ST_SetSRID(ST_MakePoint($1, $2), 4326)::geography
-             ) as distance
-      FROM driver_profiles
-      WHERE availability_status = 'online'
+             ) AS distance
+      FROM driver_profiles dp
+      JOIN vehicles v ON v.id = dp.vehicle_id
+        AND v.verification_status = 'approved'
+        ${vehicleFilter}
+      WHERE dp.availability_status = 'online'
       AND ST_DWithin(
-        location,
+        dp.current_location,
         ST_SetSRID(ST_MakePoint($1, $2), 4326)::geography,
         $3
       )
       ORDER BY distance ASC
       LIMIT 10
       `,
-      [lng, lat, radiusKm * 1000],
+      params,
     );
   }
 
@@ -511,12 +587,36 @@ export class BookingService {
   /**
    * Reject booking (driver)
    */
-  async rejectBooking(bookingId: string, driverId: string, reason: string) {
-    const offeredDriverId = await this.cacheManager.get(`booking:${bookingId}:offer`);
-
-    if (offeredDriverId === driverId) {
-      await this.cacheManager.del(`booking:${bookingId}:offer`);
+  async rejectBooking(bookingId: string, driverId: string) {
+    const booking = await this.bookingRepository.findOne({ where: { id: bookingId } });
+    if (!booking || booking.status !== BookingStatus.PENDING) {
+      return { message: 'Booking no longer available' };
     }
+
+    const offeredDriverId = await this.cacheManager.get(`booking:${bookingId}:offer`);
+    if (offeredDriverId !== driverId) {
+      return { message: 'Offer not assigned to you' };
+    }
+
+    // Read cached state
+    const excludedDriverIds =
+      (await this.cacheManager.get<string[]>(`booking:${bookingId}:excluded`)) || [driverId];
+    const vehicleType =
+      (await this.cacheManager.get<string>(`booking:${bookingId}:vehicle_type`)) ||
+      booking.vehicle_type;
+
+    // Clear offer cache
+    await this.cacheManager.del(`booking:${bookingId}:offer`);
+    await this.cacheManager.del(`booking:${bookingId}:excluded`);
+    await this.cacheManager.del(`booking:${bookingId}:vehicle_type`);
+
+    // Cancel any pending timeout job by moving immediately to next driver
+    await this.bookingQueue.add('search_driver', {
+      bookingId,
+      excludedDriverIds,
+      vehicleType,
+      attempt: excludedDriverIds.length + 1,
+    });
 
     return { message: 'Booking rejected' };
   }
