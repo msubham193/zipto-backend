@@ -1,7 +1,6 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import { CACHE_MANAGER } from '@nestjs/cache-manager';
-import { caching } from 'cache-manager';
+import { CacheModule } from '@nestjs/cache-manager';
 import { NotificationController } from './notification.controller';
 import { NotificationService } from './notification.service';
 import { AuthModule } from '../auth/auth.module';
@@ -14,15 +13,10 @@ import { DriverProfile } from '../driver/entities/driver-profile.entity';
     TypeOrmModule.forFeature([Booking, DriverProfile]),
     AuthModule,
     BookingModule,
+    CacheModule.register({ ttl: 0, max: 500 }),
   ],
   controllers: [NotificationController],
-  providers: [
-    NotificationService,
-    {
-      provide: CACHE_MANAGER,
-      useFactory: async () => caching('memory', { max: 500, ttl: 0 }),
-    },
-  ],
+  providers: [NotificationService],
   exports: [NotificationService],
 })
 export class NotificationModule {}
