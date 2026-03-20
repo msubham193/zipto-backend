@@ -7,6 +7,7 @@ import { Booking } from '../booking/entities/booking.entity';
 import { PricingRule } from '../booking/entities/pricing-rule.entity';
 import { Payment } from '../payment/entities/payment.entity';
 import { DriverProfile } from '../driver/entities/driver-profile.entity';
+import { WithdrawalRequest } from '../driver/entities/withdrawal-request.entity';
 import { Vehicle } from '../vehicle/entities/vehicle.entity';
 import { AuthModule } from '../auth/auth.module';
 import { BookingModule } from '../booking/booking.module';
@@ -14,7 +15,7 @@ import { NotificationModule } from '../notification/notification.module';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([User, Booking, PricingRule, Payment, DriverProfile, Vehicle]),
+    TypeOrmModule.forFeature([User, Booking, PricingRule, Payment, DriverProfile, Vehicle, WithdrawalRequest]),
     AuthModule,
     BookingModule,
     NotificationModule,

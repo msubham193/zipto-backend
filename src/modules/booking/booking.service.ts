@@ -625,7 +625,7 @@ export class BookingService {
    * Get booking by ID — includes driver profile stats (rating, total trips).
    * Also handles offer IDs (before driver accepts) by checking Redis.
    */
-  async getById(bookingId: string, userId: string) {
+  async getById(bookingId: string, userId: string): Promise<any> {
     // Check if this is an offer still in Redis (searching state)
     const offerData = await this.cacheManager.get<any>(`offer:${bookingId}`);
     if (offerData) {

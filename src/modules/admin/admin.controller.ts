@@ -217,4 +217,29 @@ export class AdminController {
     await this.notificationService.clearAdminNotifications();
     return { success: true };
   }
+
+  // ─── Withdrawal Management ────────────────────────────────────────────────
+
+  @Get('withdrawals')
+  @ApiOperation({ summary: 'Get all withdrawal requests' })
+  @ApiResponse({ status: 200, description: 'Withdrawal requests retrieved' })
+  async getWithdrawals(@Query('status') status?: string) {
+    return this.adminService.getWithdrawals(status);
+  }
+
+  @Put('withdrawals/:id/approve')
+  @ApiOperation({ summary: 'Approve a withdrawal request' })
+  @ApiResponse({ status: 200, description: 'Withdrawal approved' })
+  @ApiResponse({ status: 404, description: 'Withdrawal not found' })
+  async approveWithdrawal(@Param('id') id: string, @Body('remarks') remarks?: string) {
+    return this.adminService.approveWithdrawal(id, remarks);
+  }
+
+  @Put('withdrawals/:id/reject')
+  @ApiOperation({ summary: 'Reject a withdrawal request (refunds wallet)' })
+  @ApiResponse({ status: 200, description: 'Withdrawal rejected, wallet refunded' })
+  @ApiResponse({ status: 404, description: 'Withdrawal not found' })
+  async rejectWithdrawal(@Param('id') id: string, @Body('remarks') remarks?: string) {
+    return this.adminService.rejectWithdrawal(id, remarks);
+  }
 }

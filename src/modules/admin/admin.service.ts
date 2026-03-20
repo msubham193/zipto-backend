@@ -5,6 +5,7 @@ import { User, UserRole } from '../auth/entities/user.entity';
 import { Booking, BookingStatus } from '../booking/entities/booking.entity';
 import { Payment, PaymentStatus } from '../payment/entities/payment.entity';
 import { DriverProfile, VerificationStatus } from '../driver/entities/driver-profile.entity';
+import { WithdrawalRequest, WithdrawalStatus } from '../driver/entities/withdrawal-request.entity';
 import { Vehicle } from '../vehicle/entities/vehicle.entity';
 import { NotificationService } from '../notification/notification.service';
 
@@ -30,6 +31,8 @@ export class AdminService {
     private vehicleRepository: Repository<Vehicle>,
     @InjectRepository(PricingRule)
     private pricingRuleRepository: Repository<PricingRule>,
+    @InjectRepository(WithdrawalRequest)
+    private withdrawalRepository: Repository<WithdrawalRequest>,
     private notificationService: NotificationService,
   ) {}
 
@@ -789,5 +792,48 @@ export class AdminService {
       .execute();
 
     return { message: 'Pricing rules seeded successfully', count: results.length, data: results };
+  }
+
+  // ─── Withdrawal Management ────────────────────────────────────────────────
+
+  async getWithdrawals(status?: string) {
+    const where: any = {};
+    if (status) where.status = status;
+
+    return this.withdrawalRepository.find({
+      where,
+      relations: ['driver_profile', 'driver_profile.user', 'bank_account'],
+      order: { created_at: 'DESC' },
+    });
+  }
+
+  async approveWithdrawal(withdrawalId: string, remarks?: string) {
+    const withdrawal = await this.withdrawalRepository.findOne({
+      where: { id: withdrawalId },
+    });
+    if (!withdrawal) throw new NotFoundException('Withdrawal request not found');
+
+    withdrawal.status = WithdrawalStatus.COMPLETED;
+    if (remarks) withdrawal.remarks = remarks;
+    return this.withdrawalRepository.save(withdrawal);
+  }
+
+  async rejectWithdrawal(withdrawalId: string, remarks?: string) {
+    const withdrawal = await this.withdrawalRepository.findOne({
+      where: { id: withdrawalId },
+      relations: ['driver_profile'],
+    });
+    if (!withdrawal) throw new NotFoundException('Withdrawal request not found');
+
+    // Refund the amount back to driver wallet
+    await this.driverProfileRepository.increment(
+      { id: withdrawal.driver_profile_id },
+      'wallet_balance',
+      Number(withdrawal.amount),
+    );
+
+    withdrawal.status = WithdrawalStatus.REJECTED;
+    if (remarks) withdrawal.remarks = remarks;
+    return this.withdrawalRepository.save(withdrawal);
   }
 }
