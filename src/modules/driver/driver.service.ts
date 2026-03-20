@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import {
@@ -6,6 +6,8 @@ import {
   AvailabilityStatus,
   VerificationStatus,
 } from './entities/driver-profile.entity';
+import { BankAccount } from './entities/bank-account.entity';
+import { WithdrawalRequest, WithdrawalStatus } from './entities/withdrawal-request.entity';
 import { Vehicle, VehicleType } from '../vehicle/entities/vehicle.entity';
 import { User } from '../auth/entities/user.entity';
 import { Booking, BookingStatus } from '../booking/entities/booking.entity';
@@ -15,8 +17,10 @@ import {
   UpdateLocationDto,
   OnboardDriverDto,
 } from './dto/driver.dto';
+import { CreateBankAccountDto, UpdateBankAccountDto } from './dto/bank-account.dto';
 import { getPaginationMeta } from '../../common/utils/helpers.util';
 import { S3Service } from '../../services/s3.service';
+import { NotificationService } from '../notification/notification.service';
 
 @Injectable()
 export class DriverService {
@@ -29,11 +33,16 @@ export class DriverService {
     private vehicleRepository: Repository<Vehicle>,
     @InjectRepository(Booking)
     private bookingRepository: Repository<Booking>,
+    @InjectRepository(BankAccount)
+    private bankAccountRepository: Repository<BankAccount>,
+    @InjectRepository(WithdrawalRequest)
+    private withdrawalRepository: Repository<WithdrawalRequest>,
     private readonly s3Service: S3Service,
+    private readonly notificationService: NotificationService,
   ) {}
 
   /**
-   * Get driver profile
+   * Get driver profile (flattened — name/phone/email surfaced at top level)
    */
   async getProfile(userId: string) {
     const profile = await this.driverProfileRepository.findOne({
@@ -45,7 +54,13 @@ export class DriverService {
       throw new NotFoundException('Driver profile not found');
     }
 
-    return profile;
+    // Surface user-level fields so frontend can read profile.name directly
+    return {
+      ...profile,
+      name: profile.user?.name ?? null,
+      phone: profile.user?.phone ?? null,
+      email: profile.user?.email ?? null,
+    };
   }
 
   /**
@@ -159,12 +174,40 @@ export class DriverService {
    * Get trip history with pagination
    */
   async getTripHistory(userId: string, page: number = 1, limit: number = 10, status?: string) {
-    const driverProfile = await this.getProfile(userId);
+    const where: any = { driver_id: userId };
+    if (status) {
+      where.status = status;
+    }
 
-    // TODO: This will be implemented when Booking module is created
-    // For now, return empty array with pagination
-    const trips: any[] = [];
-    const total = 0;
+    const [bookings, total] = await this.bookingRepository.findAndCount({
+      where,
+      relations: ['customer', 'payments'],
+      order: { created_at: 'DESC' },
+      skip: (page - 1) * limit,
+      take: limit,
+    });
+
+    const trips = bookings.map(b => ({
+      id: b.id,
+      status: b.status,
+      pickup_location: b.pickup_address,
+      dropoff_location: b.drop_address,
+      amount: b.final_fare || b.estimated_fare,
+      distance: b.distance,
+      vehicle_type: b.vehicle_type,
+      service_category: b.service_category,
+      created_at: b.created_at,
+      completion_time: b.completion_time,
+      customer_name: b.customer?.name || null,
+      customer_phone: b.customer?.phone || null,
+      payment_status: b.payments?.some(p => p.payment_status === 'completed')
+        ? 'paid'
+        : b.status === BookingStatus.COMPLETED ? 'paid' : 'unpaid',
+      payment_method: b.payments?.find(p => p.payment_status === 'completed')?.payment_method
+        || (b.status === BookingStatus.COMPLETED ? 'cash' : null),
+      driver_earnings: b.driver_earnings,
+      cancellation_reason: b.cancellation_reason,
+    }));
 
     return {
       trips,
@@ -191,7 +234,17 @@ export class DriverService {
       availability_status: AvailabilityStatus.OFFLINE,
     });
 
-    return this.driverProfileRepository.save(profile);
+    const saved = await this.driverProfileRepository.save(profile);
+
+    // Notify admin about new driver registration
+    await this.notificationService.pushAdmin(
+      'driver_registered',
+      'New Driver Registered',
+      `A new driver has registered and created their profile. Awaiting KYC submission.`,
+      { driverUserId: userId },
+    );
+
+    return saved;
   }
 
   /**
@@ -334,7 +387,457 @@ export class DriverService {
       }
     }
 
+    // Notify admin about KYC submission
+    const driverName = onboardDriverDto.name ?? `Driver #${userId.slice(-6).toUpperCase()}`;
+    await this.notificationService.pushAdmin(
+      'kyc_submitted',
+      'KYC Documents Submitted',
+      `${driverName} has submitted KYC documents and is awaiting verification.`,
+      { driverUserId: userId },
+    );
+
     return { message: 'Driver onboarded successfully', profile };
+  }
+
+  /**
+   * Get driver attendance calendar with per-day earnings & hours
+   */
+  async getCalendar(
+    userId: string,
+    period: 'month' | 'week',
+    year: number,
+    month: number,
+    weekStart?: string,
+  ) {
+    // Resolve date range
+    let from: Date;
+    let to: Date;
+
+    if (period === 'week') {
+      if (weekStart) {
+        from = new Date(weekStart);
+        from.setHours(0, 0, 0, 0);
+      } else {
+        // Default to the Monday of the current week
+        const today = new Date();
+        const dow = today.getDay(); // 0=Sun
+        const diff = dow === 0 ? -6 : 1 - dow; // shift to Monday
+        from = new Date(today);
+        from.setDate(today.getDate() + diff);
+        from.setHours(0, 0, 0, 0);
+      }
+      to = new Date(from);
+      to.setDate(from.getDate() + 6);
+      to.setHours(23, 59, 59, 999);
+    } else {
+      from = new Date(year, month - 1, 1, 0, 0, 0, 0);
+      to = new Date(year, month, 0, 23, 59, 59, 999); // last day of month
+    }
+
+    // Query all active bookings (non-cancelled) grouped by the day the driver
+    // accepted them. This covers: accepted, ongoing, and completed trips.
+    // For completed trips we also capture earnings + hours; for others we just
+    // know the driver was working that day.
+    const ACTIVE_STATUSES = [
+      BookingStatus.ACCEPTED,
+      BookingStatus.DRIVER_ASSIGNED,
+      BookingStatus.ONGOING,
+      BookingStatus.COMPLETED,
+    ];
+
+    const rows: Array<{
+      work_date: string | Date;
+      trips: string;
+      earnings: string;
+      first_trip: Date | null;
+      last_trip: Date | null;
+      hours_worked: string;
+    }> = await this.bookingRepository
+      .createQueryBuilder('b')
+      // Use acceptance_time as the "work day" anchor so online-but-no-completion
+      // days are still captured. Fall back to created_at for edge cases.
+      .select("DATE(COALESCE(b.acceptance_time, b.created_at))", 'work_date')
+      .addSelect(
+        `COUNT(CASE WHEN b.status = '${BookingStatus.COMPLETED}' THEN 1 END)`,
+        'trips',
+      )
+      .addSelect(
+        `COALESCE(SUM(CASE WHEN b.status = '${BookingStatus.COMPLETED}' THEN b.driver_earnings ELSE 0 END), 0)`,
+        'earnings',
+      )
+      .addSelect('MIN(b.acceptance_time)', 'first_trip')
+      .addSelect(
+        `MAX(COALESCE(b.completion_time, b.acceptance_time))`,
+        'last_trip',
+      )
+      .addSelect(
+        `EXTRACT(EPOCH FROM (MAX(COALESCE(b.completion_time, b.acceptance_time)) - MIN(b.acceptance_time))) / 3600`,
+        'hours_worked',
+      )
+      .where('b.driver_id = :userId', { userId })
+      .andWhere('b.status IN (:...statuses)', { statuses: ACTIVE_STATUSES })
+      .andWhere('COALESCE(b.acceptance_time, b.created_at) >= :from', { from })
+      .andWhere('COALESCE(b.acceptance_time, b.created_at) <= :to', { to })
+      .groupBy("DATE(COALESCE(b.acceptance_time, b.created_at))")
+      .orderBy("DATE(COALESCE(b.acceptance_time, b.created_at))", 'ASC')
+      .getRawMany();
+
+    // Build a lookup map: ISO date string → row
+    const dayMap = new Map<string, typeof rows[0]>();
+    for (const row of rows) {
+      const key =
+        row.work_date instanceof Date
+          ? row.work_date.toISOString().split('T')[0]
+          : String(row.work_date).split('T')[0];
+      dayMap.set(key, row);
+    }
+
+    // For today: if the driver is currently online and not already in the map,
+    // inject a "present with 0 trips" entry so going online alone counts.
+    const todayStr = new Date().toISOString().split('T')[0];
+    if (!dayMap.has(todayStr)) {
+      const profile = await this.driverProfileRepository.findOne({
+        where: { user_id: userId },
+        select: ['id', 'availability_status'],
+      });
+      if (profile?.availability_status === AvailabilityStatus.ONLINE) {
+        dayMap.set(todayStr, {
+          work_date: todayStr,
+          trips: '0',
+          earnings: '0',
+          first_trip: null,
+          last_trip: null,
+          hours_worked: '0',
+        });
+      }
+    }
+
+    // Generate one entry per calendar day in the range
+    const days: Array<{
+      date: string;
+      day_of_week: string;
+      is_present: boolean;
+      earnings: number;
+      trips: number;
+      hours_worked: number;
+      first_trip_at: string | null;
+      last_trip_at: string | null;
+    }> = [];
+
+    const cursor = new Date(from);
+    const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+    while (cursor <= to) {
+      const dateStr = cursor.toISOString().split('T')[0];
+      const row = dayMap.get(dateStr);
+
+      const hours = row
+        ? Math.max(0, parseFloat(row.hours_worked) || 0)
+        : 0;
+
+      const fmt = (d: Date | null) => {
+        if (!d) return null;
+        const dt = new Date(d);
+        return `${String(dt.getHours()).padStart(2, '0')}:${String(dt.getMinutes()).padStart(2, '0')}`;
+      };
+
+      days.push({
+        date: dateStr,
+        day_of_week: DAY_NAMES[cursor.getDay()],
+        is_present: !!row,
+        earnings: row ? parseFloat(row.earnings) : 0,
+        trips: row ? parseInt(row.trips, 10) : 0,
+        hours_worked: parseFloat(hours.toFixed(1)),
+        first_trip_at: row ? fmt(row.first_trip) : null,
+        last_trip_at: row ? fmt(row.last_trip) : null,
+      });
+
+      cursor.setDate(cursor.getDate() + 1);
+    }
+
+    const presentDays = days.filter(d => d.is_present);
+    const summary = {
+      days_present: presentDays.length,
+      total_days: days.length,
+      total_earnings: parseFloat(
+        presentDays.reduce((s, d) => s + d.earnings, 0).toFixed(2),
+      ),
+      total_trips: presentDays.reduce((s, d) => s + d.trips, 0),
+      total_hours: parseFloat(
+        presentDays.reduce((s, d) => s + d.hours_worked, 0).toFixed(1),
+      ),
+    };
+
+    return {
+      period,
+      year: from.getFullYear(),
+      month: from.getMonth() + 1,
+      week_start: period === 'week' ? from.toISOString().split('T')[0] : null,
+      week_end: period === 'week' ? to.toISOString().split('T')[0] : null,
+      summary,
+      days,
+    };
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Bank Account CRUD
+  // ─────────────────────────────────────────────────────────────────────────
+
+  private async getDriverProfileId(userId: string): Promise<string> {
+    const profile = await this.driverProfileRepository.findOne({
+      where: { user_id: userId },
+      select: ['id'],
+    });
+    if (!profile) throw new NotFoundException('Driver profile not found');
+    return profile.id;
+  }
+
+  async getBankAccounts(userId: string): Promise<BankAccount[]> {
+    const driverProfileId = await this.getDriverProfileId(userId);
+    return this.bankAccountRepository.find({
+      where: { driver_profile_id: driverProfileId },
+      order: { is_primary: 'DESC', created_at: 'ASC' },
+    });
+  }
+
+  async addBankAccount(userId: string, dto: CreateBankAccountDto): Promise<BankAccount> {
+    const driverProfileId = await this.getDriverProfileId(userId);
+
+    const existingCount = await this.bankAccountRepository.count({
+      where: { driver_profile_id: driverProfileId },
+    });
+
+    const account = this.bankAccountRepository.create({
+      ...dto,
+      ifsc_code: dto.ifsc_code.toUpperCase(),
+      driver_profile_id: driverProfileId,
+      is_primary: existingCount === 0, // first account is auto-primary
+    });
+
+    return this.bankAccountRepository.save(account);
+  }
+
+  async updateBankAccount(
+    userId: string,
+    bankAccountId: string,
+    dto: UpdateBankAccountDto,
+  ): Promise<BankAccount> {
+    const driverProfileId = await this.getDriverProfileId(userId);
+    const account = await this.bankAccountRepository.findOne({
+      where: { id: bankAccountId, driver_profile_id: driverProfileId },
+    });
+    if (!account) throw new NotFoundException('Bank account not found');
+
+    Object.assign(account, {
+      ...dto,
+      ...(dto.ifsc_code && { ifsc_code: dto.ifsc_code.toUpperCase() }),
+    });
+    return this.bankAccountRepository.save(account);
+  }
+
+  async deleteBankAccount(userId: string, bankAccountId: string): Promise<void> {
+    const driverProfileId = await this.getDriverProfileId(userId);
+    const account = await this.bankAccountRepository.findOne({
+      where: { id: bankAccountId, driver_profile_id: driverProfileId },
+    });
+    if (!account) throw new NotFoundException('Bank account not found');
+
+    await this.bankAccountRepository.remove(account);
+
+    // If the deleted account was primary, auto-promote the oldest remaining one
+    if (account.is_primary) {
+      const next = await this.bankAccountRepository.findOne({
+        where: { driver_profile_id: driverProfileId },
+        order: { created_at: 'ASC' },
+      });
+      if (next) {
+        next.is_primary = true;
+        await this.bankAccountRepository.save(next);
+      }
+    }
+  }
+
+  async setPrimaryBankAccount(userId: string, bankAccountId: string): Promise<BankAccount> {
+    const driverProfileId = await this.getDriverProfileId(userId);
+    const account = await this.bankAccountRepository.findOne({
+      where: { id: bankAccountId, driver_profile_id: driverProfileId },
+    });
+    if (!account) throw new NotFoundException('Bank account not found');
+
+    // Unset all primaries for this driver, then set the selected one
+    await this.bankAccountRepository.update(
+      { driver_profile_id: driverProfileId },
+      { is_primary: false },
+    );
+    account.is_primary = true;
+    return this.bankAccountRepository.save(account);
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Earnings
+  // ─────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Earnings dashboard for a given period (today | week | month).
+   * Returns totals + a simple fare breakdown + current wallet balance.
+   */
+  async getEarningsDashboard(userId: string, period: 'today' | 'week' | 'month') {
+    const now = new Date();
+    let from: Date;
+    let to: Date = new Date(now);
+    to.setHours(23, 59, 59, 999);
+
+    if (period === 'today') {
+      from = new Date(now);
+      from.setHours(0, 0, 0, 0);
+    } else if (period === 'week') {
+      const dow = now.getDay(); // 0=Sun
+      const diff = dow === 0 ? -6 : 1 - dow; // shift to Monday
+      from = new Date(now);
+      from.setDate(now.getDate() + diff);
+      from.setHours(0, 0, 0, 0);
+    } else {
+      from = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
+    }
+
+    const bookings = await this.bookingRepository.find({
+      where: {
+        driver_id: userId,
+        status: BookingStatus.COMPLETED,
+      },
+      select: ['id', 'driver_earnings', 'skido_commission', 'final_fare', 'fare_breakdown', 'completion_time'],
+    });
+
+    // Filter to the period in JS (simpler than parameterised date query for nullable completion_time)
+    const inPeriod = bookings.filter(b => {
+      const t = b.completion_time ? new Date(b.completion_time) : null;
+      return t && t >= from && t <= to;
+    });
+
+    let totalEarnings = 0;
+    let totalGrossFare = 0;
+    let totalPlatformFee = 0;
+    let totalBaseFare = 0;
+    let totalDistanceCharge = 0;
+    let totalOtherCharges = 0;
+
+    for (const b of inPeriod) {
+      const driverEarnings = Number(b.driver_earnings || 0);
+      const commission = Number(b.skido_commission || 0);
+      const gross = Number(b.final_fare || 0);
+      const fb = b.fare_breakdown as any;
+
+      totalEarnings += driverEarnings;
+      totalGrossFare += gross;
+      totalPlatformFee += commission;
+      totalBaseFare += Number(fb?.base_fare || 0);
+      totalDistanceCharge += Number(fb?.distance_charge || 0);
+    }
+
+    // "Other charges" = anything beyond base + distance that the driver still got
+    totalOtherCharges = Math.max(0, totalEarnings - totalBaseFare - totalDistanceCharge);
+
+    // Current wallet balance (accumulated, not period-specific)
+    const profile = await this.driverProfileRepository.findOne({
+      where: { user_id: userId },
+      select: ['id', 'wallet_balance'],
+    });
+
+    return {
+      period,
+      wallet_balance: Number(profile?.wallet_balance || 0),
+      total_earnings: parseFloat(totalEarnings.toFixed(2)),
+      trip_count: inPeriod.length,
+      breakdown: {
+        base_fare: parseFloat(totalBaseFare.toFixed(2)),
+        distance_charge: parseFloat(totalDistanceCharge.toFixed(2)),
+        other_charges: parseFloat(totalOtherCharges.toFixed(2)),
+        platform_fee: parseFloat(totalPlatformFee.toFixed(2)),
+        gross_fare: parseFloat(totalGrossFare.toFixed(2)),
+      },
+    };
+  }
+
+  /**
+   * Request a withdrawal from wallet balance.
+   * Deducts from wallet_balance and records the request.
+   */
+  async requestWithdrawal(
+    userId: string,
+    amount: number,
+    bankAccountId?: string,
+  ) {
+    const MIN_WITHDRAWAL = 100;
+
+    if (!amount || amount < MIN_WITHDRAWAL) {
+      throw new BadRequestException(`Minimum withdrawal amount is ₹${MIN_WITHDRAWAL}`);
+    }
+
+    const profile = await this.driverProfileRepository.findOne({
+      where: { user_id: userId },
+      select: ['id', 'wallet_balance'],
+    });
+    if (!profile) throw new NotFoundException('Driver profile not found');
+
+    const balance = Number(profile.wallet_balance || 0);
+    if (amount > balance) {
+      throw new BadRequestException(
+        `Insufficient balance. Available: ₹${balance.toFixed(2)}`,
+      );
+    }
+
+    // Validate bank account belongs to this driver (optional but safe)
+    if (bankAccountId) {
+      const account = await this.bankAccountRepository.findOne({
+        where: { id: bankAccountId, driver_profile_id: profile.id },
+      });
+      if (!account) throw new NotFoundException('Bank account not found');
+    } else {
+      // Auto-pick primary bank account
+      const primary = await this.bankAccountRepository.findOne({
+        where: { driver_profile_id: profile.id, is_primary: true },
+      });
+      bankAccountId = primary?.id ?? undefined;
+    }
+
+    // Deduct balance
+    await this.driverProfileRepository.update(profile.id, {
+      wallet_balance: balance - amount,
+    });
+
+    // Record withdrawal request
+    const request = this.withdrawalRepository.create({
+      driver_profile_id: profile.id,
+      amount,
+      ...(bankAccountId && { bank_account_id: bankAccountId }),
+      status: WithdrawalStatus.PENDING,
+    });
+    const saved = await this.withdrawalRepository.save(request) as WithdrawalRequest;
+
+    return {
+      success: true,
+      message: 'Withdrawal request submitted successfully',
+      withdrawal_id: saved.id,
+      amount: saved.amount,
+      remaining_balance: parseFloat((balance - amount).toFixed(2)),
+    };
+  }
+
+  /**
+   * Get withdrawal history for the driver
+   */
+  async getWithdrawalHistory(userId: string) {
+    const profile = await this.driverProfileRepository.findOne({
+      where: { user_id: userId },
+      select: ['id'],
+    });
+    if (!profile) throw new NotFoundException('Driver profile not found');
+
+    return this.withdrawalRepository.find({
+      where: { driver_profile_id: profile.id },
+      relations: ['bank_account'],
+      order: { created_at: 'DESC' },
+    });
   }
 
   /**

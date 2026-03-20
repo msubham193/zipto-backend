@@ -1,4 +1,4 @@
-import { Controller, Post, Body, Get, HttpCode, HttpStatus } from '@nestjs/common';
+import { Controller, Post, Body, Get, Param, HttpCode, HttpStatus, ForbiddenException } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { AuthService } from './auth.service';
 import {
@@ -95,6 +95,17 @@ export class AuthController {
   @ApiResponse({ status: 200, description: 'OTP resent successfully' })
   async resendOtp(@Body() resendOTPDto: ResendOTPDto) {
     return this.authService.resendOtp(resendOTPDto.phone);
+  }
+
+  @Public()
+  @Get('dev/otp/:phone')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: '[DEV ONLY] Get current OTP for a phone number' })
+  async getDevOtp(@Param('phone') phone: string) {
+    if (process.env.NODE_ENV === 'production') {
+      throw new ForbiddenException('Not available in production');
+    }
+    return this.authService.getDevOtp(phone);
   }
 
   @Post('logout')

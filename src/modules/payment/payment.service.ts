@@ -12,6 +12,7 @@ import { Payment, PaymentMethod, PaymentStatus } from './entities/payment.entity
 import { Booking, BookingStatus } from '../booking/entities/booking.entity';
 import { CreateOrderDto, VerifyPaymentDto, CashPaymentDto } from './dto/payment.dto';
 import { getPaginationMeta } from '../../common/utils/helpers.util';
+import { NotificationService } from '../notification/notification.service';
 import * as crypto from 'crypto';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const Razorpay = require('razorpay');
@@ -26,6 +27,7 @@ export class PaymentService {
     @InjectRepository(Booking)
     private bookingRepository: Repository<Booking>,
     private configService: ConfigService,
+    private notificationService: NotificationService,
   ) {}
 
   /**
@@ -184,6 +186,16 @@ export class PaymentService {
 
     this.logger.log(`Payment completed for booking: ${booking_id}`);
 
+    // Notify the driver if one is assigned
+    if (payment.booking.driver_id) {
+      const amount = payment.amount;
+      this.notificationService.notifyPaymentReceived(
+        payment.booking.driver_id,
+        amount,
+        booking_id,
+      ).catch(() => {/* non-critical */});
+    }
+
     return {
       payment,
       booking: payment.booking,
@@ -224,6 +236,15 @@ export class PaymentService {
     });
 
     await this.paymentRepository.save(payment);
+
+    // Notify the driver
+    if (booking.driver_id) {
+      this.notificationService.notifyPaymentReceived(
+        booking.driver_id,
+        amount,
+        booking_id,
+      ).catch(() => {/* non-critical */});
+    }
 
     return payment;
   }

@@ -72,6 +72,21 @@ export class CreateBookingDto {
   @IsMobilePhone('en-IN')
   mobile_number: string;
 
+  @ApiPropertyOptional({ example: 'Jane Doe', description: 'Receiver name' })
+  @IsOptional()
+  @IsString()
+  receiver_name?: string;
+
+  @ApiPropertyOptional({ example: '9876543211', description: 'Receiver phone number' })
+  @IsOptional()
+  @IsString()
+  receiver_phone?: string;
+
+  @ApiPropertyOptional({ example: '9876543212', description: 'Alternative phone number' })
+  @IsOptional()
+  @IsString()
+  alternative_phone?: string;
+
   @ApiProperty({ example: 'Bhubaneswar' })
   @IsString()
   @IsNotEmpty()
@@ -123,6 +138,13 @@ export class CreateBookingDto {
   number_of_helpers?: number;
 }
 
+export class StartTripDto {
+  @ApiProperty({ example: '391847', description: 'Pickup OTP provided by customer to confirm package handover' })
+  @IsString()
+  @IsNotEmpty()
+  pickup_otp: string;
+}
+
 export class CancelBookingDto {
   @ApiProperty({ example: 'Changed my mind' })
   @IsString()
@@ -131,6 +153,16 @@ export class CancelBookingDto {
 }
 
 export class CompleteTripDto {
+  @ApiProperty({ example: '482910', description: 'Delivery OTP provided by the sender to confirm delivery' })
+  @IsString()
+  @IsNotEmpty()
+  delivery_otp: string;
+
+  @ApiPropertyOptional({ example: 'cash', description: 'Payment method used at delivery: cash or online' })
+  @IsOptional()
+  @IsString()
+  payment_method?: 'cash' | 'online';
+
   @ApiPropertyOptional({ example: false, description: 'Whether toll was incurred during the trip' })
   @IsOptional()
   @IsBoolean()

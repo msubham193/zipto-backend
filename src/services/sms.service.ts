@@ -10,19 +10,49 @@ export class SmsService {
   private readonly verifyServiceSid: string;
 
   constructor(private configService: ConfigService) {
-    const accountSid = this.configService.get<string>('externalServices.twilio.accountSid') || '';
-    const authToken = this.configService.get<string>('externalServices.twilio.authToken') || '';
+    const accountSid = (this.configService.get<string>('externalServices.twilio.accountSid') || '').trim();
+    const authToken = (this.configService.get<string>('externalServices.twilio.authToken') || '').trim();
     this.verifyServiceSid =
-      this.configService.get<string>('externalServices.twilio.verifyServiceSid') || '';
+      (this.configService.get<string>('externalServices.twilio.verifyServiceSid') || '').trim();
 
     this.logger.log(
-      `Twilio config - accountSid: ${accountSid ? accountSid.substring(0, 6) + '...' : 'MISSING'}, authToken: ${authToken ? '***set***' : 'MISSING'}, verifyServiceSid: ${this.verifyServiceSid || 'MISSING'}`,
+      `Twilio config — accountSid: ${accountSid ? accountSid.substring(0, 10) + '...' : 'MISSING'} (len=${accountSid.length}), authToken len=${authToken.length}, verifyServiceSid: ${this.verifyServiceSid || 'MISSING'}`,
     );
     this.client = twilio(accountSid, authToken);
   }
 
   /**
-   * Send OTP via Twilio Verify
+   * Send a plain SMS message via Twilio Messaging
+   */
+  async sendSms(to: string, message: string): Promise<boolean> {
+    const fromNumber = this.configService.get<string>('externalServices.twilio.fromNumber') || '';
+    if (!fromNumber) {
+      this.logger.warn(`Twilio fromNumber not configured. Cannot send SMS to ${to}`);
+      return false;
+    }
+
+    // Ensure E.164 format for Indian numbers
+    const formattedTo = to.startsWith('+') ? to : `+91${to.replace(/\D/g, '').slice(-10)}`;
+
+    try {
+      const msg = await this.client.messages.create({
+        body: message,
+        from: fromNumber,
+        to: formattedTo,
+      });
+      this.logger.log(`SMS sent to ${formattedTo} - SID: ${msg.sid}`);
+      return true;
+    } catch (error: unknown) {
+      const msg = (error as Error)?.message || JSON.stringify(error);
+      this.logger.error(`Twilio sendSms failed to ${formattedTo}: ${msg}`);
+      return false;
+    }
+  }
+
+  /**
+   * Send OTP via Twilio Verify.
+   * In development mode, skips Twilio and returns true immediately
+   * (use the static dev OTP "1234" to verify).
    */
   async sendVerification(phone: string): Promise<boolean> {
     this.logger.log(
@@ -53,7 +83,8 @@ export class SmsService {
   }
 
   /**
-   * Verify OTP via Twilio Verify
+   * Verify OTP via Twilio Verify.
+   * In development mode, accepts the static dev OTP "1234".
    */
   async checkVerification(phone: string, code: string): Promise<boolean> {
     if (!this.verifyServiceSid) {

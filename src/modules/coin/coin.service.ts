@@ -1,4 +1,4 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { CoinTransaction, CoinTransactionType } from './entities/coin-transaction.entity';
@@ -137,7 +137,7 @@ export class CoinService {
   async getBalance(userId: string) {
     const user = await this.userRepository.findOne({
       where: { id: userId },
-      select: ['id', 'coins'],
+      select: ['id', 'coins', 'wallet_balance'],
     });
 
     if (!user) {
@@ -147,7 +147,9 @@ export class CoinService {
     return {
       coins: user.coins,
       rupee_value: Math.round(user.coins * CoinService.COINS_TO_RUPEES_RATE * 100) / 100,
+      wallet_balance: Number(user.wallet_balance),
       rate: '100 coins = ₹2',
+      min_transfer: 100,
     };
   }
 
@@ -165,6 +167,56 @@ export class CoinService {
     return {
       transactions,
       ...getPaginationMeta(total, page, limit),
+    };
+  }
+
+  /**
+   * Transfer coins to wallet balance (min 100 coins)
+   * 100 coins = ₹2
+   */
+  async transferToWallet(userId: string, coins: number): Promise<{ coins_deducted: number; rupees_added: number; new_coin_balance: number; new_wallet_balance: number }> {
+    if (coins < 100) {
+      throw new BadRequestException('Minimum 100 coins required to transfer to wallet');
+    }
+
+    // Must be in multiples of 100
+    const validCoins = Math.floor(coins / 100) * 100;
+    if (validCoins === 0) {
+      throw new BadRequestException('Minimum 100 coins required to transfer to wallet');
+    }
+
+    const user = await this.userRepository.findOne({ where: { id: userId } });
+    if (!user) throw new NotFoundException('User not found');
+
+    if (user.coins < validCoins) {
+      throw new BadRequestException(`Insufficient coins. You have ${user.coins} coins`);
+    }
+
+    const rupeesAdded = Math.round(validCoins * CoinService.COINS_TO_RUPEES_RATE * 100) / 100;
+
+    // Record the transaction
+    const transaction = this.coinTransactionRepository.create({
+      user_id: userId,
+      coins: validCoins,
+      type: CoinTransactionType.REDEEMED,
+      description: `Transferred ${validCoins} coins to wallet (₹${rupeesAdded})`,
+      multiplier: 1,
+    });
+    await this.coinTransactionRepository.save(transaction);
+
+    // Deduct coins and add rupees to wallet
+    await this.userRepository.decrement({ id: userId }, 'coins', validCoins);
+    await this.userRepository.increment({ id: userId }, 'wallet_balance', rupeesAdded);
+
+    const updated = await this.userRepository.findOne({ where: { id: userId }, select: ['coins', 'wallet_balance'] });
+
+    this.logger.log(`User ${userId} transferred ${validCoins} coins → ₹${rupeesAdded} wallet`);
+
+    return {
+      coins_deducted: validCoins,
+      rupees_added: rupeesAdded,
+      new_coin_balance: updated!.coins,
+      new_wallet_balance: Number(updated!.wallet_balance),
     };
   }
 

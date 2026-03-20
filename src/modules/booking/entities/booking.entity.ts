@@ -71,6 +71,27 @@ export class Booking {
   @Column({ type: 'varchar', length: 15, default: '' })
   mobile_number: string;
 
+  @Column({ type: 'varchar', length: 100, nullable: true })
+  receiver_name: string;
+
+  @Column({ type: 'varchar', length: 15, nullable: true })
+  receiver_phone: string;
+
+  @Column({ type: 'varchar', length: 15, nullable: true })
+  alternative_phone: string;
+
+  @Column({ type: 'varchar', length: 6, nullable: true })
+  pickup_otp: string;
+
+  @Column({ type: 'boolean', default: false })
+  pickup_otp_verified: boolean;
+
+  @Column({ type: 'varchar', length: 6, nullable: true })
+  delivery_otp: string;
+
+  @Column({ type: 'boolean', default: false })
+  otp_verified: boolean;
+
   @Column({ type: 'varchar', length: 100, default: '' })
   city: string;
 

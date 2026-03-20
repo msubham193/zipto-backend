@@ -1,14 +1,17 @@
 import {
   Inject,
   Injectable,
+  Logger,
   NotFoundException,
   BadRequestException,
   ForbiddenException,
 } from '@nestjs/common';
+import { randomUUID } from 'crypto';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
 import { Booking, BookingStatus, BookingType } from './entities/booking.entity';
 import { PricingRule } from './entities/pricing-rule.entity';
+import { Payment, PaymentMethod, PaymentStatus } from '../payment/entities/payment.entity';
 import {
   EstimateFareDto,
   CreateBookingDto,
@@ -17,6 +20,7 @@ import {
 } from './dto/booking.dto';
 import { getPaginationMeta } from '../../common/utils/helpers.util';
 import { MapboxService } from '../../services/mapbox.service';
+import { SmsService } from '../../services/sms.service';
 import { CoinService } from '../coin/coin.service';
 import { InjectQueue } from '@nestjs/bull';
 import { Queue } from 'bull';
@@ -33,6 +37,7 @@ import {
 
 @Injectable()
 export class BookingService {
+  private readonly logger = new Logger(BookingService.name);
   private pricingRulesInitialized = false;
   private pricingRulesSyncPromise?: Promise<void>;
 
@@ -41,7 +46,10 @@ export class BookingService {
     private bookingRepository: Repository<Booking>,
     @InjectRepository(PricingRule)
     private pricingRuleRepository: Repository<PricingRule>,
+    @InjectRepository(Payment)
+    private paymentRepository: Repository<Payment>,
     private mapboxService: MapboxService,
+    private smsService: SmsService,
     private coinService: CoinService,
     @InjectQueue('booking_assignment') private bookingQueue: Queue,
     private bookingGateway: BookingGateway,
@@ -216,7 +224,7 @@ export class BookingService {
   }
 
   /**
-   * Create new booking
+   * Create booking offer — stores in Redis only. DB record is created only when a driver accepts.
    */
   async create(userId: string, createBookingDto: CreateBookingDto) {
     const {
@@ -230,16 +238,17 @@ export class BookingService {
       booking_type,
       scheduled_time,
       extra_drop_locations = [],
+      receiver_name,
+      receiver_phone,
+      alternative_phone,
     } = createBookingDto;
 
-    // Validate scheduled time for scheduled bookings
+    // Validate scheduled time
     if (booking_type === BookingType.SCHEDULED) {
       if (!scheduled_time) {
         throw new BadRequestException('Scheduled time is required for scheduled bookings');
       }
-
-      const scheduledDate = new Date(scheduled_time);
-      if (scheduledDate <= new Date()) {
+      if (new Date(scheduled_time) <= new Date()) {
         throw new BadRequestException('Scheduled time must be in the future');
       }
     }
@@ -251,8 +260,15 @@ export class BookingService {
       extra_stops: extra_drop_locations.length,
     });
 
-    // Create booking
-    const booking = this.bookingRepository.create({
+    // Generate OTPs for later (sent via SMS after driver accepts)
+    const pickup_otp   = Math.floor(100000 + Math.random() * 900000).toString();
+    const delivery_otp = Math.floor(100000 + Math.random() * 900000).toString();
+
+    const offerId = randomUUID();
+    const OFFER_TTL_MS = 6 * 60 * 1000; // 6 minutes
+
+    // Store entire offer data in Redis — NO DB write yet
+    await this.cacheManager.set(`offer:${offerId}`, {
       customer_id: userId,
       name,
       mobile_number,
@@ -260,176 +276,308 @@ export class BookingService {
       service_category,
       booking_type,
       vehicle_type,
-      pickup_address: pickup_location.address,
-      drop_address: drop_location.address,
-      distance: fareEstimate.distance,
-      duration: fareEstimate.duration,
-      estimated_fare: fareEstimate.estimated_fare,
-      fare_breakdown: fareEstimate.breakdown,
-      number_of_helpers: 0,
-      extra_stops_count: extra_drop_locations.length,
+      pickup_location,
+      drop_location,
+      pickup_address:    pickup_location.address,
+      drop_address:      drop_location.address,
+      extra_drop_locations,
+      scheduled_time,
+      receiver_name,
+      receiver_phone,
+      alternative_phone,
+      distance:         fareEstimate.distance,
+      duration:         fareEstimate.duration,
+      estimated_fare:   fareEstimate.estimated_fare,
+      fare_breakdown:   fareEstimate.breakdown,
       is_night_booking: fareEstimate.is_night_booking,
-      status: BookingStatus.PENDING,
-      scheduled_time: scheduled_time ? new Date(scheduled_time) : undefined,
-    });
+      pickup_otp,
+      delivery_otp,
+    }, OFFER_TTL_MS);
 
-    // Set PostGIS Point for pickup location
-    await this.bookingRepository
-      .createQueryBuilder()
-      .insert()
-      .into(Booking)
-      .values({
-        ...booking,
-        pickup_location: () =>
-          `ST_SetSRID(ST_MakePoint(${pickup_location.longitude}, ${pickup_location.latitude}), 4326)`,
-        drop_location: () =>
-          `ST_SetSRID(ST_MakePoint(${drop_location.longitude}, ${drop_location.latitude}), 4326)`,
-      })
-      .execute();
+    this.logger.log(`Offer created: ${offerId}, type: ${booking_type}, vehicle: ${vehicle_type}`);
 
-    // Fetch the created booking
-    const createdBooking = await this.bookingRepository.findOne({
-      where: { customer_id: userId },
-      order: { created_at: 'DESC' },
-      relations: ['customer'],
-    });
-
-    // If immediate booking, start searching for drivers
-    if (createdBooking && booking_type === BookingType.INSTANT) {
-      // Optimistically notify customer that search has started
+    if (booking_type === BookingType.INSTANT) {
       this.bookingGateway.notifyUser(userId, 'searching_for_driver', {
-        bookingId: createdBooking.id,
+        bookingId: offerId,
         message: 'Finding the nearest driver for you...',
+        searchTimeoutSeconds: 60,
       });
 
-      await this.bookingQueue.add('search_driver', {
-        bookingId: createdBooking.id,
-        vehicleType: vehicle_type,
-        excludedDriverIds: [],
-        attempt: 1,
-      });
+      await this.bookingQueue.add('search_timeout', { bookingId: offerId }, { delay: 60000 });
+
+      this.processDriverSearch(offerId, [], vehicle_type, 1).catch(err =>
+        this.logger.error(`Driver search failed: ${err.message}`),
+      );
     }
 
-    return createdBooking;
+    return {
+      id:             offerId,
+      offer_id:       offerId,
+      estimated_fare: fareEstimate.estimated_fare,
+      distance:       fareEstimate.distance,
+      duration:       fareEstimate.duration,
+      status:         'searching',
+    };
   }
 
   /**
-   * Process Driver Search (Job Processor)
+   * Get offer/booking status — used by customer to poll while searching for a driver.
+   * Returns searching | accepted (with real booking_id) | expired
+   */
+  async getOfferStatus(offerId: string, userId: string) {
+    // Check if offer was accepted → real booking ID stored in Redis
+    const realBookingId = await this.cacheManager.get<string>(`offer:accepted:${offerId}`);
+    if (realBookingId) {
+      return { status: 'accepted', booking_id: realBookingId };
+    }
+
+    const offerData = await this.cacheManager.get<any>(`offer:${offerId}`);
+    if (offerData) {
+      if (offerData.customer_id !== userId) {
+        throw new ForbiddenException('Not authorized');
+      }
+      return { status: 'searching' };
+    }
+
+    return { status: 'expired' };
+  }
+
+  /**
+   * Cancel an active offer (before any driver accepts).
+   */
+  async cancelOffer(offerId: string, userId: string) {
+    const offerData = await this.cacheManager.get<any>(`offer:${offerId}`);
+    if (!offerData) {
+      return { message: 'Offer not found or already expired' };
+    }
+    if (offerData.customer_id !== userId) {
+      throw new ForbiddenException('Not authorized');
+    }
+    await this.cleanupOffer(offerId);
+    return { message: 'Offer cancelled' };
+  }
+
+  private async cleanupOffer(offerId: string) {
+    await this.cacheManager.del(`offer:${offerId}`);
+    await this.cacheManager.del(`offer:${offerId}:offer`);
+    await this.cacheManager.del(`offer:${offerId}:excluded`);
+    await this.cacheManager.del(`offer:${offerId}:vehicle_type`);
+    await this.cacheManager.del(`offer:${offerId}:broadcast`);
+    await this.cacheManager.del(`offer:${offerId}:broadcast_drivers`);
+    await this.cacheManager.del(`offer:${offerId}:accepted`);
+  }
+
+  /**
+   * Process Driver Search — reads offer from Redis (no DB required)
    */
   async processDriverSearch(
-    bookingId: string,
+    offerId: string,
     excludedDriverIds: string[],
     vehicleType?: string,
     attempt: number = 1,
   ) {
     const MAX_ATTEMPTS = 10;
 
-    const booking = await this.bookingRepository.findOne({ where: { id: bookingId } });
-    if (!booking || booking.status !== BookingStatus.PENDING) return;
+    const offerData = await this.cacheManager.get<any>(`offer:${offerId}`);
+    this.logger.log(`[processDriverSearch] offer=${offerId}, found=${!!offerData}, attempt=${attempt}`);
+    if (!offerData) return; // offer accepted or expired
 
-    // Auto-cancel after max attempts
+    const resolvedVehicleType = vehicleType || offerData.vehicle_type;
+    const { latitude, longitude } = offerData.pickup_location;
+    this.logger.log(`[processDriverSearch] pickup=(${latitude},${longitude}), vehicleType: ${resolvedVehicleType}`);
+
     if (attempt > MAX_ATTEMPTS) {
-      booking.status = BookingStatus.CANCELLED;
-      booking.cancellation_reason = 'No drivers available in your area';
-      await this.bookingRepository.save(booking);
-      this.bookingGateway.notifyUser(booking.customer_id, 'no_drivers_found', {
-        bookingId,
-        message: 'No drivers available in your area. Booking cancelled.',
-      });
+      await this.broadcastBookingToNearby(offerId, resolvedVehicleType);
       return;
     }
 
-    const resolvedVehicleType = vehicleType || booking.vehicle_type;
-    const pickup = booking.pickup_location as any;
-    const nearbyDrivers = await this.findNearbyDrivers(
-      pickup.coordinates[1],
-      pickup.coordinates[0],
-      5,
-      resolvedVehicleType,
-    );
+    const nearbyDrivers = await this.findNearbyDrivers(latitude, longitude, 5, resolvedVehicleType);
+    this.logger.log(`[processDriverSearch] found ${nearbyDrivers.length} nearby drivers`);
 
     const eligibleDrivers = nearbyDrivers.filter(
       (driver: any) => !excludedDriverIds.includes(driver.user_id),
     );
 
     if (eligibleDrivers.length === 0) {
-      booking.status = BookingStatus.CANCELLED;
-      booking.cancellation_reason = 'No drivers available in your area';
-      await this.bookingRepository.save(booking);
-      this.bookingGateway.notifyUser(booking.customer_id, 'no_drivers_found', {
-        bookingId,
-        message: 'No drivers available in your area. Booking cancelled.',
-      });
+      this.logger.log(`[processDriverSearch] no eligible drivers, broadcasting...`);
+      await this.broadcastBookingToNearby(offerId, resolvedVehicleType);
       return;
     }
 
     const nearestDriver = eligibleDrivers[0];
+    this.logger.log(`[processDriverSearch] sending offer to driver ${nearestDriver.user_id}`);
     const newExcluded = [...excludedDriverIds, nearestDriver.user_id];
 
-    // Cache offer + excluded list so reject can pick it up (TTL 15s)
-    await this.cacheManager.set(`booking:${bookingId}:offer`, nearestDriver.user_id, 15000);
-    await this.cacheManager.set(`booking:${bookingId}:excluded`, newExcluded, 15000);
-    await this.cacheManager.set(
-      `booking:${bookingId}:vehicle_type`,
-      resolvedVehicleType,
-      15000,
-    );
+    await this.cacheManager.set(`offer:${offerId}:offer`,        nearestDriver.user_id, 60000);
+    await this.cacheManager.set(`offer:${offerId}:excluded`,     newExcluded,           60000);
+    await this.cacheManager.set(`offer:${offerId}:vehicle_type`, resolvedVehicleType,   60000);
 
-    // Send offer to driver
     this.bookingGateway.emitBookingOffer(nearestDriver.user_id, {
-      bookingId: booking.id,
-      pickup: booking.pickup_address,
-      drop: booking.drop_address,
-      fare: booking.estimated_fare,
-      distance: booking.distance,
+      bookingId:   offerId,
+      pickup:      offerData.pickup_address,
+      drop:        offerData.drop_address,
+      fare:        offerData.estimated_fare,
+      distance:    offerData.distance,
       vehicleType: resolvedVehicleType,
-      timeLeft: 30,
+      timeLeft:    15,
     });
+    this.logger.log(`[processDriverSearch] offer emitted to driver ${nearestDriver.user_id}`);
 
-    // Schedule timeout job (30s window)
     await this.bookingQueue.add(
       'offer_timeout',
       {
-        bookingId,
-        driverId: nearestDriver.user_id,
+        bookingId:        offerId,
+        driverId:         nearestDriver.user_id,
         excludedDriverIds: newExcluded,
-        vehicleType: resolvedVehicleType,
-        attempt: attempt + 1,
+        vehicleType:      resolvedVehicleType,
+        attempt:          attempt + 1,
       },
-      { delay: 30000 },
+      { delay: 15000 },
     );
   }
 
   /**
-   * Handle Offer Timeout (Job Processor)
+   * Handle Offer Timeout (Job Processor) — reads from Redis
    */
   async handleOfferTimeout(
-    bookingId: string,
+    offerId: string,
     driverId: string,
     excludedDriverIds: string[],
     vehicleType?: string,
     attempt: number = 1,
   ) {
-    const booking = await this.bookingRepository.findOne({ where: { id: bookingId } });
-    if (!booking || booking.status !== BookingStatus.PENDING) return;
+    const offerData = await this.cacheManager.get<any>(`offer:${offerId}`);
+    if (!offerData) return; // offer accepted or expired
 
-    const currentOfferDriver = await this.cacheManager.get(`booking:${bookingId}:offer`);
-
+    const currentOfferDriver = await this.cacheManager.get(`offer:${offerId}:offer`);
     if (currentOfferDriver === driverId) {
-      await this.cacheManager.del(`booking:${bookingId}:offer`);
-      await this.cacheManager.del(`booking:${bookingId}:excluded`);
-      await this.cacheManager.del(`booking:${bookingId}:vehicle_type`);
+      await this.cacheManager.del(`offer:${offerId}:offer`);
+      await this.cacheManager.del(`offer:${offerId}:excluded`);
+      await this.cacheManager.del(`offer:${offerId}:vehicle_type`);
 
-      // Notify driver that offer expired
-      this.bookingGateway.notifyUser(driverId, 'offer_expired', { bookingId });
+      this.bookingGateway.notifyUser(driverId, 'offer_expired', { bookingId: offerId });
 
       await this.bookingQueue.add('search_driver', {
-        bookingId,
+        bookingId: offerId,
         excludedDriverIds,
         vehicleType,
         attempt,
       });
     }
+  }
+
+  /**
+   * Broadcast a booking offer to ALL nearby online drivers when sequential search exhausted.
+   * Still no DB record — just Redis + WebSocket.
+   */
+  private async broadcastBookingToNearby(offerId: string, vehicleType?: string) {
+    const BROADCAST_TTL_MS = 5 * 60 * 1000;
+
+    const offerData = await this.cacheManager.get<any>(`offer:${offerId}`);
+    if (!offerData) return; // offer accepted or expired
+
+    const { latitude, longitude } = offerData.pickup_location;
+    const nearbyDrivers = await this.findNearbyDrivers(latitude, longitude, 10, vehicleType);
+
+    if (nearbyDrivers.length === 0) {
+      this.bookingGateway.notifyUser(offerData.customer_id, 'no_drivers_found', {
+        bookingId: offerId,
+        message: 'No drivers available in your area. Please try again.',
+      });
+      await this.cleanupOffer(offerId);
+      return;
+    }
+
+    const driverIds = nearbyDrivers.map((d: any) => d.user_id);
+
+    await this.cacheManager.set(`offer:${offerId}:broadcast`,         true,      BROADCAST_TTL_MS);
+    await this.cacheManager.set(`offer:${offerId}:broadcast_drivers`, driverIds, BROADCAST_TTL_MS);
+
+    const payload = {
+      bookingId: offerId,
+      pickup:    offerData.pickup_address,
+      drop:      offerData.drop_address,
+      fare:      offerData.estimated_fare,
+      distance:  offerData.distance,
+      vehicleType,
+    };
+
+    for (const driverId of driverIds) {
+      this.bookingGateway.notifyUser(driverId, 'booking_available', payload);
+
+      // Track per-driver so getAvailableBookings() can return them
+      const existing = (await this.cacheManager.get<string[]>(`driver:broadcasts:${driverId}`)) || [];
+      if (!existing.includes(offerId)) {
+        await this.cacheManager.set(`driver:broadcasts:${driverId}`, [...existing, offerId], BROADCAST_TTL_MS);
+      }
+    }
+
+    this.logger.log(`Broadcast offer ${offerId} to ${driverIds.length} nearby drivers`);
+
+    await this.bookingQueue.add('broadcast_timeout', { bookingId: offerId }, { delay: BROADCAST_TTL_MS });
+  }
+
+  /**
+   * Hard 60-second search timeout — offer expires, no DB record to delete.
+   */
+  async handleSearchTimeout(offerId: string) {
+    const offerData = await this.cacheManager.get<any>(`offer:${offerId}`);
+    if (!offerData) return; // offer accepted or already cleaned up
+
+    this.logger.log(`[SearchTimeout] 60s expired for offer ${offerId}`);
+
+    this.bookingGateway.notifyUser(offerData.customer_id, 'search_timeout', {
+      bookingId: offerId,
+      message: 'No drivers found within 60 seconds. Please try again.',
+    });
+
+    await this.cleanupOffer(offerId);
+  }
+
+  /**
+   * Broadcast TTL expired — nobody accepted, clean up Redis only.
+   */
+  async handleBroadcastTimeout(offerId: string) {
+    const offerData = await this.cacheManager.get<any>(`offer:${offerId}`);
+    if (!offerData) return; // offer accepted or already cleaned up
+
+    this.bookingGateway.notifyUser(offerData.customer_id, 'no_drivers_found', {
+      bookingId: offerId,
+      message: 'No drivers accepted your booking. Please try again.',
+    });
+
+    await this.cleanupOffer(offerId);
+  }
+
+  /**
+   * Get available broadcast offers for a driver (notification screen).
+   * Reads from Redis — no DB query needed since bookings aren't in DB yet.
+   */
+  async getAvailableBookings(driverUserId: string) {
+    const broadcastOfferIds =
+      (await this.cacheManager.get<string[]>(`driver:broadcasts:${driverUserId}`)) || [];
+
+    const results: any[] = [];
+    for (const offerId of broadcastOfferIds) {
+      const offerData = await this.cacheManager.get<any>(`offer:${offerId}`);
+      if (!offerData) continue;
+      const isBroadcast = await this.cacheManager.get(`offer:${offerId}:broadcast`);
+      if (!isBroadcast) continue;
+
+      results.push({
+        id:              offerId,
+        offer_id:        offerId,
+        pickup_address:  offerData.pickup_address,
+        drop_address:    offerData.drop_address,
+        estimated_fare:  offerData.estimated_fare,
+        distance:        offerData.distance,
+        vehicle_type:    offerData.vehicle_type,
+        city:            offerData.city,
+        service_category: offerData.service_category,
+      });
+    }
+
+    return results;
   }
 
   /**
@@ -474,9 +622,34 @@ export class BookingService {
   }
 
   /**
-   * Get booking by ID
+   * Get booking by ID — includes driver profile stats (rating, total trips).
+   * Also handles offer IDs (before driver accepts) by checking Redis.
    */
   async getById(bookingId: string, userId: string) {
+    // Check if this is an offer still in Redis (searching state)
+    const offerData = await this.cacheManager.get<any>(`offer:${bookingId}`);
+    if (offerData) {
+      if (offerData.customer_id !== userId) {
+        throw new ForbiddenException('You do not have access to this booking');
+      }
+      return {
+        id:              bookingId,
+        status:          'searching',
+        pickup_address:  offerData.pickup_address,
+        drop_address:    offerData.drop_address,
+        estimated_fare:  offerData.estimated_fare,
+        distance:        offerData.distance,
+        vehicle_type:    offerData.vehicle_type,
+        customer_id:     userId,
+      };
+    }
+
+    // Check if offer was accepted — redirect to the real booking
+    const realBookingId = await this.cacheManager.get<string>(`offer:accepted:${bookingId}`);
+    if (realBookingId) {
+      return this.getById(realBookingId, userId);
+    }
+
     const booking = await this.bookingRepository.findOne({
       where: { id: bookingId },
       relations: ['customer', 'driver', 'vehicle'],
@@ -490,13 +663,41 @@ export class BookingService {
       throw new ForbiddenException('You do not have access to this booking');
     }
 
-    return booking;
+    // Attach driver profile stats if driver is assigned
+    let driverStats: { average_rating: number | null; total_trips: number } | null = null;
+    if (booking.driver_id) {
+      const [profile] = await this.bookingRepository.manager.query(
+        `SELECT average_rating, total_trips FROM driver_profiles WHERE user_id = $1 LIMIT 1`,
+        [booking.driver_id],
+      );
+      if (profile) {
+        driverStats = {
+          average_rating: profile.average_rating ? parseFloat(profile.average_rating) : null,
+          total_trips: parseInt(profile.total_trips, 10) || 0,
+        };
+      }
+    }
+
+    return {
+      ...booking,
+      driver_stats: driverStats,
+      pickup_otp: booking.pickup_otp,
+      delivery_otp: booking.delivery_otp,
+    };
   }
 
   /**
-   * Cancel booking
+   * Cancel booking or offer
    */
   async cancel(bookingId: string, userId: string, cancelDto: CancelBookingDto) {
+    // If this is a Redis offer (not yet in DB), cancel the offer
+    const offerData = await this.cacheManager.get<any>(`offer:${bookingId}`);
+    if (offerData) {
+      if (offerData.customer_id !== userId) throw new ForbiddenException('Not authorized');
+      await this.cleanupOffer(bookingId);
+      return { message: 'Booking offer cancelled' };
+    }
+
     const booking = await this.getById(bookingId, userId);
 
     if ([BookingStatus.ONGOING, BookingStatus.COMPLETED].includes(booking.status)) {
@@ -532,87 +733,222 @@ export class BookingService {
   }
 
   /**
-   * Get driver's active booking
+   * Get driver's active booking — includes payment status, receiver info, and delivery OTP
    */
   async getDriverActiveBooking(userId: string) {
     const booking = await this.bookingRepository.findOne({
-      where: {
-        driver_id: userId,
-        status: BookingStatus.ONGOING,
-      },
-      relations: ['customer', 'vehicle'],
+      where: [
+        { driver_id: userId, status: BookingStatus.ONGOING },
+        { driver_id: userId, status: BookingStatus.ACCEPTED },
+        { driver_id: userId, status: BookingStatus.DRIVER_ASSIGNED },
+      ],
+      relations: ['customer', 'vehicle', 'payments'],
+      order: { booking_time: 'DESC' },
     });
 
-    return booking || null;
+    if (!booking) return null;
+
+    const isAlreadyPaid = booking.payments?.some(p => p.payment_status === 'completed') ?? false;
+
+    return {
+      ...booking,
+      is_already_paid: isAlreadyPaid,
+      pickup_otp: booking.pickup_otp,
+      pickup_otp_verified: booking.pickup_otp_verified,
+      delivery_otp: booking.delivery_otp,
+      receiver_name: booking.receiver_name,
+      receiver_phone: booking.receiver_phone,
+      alternative_phone: booking.alternative_phone,
+    };
   }
 
   /**
-   * Accept booking (driver)
+   * Accept booking (driver) — reads offer from Redis, creates DB record for the first time.
    */
-  async acceptBooking(bookingId: string, driverId: string, vehicleId: string) {
-    const booking = await this.bookingRepository.findOne({
-      where: { id: bookingId },
+  async acceptBooking(offerId: string, driverId: string, vehicleId: string) {
+    // Get offer from Redis
+    const offerData = await this.cacheManager.get<any>(`offer:${offerId}`);
+    if (!offerData) {
+      // Might be a real DB booking (e.g., scheduled) — fall back to DB check
+      let booking: Booking | null = null;
+      try {
+        booking = await this.bookingRepository.findOne({ where: { id: offerId } });
+      } catch {}
+      if (!booking) throw new NotFoundException('Booking offer not found or already accepted');
+      if (booking.status !== BookingStatus.PENDING) {
+        throw new BadRequestException(`Booking is no longer available (status: ${booking.status})`);
+      }
+      // Existing DB booking — handle via old path
+      booking.status = BookingStatus.ACCEPTED;
+      booking.driver_id = driverId;
+      booking.vehicle_id = vehicleId;
+      booking.acceptance_time = new Date();
+      const saved = await this.bookingRepository.save(booking);
+      this.bookingGateway.notifyUser(booking.customer_id, 'booking_accepted', {
+        bookingId: booking.id, offerId, driverId,
+      });
+      return saved;
+    }
+
+    // Race-condition guard: mark as being accepted
+    const alreadyAccepting = await this.cacheManager.get(`offer:${offerId}:accepting`);
+    if (alreadyAccepting) {
+      throw new BadRequestException('Booking is being accepted by another driver');
+    }
+    await this.cacheManager.set(`offer:${offerId}:accepting`, driverId, 10000); // 10s lock
+
+    // Block driver from accepting if they already have an active order
+    const existingActive = await this.bookingRepository.findOne({
+      where: [
+        { driver_id: driverId, status: BookingStatus.ACCEPTED },
+        { driver_id: driverId, status: BookingStatus.DRIVER_ASSIGNED },
+        { driver_id: driverId, status: BookingStatus.ONGOING },
+      ],
     });
-
-    if (!booking) {
-      throw new NotFoundException('Booking not found');
+    if (existingActive) {
+      await this.cacheManager.del(`offer:${offerId}:accepting`);
+      throw new BadRequestException(
+        'You already have an active order. Complete it before accepting a new one.',
+      );
     }
 
-    if (booking.status !== BookingStatus.PENDING) {
-      throw new BadRequestException('Booking is no longer available');
+    const isBroadcast = await this.cacheManager.get<boolean>(`offer:${offerId}:broadcast`);
+    if (!isBroadcast) {
+      const offeredDriverId = await this.cacheManager.get(`offer:${offerId}:offer`);
+      if (offeredDriverId && offeredDriverId !== driverId) {
+        await this.cacheManager.del(`offer:${offerId}:accepting`);
+        throw new BadRequestException('Offer expired or assigned to another driver');
+      }
     }
 
-    const offeredDriverId = await this.cacheManager.get(`booking:${bookingId}:offer`);
-    if (offeredDriverId !== driverId) {
-      throw new BadRequestException('Booking offer expired or not assigned to you');
+    // ── Create the booking in DB for the first time ──────────────────────────
+    try {
+      const booking = this.bookingRepository.create({
+        customer_id:     offerData.customer_id,
+        name:            offerData.name,
+        mobile_number:   offerData.mobile_number,
+        city:            offerData.city,
+        service_category: offerData.service_category,
+        booking_type:    offerData.booking_type,
+        vehicle_type:    offerData.vehicle_type,
+        pickup_address:  offerData.pickup_address,
+        drop_address:    offerData.drop_address,
+        distance:        offerData.distance,
+        duration:        offerData.duration,
+        estimated_fare:  offerData.estimated_fare,
+        fare_breakdown:  offerData.fare_breakdown,
+        number_of_helpers: 0,
+        extra_stops_count: (offerData.extra_drop_locations || []).length,
+        is_night_booking: offerData.is_night_booking,
+        status:          BookingStatus.ACCEPTED,
+        scheduled_time:  offerData.scheduled_time ? new Date(offerData.scheduled_time) : undefined,
+        receiver_name:   offerData.receiver_name,
+        receiver_phone:  offerData.receiver_phone,
+        alternative_phone: offerData.alternative_phone,
+        pickup_otp:      offerData.pickup_otp,
+        pickup_otp_verified: false,
+        delivery_otp:    offerData.delivery_otp,
+        otp_verified:    false,
+        driver_id:       driverId,
+        vehicle_id:      vehicleId,
+        acceptance_time: new Date(),
+      });
+
+      await this.bookingRepository
+        .createQueryBuilder()
+        .insert()
+        .into(Booking)
+        .values({
+          ...booking,
+          pickup_location: () =>
+            `ST_SetSRID(ST_MakePoint(${offerData.pickup_location.longitude}, ${offerData.pickup_location.latitude}), 4326)`,
+          drop_location: () =>
+            `ST_SetSRID(ST_MakePoint(${offerData.drop_location.longitude}, ${offerData.drop_location.latitude}), 4326)`,
+        })
+        .execute();
+
+      const createdBooking = await this.bookingRepository.findOne({
+        where: { customer_id: offerData.customer_id, driver_id: driverId },
+        order: { created_at: 'DESC' },
+        relations: ['customer'],
+      });
+
+      if (!createdBooking) throw new Error('Failed to retrieve created booking');
+
+      // Send OTP SMS now that booking is confirmed
+      const smsPhone = offerData.mobile_number;
+      const smsBody =
+        `Your Zipto booking is confirmed!\n` +
+        `Pickup OTP: *${offerData.pickup_otp}* — Share with driver when they arrive.\n` +
+        `Delivery OTP: *${offerData.delivery_otp}* — Share with driver ONLY when package is delivered.`;
+      this.smsService.sendSms(smsPhone, smsBody).catch(err =>
+        this.logger.warn(`Failed to send OTP SMS: ${err?.message}`),
+      );
+
+      // Store accepted mapping so customer can resolve offer_id → booking_id
+      await this.cacheManager.set(`offer:accepted:${offerId}`, createdBooking.id, 10 * 60 * 1000);
+
+      // Notify customer with real booking ID
+      this.bookingGateway.notifyUser(offerData.customer_id, 'booking_accepted', {
+        bookingId: createdBooking.id,
+        offerId,
+        driverId,
+      });
+
+      // Notify other broadcast drivers that booking is taken
+      if (isBroadcast) {
+        const broadcastDrivers =
+          (await this.cacheManager.get<string[]>(`offer:${offerId}:broadcast_drivers`)) || [];
+        for (const dId of broadcastDrivers) {
+          if (dId !== driverId) {
+            this.bookingGateway.notifyUser(dId, 'booking_taken', { bookingId: offerId });
+          }
+        }
+      }
+
+      // Clean up Redis (but keep offer:accepted mapping for customer polling)
+      await this.cacheManager.del(`offer:${offerId}`);
+      await this.cacheManager.del(`offer:${offerId}:offer`);
+      await this.cacheManager.del(`offer:${offerId}:excluded`);
+      await this.cacheManager.del(`offer:${offerId}:vehicle_type`);
+      await this.cacheManager.del(`offer:${offerId}:broadcast`);
+      await this.cacheManager.del(`offer:${offerId}:broadcast_drivers`);
+      await this.cacheManager.del(`offer:${offerId}:accepting`);
+
+      return createdBooking;
+    } catch (dbError: any) {
+      await this.cacheManager.del(`offer:${offerId}:accepting`);
+      this.logger.error(`acceptBooking DB error: ${dbError?.message}`);
+      throw new BadRequestException('Failed to confirm booking. Please try again.');
     }
-
-    booking.status = BookingStatus.ACCEPTED;
-    booking.driver_id = driverId;
-    booking.vehicle_id = vehicleId;
-    booking.acceptance_time = new Date();
-
-    const savedBooking = await this.bookingRepository.save(booking);
-
-    await this.cacheManager.del(`booking:${bookingId}:offer`);
-
-    this.bookingGateway.notifyUser(booking.customer_id, 'booking_accepted', {
-      bookingId: booking.id,
-      driverId,
-    });
-
-    return savedBooking;
   }
 
   /**
-   * Reject booking (driver)
+   * Reject booking (driver) — reads from Redis
    */
-  async rejectBooking(bookingId: string, driverId: string) {
-    const booking = await this.bookingRepository.findOne({ where: { id: bookingId } });
-    if (!booking || booking.status !== BookingStatus.PENDING) {
-      return { message: 'Booking no longer available' };
+  async rejectBooking(offerId: string, driverId: string) {
+    const offerData = await this.cacheManager.get<any>(`offer:${offerId}`);
+    if (!offerData) {
+      return { message: 'Booking offer no longer available' };
     }
 
-    const offeredDriverId = await this.cacheManager.get(`booking:${bookingId}:offer`);
+    const offeredDriverId = await this.cacheManager.get(`offer:${offerId}:offer`);
     if (offeredDriverId !== driverId) {
       return { message: 'Offer not assigned to you' };
     }
 
-    // Read cached state
     const excludedDriverIds =
-      (await this.cacheManager.get<string[]>(`booking:${bookingId}:excluded`)) || [driverId];
+      (await this.cacheManager.get<string[]>(`offer:${offerId}:excluded`)) || [driverId];
     const vehicleType =
-      (await this.cacheManager.get<string>(`booking:${bookingId}:vehicle_type`)) ||
-      booking.vehicle_type;
+      (await this.cacheManager.get<string>(`offer:${offerId}:vehicle_type`)) ||
+      offerData.vehicle_type;
 
-    // Clear offer cache
-    await this.cacheManager.del(`booking:${bookingId}:offer`);
-    await this.cacheManager.del(`booking:${bookingId}:excluded`);
-    await this.cacheManager.del(`booking:${bookingId}:vehicle_type`);
+    await this.cacheManager.del(`offer:${offerId}:offer`);
+    await this.cacheManager.del(`offer:${offerId}:excluded`);
+    await this.cacheManager.del(`offer:${offerId}:vehicle_type`);
 
-    // Cancel any pending timeout job by moving immediately to next driver
     await this.bookingQueue.add('search_driver', {
-      bookingId,
+      bookingId: offerId,
       excludedDriverIds,
       vehicleType,
       attempt: excludedDriverIds.length + 1,
@@ -622,9 +958,9 @@ export class BookingService {
   }
 
   /**
-   * Start trip
+   * Start trip — driver must provide pickup OTP received from customer
    */
-  async startTrip(bookingId: string, driverId: string) {
+  async startTrip(bookingId: string, driverId: string, pickupOtp: string) {
     const booking = await this.bookingRepository.findOne({
       where: { id: bookingId, driver_id: driverId },
     });
@@ -633,12 +969,31 @@ export class BookingService {
       throw new NotFoundException('Booking not found');
     }
 
-    if (booking.status !== BookingStatus.ACCEPTED) {
+    const allowedStatuses = [BookingStatus.ACCEPTED, BookingStatus.DRIVER_ASSIGNED];
+    if (!allowedStatuses.includes(booking.status)) {
       throw new BadRequestException(`Cannot start trip with status: ${booking.status}`);
+    }
+
+    const otpInput = (pickupOtp || '').trim();
+    const storedOtp = (booking.pickup_otp || '').trim();
+
+    this.logger.log(
+      `[startTrip] booking=${bookingId} storedOTP="${storedOtp}" receivedOTP="${otpInput}"`,
+    );
+
+    if (!otpInput || otpInput.length < 4) {
+      throw new BadRequestException('Pickup OTP is required to start the trip');
+    }
+
+    if (storedOtp && storedOtp !== otpInput) {
+      throw new BadRequestException(
+        `Invalid pickup OTP. Expected: ${storedOtp} | Got: ${otpInput}`,
+      );
     }
 
     booking.status = BookingStatus.ONGOING;
     booking.start_time = new Date();
+    booking.pickup_otp_verified = true;
 
     return this.bookingRepository.save(booking);
   }
@@ -660,6 +1015,15 @@ export class BookingService {
 
     if (booking.status !== BookingStatus.ONGOING) {
       throw new BadRequestException(`Cannot complete trip with status: ${booking.status}`);
+    }
+
+    // Verify delivery OTP
+    const deliveryOtp = completeTripDto?.delivery_otp;
+    if (!deliveryOtp) {
+      throw new BadRequestException('Delivery OTP is required to complete the trip');
+    }
+    if (booking.delivery_otp && booking.delivery_otp !== deliveryOtp) {
+      throw new BadRequestException('Invalid delivery OTP. Please ask the sender for the correct OTP.');
     }
 
     // Get pricing rule for waiting charge calculation
@@ -713,8 +1077,25 @@ export class BookingService {
     booking.waiting_time_minutes = waitingTimeMinutes;
     booking.skido_commission = skidoCommission;
     booking.driver_earnings = driverEarnings;
+    booking.otp_verified = true;
 
     const savedBooking = await this.bookingRepository.save(booking);
+
+    // Auto-record cash payment if driver chose cash at delivery
+    const paymentMethod = completeTripDto?.payment_method;
+    const alreadyPaid = await this.paymentRepository.findOne({
+      where: { booking_id: bookingId, payment_status: PaymentStatus.COMPLETED },
+    });
+    if (!alreadyPaid && paymentMethod === 'cash') {
+      const cashPayment = this.paymentRepository.create({
+        booking_id: bookingId,
+        amount: finalFare,
+        driver_earnings: driverEarnings,
+        payment_method: PaymentMethod.CASH,
+        payment_status: PaymentStatus.COMPLETED,
+      });
+      await this.paymentRepository.save(cashPayment);
+    }
 
     // Award coins to customer for successful delivery
     const coinReward = await this.coinService.awardCoins(
@@ -749,7 +1130,11 @@ export class BookingService {
       .leftJoinAndSelect('booking.driver', 'driver')
       .leftJoinAndSelect('booking.vehicle', 'vehicle')
       .leftJoinAndSelect('booking.payments', 'payments')
-      .where('booking.customer_id = :userId', { userId });
+      .where('booking.customer_id = :userId', { userId })
+      // Exclude system auto-cancelled (no driver found) bookings
+      .andWhere(
+        "(booking.cancellation_reason NOT ILIKE '%no driver%' OR booking.cancellation_reason IS NULL)",
+      );
 
     if (status) {
       queryBuilder.andWhere('booking.status = :status', { status });

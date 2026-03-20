@@ -2,6 +2,7 @@ import { Controller, Get, Put, Post, Delete, Param, Query, Body } from '@nestjs/
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { AdminService } from './admin.service';
 import { BookingService } from '../booking/booking.service';
+import { NotificationService } from '../notification/notification.service';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { GetBookingsDto } from './dto/get-bookings.dto';
 import { PaginationDto } from './dto/pagination.dto';
@@ -16,6 +17,7 @@ export class AdminController {
   constructor(
     private readonly adminService: AdminService,
     private readonly bookingService: BookingService,
+    private readonly notificationService: NotificationService,
   ) {}
 
   @Get('dashboard/stats')
@@ -188,5 +190,31 @@ export class AdminController {
   @ApiResponse({ status: 200, description: 'Pricing rule deleted' })
   async deletePricingRule(@Param('id') id: string) {
     return this.bookingService.deletePricingRule(id);
+  }
+
+  // ─── Admin Notifications ───────────────────────────────────────────────────
+
+  @Get('notifications')
+  @ApiOperation({ summary: 'Get admin notifications' })
+  @ApiResponse({ status: 200, description: 'Notifications retrieved' })
+  async getAdminNotifications() {
+    const data = await this.notificationService.getAdminNotifications();
+    return { success: true, data };
+  }
+
+  @Post('notifications/read-all')
+  @ApiOperation({ summary: 'Mark all admin notifications as read' })
+  @ApiResponse({ status: 201, description: 'Marked as read' })
+  async markAdminNotificationsRead() {
+    await this.notificationService.markAdminNotificationsRead();
+    return { success: true };
+  }
+
+  @Delete('notifications/clear')
+  @ApiOperation({ summary: 'Clear all admin notifications' })
+  @ApiResponse({ status: 200, description: 'Notifications cleared' })
+  async clearAdminNotifications() {
+    await this.notificationService.clearAdminNotifications();
+    return { success: true };
   }
 }

@@ -7,22 +7,31 @@ import { PricingRule } from './entities/pricing-rule.entity';
 import { AuthModule } from '../auth/auth.module';
 import { CoinModule } from '../coin/coin.module';
 import { BullModule } from '@nestjs/bull';
-import { CacheModule } from '@nestjs/cache-manager';
+import { CACHE_MANAGER } from '@nestjs/cache-manager';
+import { caching } from 'cache-manager';
 import { BookingGateway } from './booking.gateway';
 import { BookingProcessor } from './booking.processor';
+import { Payment } from '../payment/entities/payment.entity';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Booking, PricingRule]),
+    TypeOrmModule.forFeature([Booking, PricingRule, Payment]),
     AuthModule,
     CoinModule,
     BullModule.registerQueue({
       name: 'booking_assignment',
     }),
-    CacheModule.register(),
   ],
   controllers: [BookingController],
-  providers: [BookingService, BookingGateway, BookingProcessor],
-  exports: [BookingService],
+  providers: [
+    BookingService,
+    BookingGateway,
+    BookingProcessor,
+    {
+      provide: CACHE_MANAGER,
+      useFactory: async () => caching('memory', { max: 500, ttl: 0 }),
+    },
+  ],
+  exports: [BookingService, BookingGateway],
 })
 export class BookingModule {}

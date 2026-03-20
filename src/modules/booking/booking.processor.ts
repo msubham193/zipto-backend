@@ -19,7 +19,7 @@ export class BookingProcessor {
     }>,
   ) {
     const { bookingId, excludedDriverIds, vehicleType, attempt } = job.data;
-    this.logger.debug(`Processing search_driver for booking ${bookingId}, attempt ${attempt}`);
+    this.logger.log(`Processing search_driver for booking ${bookingId}, attempt ${attempt}`);
 
     try {
       await this.bookingService.processDriverSearch(
@@ -59,6 +59,32 @@ export class BookingProcessor {
     } catch (error) {
       this.logger.error(
         `Error processing offer_timeout for booking ${bookingId}: ${error.message}`,
+      );
+    }
+  }
+
+  @Process('broadcast_timeout')
+  async handleBroadcastTimeout(job: Job<{ bookingId: string }>) {
+    const { bookingId } = job.data;
+    this.logger.debug(`Processing broadcast_timeout for booking ${bookingId}`);
+    try {
+      await this.bookingService.handleBroadcastTimeout(bookingId);
+    } catch (error) {
+      this.logger.error(
+        `Error processing broadcast_timeout for booking ${bookingId}: ${error.message}`,
+      );
+    }
+  }
+
+  @Process('search_timeout')
+  async handleSearchTimeout(job: Job<{ bookingId: string }>) {
+    const { bookingId } = job.data;
+    this.logger.log(`Processing search_timeout (60s) for booking ${bookingId}`);
+    try {
+      await this.bookingService.handleSearchTimeout(bookingId);
+    } catch (error) {
+      this.logger.error(
+        `Error processing search_timeout for booking ${bookingId}: ${error.message}`,
       );
     }
   }

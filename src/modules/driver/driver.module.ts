@@ -5,15 +5,19 @@ import * as multer from 'multer';
 import { DriverController } from './driver.controller';
 import { DriverService } from './driver.service';
 import { DriverProfile } from './entities/driver-profile.entity';
+import { BankAccount } from './entities/bank-account.entity';
+import { WithdrawalRequest } from './entities/withdrawal-request.entity';
 import { Vehicle } from '../vehicle/entities/vehicle.entity';
 import { User } from '../auth/entities/user.entity';
 import { AuthModule } from '../auth/auth.module';
 import { Booking } from '../booking/entities/booking.entity';
+import { NotificationModule } from '../notification/notification.module';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([DriverProfile, User, Vehicle, Booking]),
+    TypeOrmModule.forFeature([DriverProfile, BankAccount, WithdrawalRequest, User, Vehicle, Booking]),
     AuthModule,
+    NotificationModule,
     MulterModule.register({
       storage: multer.memoryStorage(),
     }),

@@ -6,6 +6,7 @@ import { Booking, BookingStatus } from '../booking/entities/booking.entity';
 import { Payment, PaymentStatus } from '../payment/entities/payment.entity';
 import { DriverProfile, VerificationStatus } from '../driver/entities/driver-profile.entity';
 import { Vehicle } from '../vehicle/entities/vehicle.entity';
+import { NotificationService } from '../notification/notification.service';
 
 import { PricingRule } from '../booking/entities/pricing-rule.entity';
 import {
@@ -29,6 +30,7 @@ export class AdminService {
     private vehicleRepository: Repository<Vehicle>,
     @InjectRepository(PricingRule)
     private pricingRuleRepository: Repository<PricingRule>,
+    private notificationService: NotificationService,
   ) {}
 
   /**
@@ -106,6 +108,9 @@ export class AdminService {
       is_verified: true,
     });
 
+    // Notify driver
+    await this.notificationService.notifyDriverApproved(profile.user_id);
+
     return { message: 'Driver approved successfully' };
   }
 
@@ -129,6 +134,9 @@ export class AdminService {
     await this.userRepository.update(profile.user_id, {
       is_verified: false,
     });
+
+    // Notify driver
+    await this.notificationService.notifyDriverRejected(profile.user_id);
 
     return { message: 'Driver rejected' };
   }

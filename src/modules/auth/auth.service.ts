@@ -55,14 +55,21 @@ export class AuthService {
       throw new UnauthorizedException('User account is deactivated');
     }
 
+    const purpose = existingUser ? OTPPurpose.LOGIN : OTPPurpose.REGISTRATION;
+    const otpCode = await this.createOTP(formattedPhone, purpose);
+
     // Send OTP via Twilio Verify
     const sent = await this.smsService.sendVerification(formattedPhone);
     if (!sent) {
-      throw new BadRequestException('Failed to send OTP. Please try again.');
+      const isDev = this.configService.get<string>('NODE_ENV') !== 'production';
+      if (isDev) {
+        this.logger.warn(
+          `[DEV] Twilio failed. OTP for ${formattedPhone}: ${otpCode} — use this to ${purpose === OTPPurpose.LOGIN ? 'login' : 'register'}`,
+        );
+      } else {
+        throw new BadRequestException('Failed to send OTP. Please try again.');
+      }
     }
-
-    const purpose = existingUser ? OTPPurpose.LOGIN : OTPPurpose.REGISTRATION;
-    await this.createOTP(formattedPhone, purpose);
 
     return {
       message: 'OTP sent successfully',
@@ -79,11 +86,38 @@ export class AuthService {
     const { phone, otp, role } = verifyOtpDto;
     const formattedPhone = formatPhoneNumber(phone);
 
-    // Verify OTP via Twilio Verify
-    const isValid = await this.smsService.checkVerification(formattedPhone, otp);
+    const isDev = process.env.NODE_ENV !== 'production';
+    this.logger.log(`[verifyOtp] phone=${formattedPhone} otp=${otp} isDev=${isDev}`);
+
+    // In dev mode: static OTP '1234' is always accepted — no Twilio or DB check needed
+    let isValid = isDev && otp === '1234';
+
     if (!isValid) {
+      // Verify via Twilio Verify
+      this.logger.log(`[verifyOtp] calling Twilio checkVerification...`);
+      isValid = await this.smsService.checkVerification(formattedPhone, otp);
+      this.logger.log(`[verifyOtp] Twilio checkVerification result: ${isValid}`);
+
+      if (!isValid && isDev) {
+        // Dev fallback: check DB OTP for non-static codes
+        const dbOtp = await this.otpRepository.findOne({
+          where: { phone: formattedPhone, otp_code: otp, is_used: false },
+        });
+        if (dbOtp && dbOtp.expires_at > new Date()) {
+          this.logger.warn(`[DEV] Accepted via DB OTP for ${formattedPhone}`);
+          isValid = true;
+        }
+      }
+    } else {
+      this.logger.warn(`[DEV] Static OTP '1234' accepted for ${formattedPhone}`);
+    }
+
+    if (!isValid) {
+      this.logger.error(`[verifyOtp] FAILED — invalid OTP for ${formattedPhone}`);
       throw new BadRequestException('Invalid or expired OTP');
     }
+
+    this.logger.log(`[verifyOtp] OTP valid — proceeding to user lookup/creation`);
 
     // Mark DB OTP records as used
     await this.otpRepository.update({ phone: formattedPhone, is_used: false }, { is_used: true });
@@ -92,6 +126,8 @@ export class AuthService {
     let user = await this.userRepository.findOne({
       where: { phone: formattedPhone },
     });
+
+    this.logger.log(`[verifyOtp] user lookup result: ${user ? `found id=${user.id}` : 'NOT FOUND — will create'}`);
 
     let isNewUser = false;
 
@@ -150,14 +186,21 @@ export class AuthService {
       throw new UnauthorizedException('User account is deactivated');
     }
 
+    const purpose = existingUser ? OTPPurpose.LOGIN : OTPPurpose.REGISTRATION;
+    const otpCode = await this.createOTP(formattedPhone, purpose);
+
     // Send OTP via Twilio Verify
     const sent = await this.smsService.sendVerification(formattedPhone);
     if (!sent) {
-      throw new BadRequestException('Failed to send OTP. Please try again.');
+      const isDev = this.configService.get<string>('NODE_ENV') !== 'production';
+      if (isDev) {
+        this.logger.warn(
+          `[DEV] Twilio failed. OTP for ${formattedPhone}: ${otpCode} — use this to ${purpose === OTPPurpose.LOGIN ? 'login' : 'register'}`,
+        );
+      } else {
+        throw new BadRequestException('Failed to send OTP. Please try again.');
+      }
     }
-
-    const purpose = existingUser ? OTPPurpose.LOGIN : OTPPurpose.REGISTRATION;
-    await this.createOTP(formattedPhone, purpose);
 
     return {
       message: 'OTP sent successfully',
@@ -245,24 +288,49 @@ export class AuthService {
   async resendOtp(phone: string) {
     const formattedPhone = formatPhoneNumber(phone);
 
-    // Send OTP via Twilio Verify
-    const sent = await this.smsService.sendVerification(formattedPhone);
-    if (!sent) {
-      throw new BadRequestException('Failed to send OTP. Please try again.');
-    }
-
     const user = await this.userRepository.findOne({
       where: { phone: formattedPhone },
     });
 
     const purpose = user ? OTPPurpose.LOGIN : OTPPurpose.REGISTRATION;
-    await this.createOTP(formattedPhone, purpose);
+    const otpCode = await this.createOTP(formattedPhone, purpose);
+
+    // Send OTP via Twilio Verify
+    const sent = await this.smsService.sendVerification(formattedPhone);
+    if (!sent) {
+      const isDev = this.configService.get<string>('NODE_ENV') !== 'production';
+      if (isDev) {
+        this.logger.warn(
+          `[DEV] Twilio failed. OTP for ${formattedPhone}: ${otpCode} — use this to ${purpose === OTPPurpose.LOGIN ? 'login' : 'register'}`,
+        );
+      } else {
+        throw new BadRequestException('Failed to send OTP. Please try again.');
+      }
+    }
 
     return {
       message: 'OTP resent successfully',
       phone: formattedPhone,
       expiresIn: '10 minutes',
     };
+  }
+
+  /**
+   * DEV ONLY — return the latest valid OTP for a phone number.
+   * Never call this in production.
+   */
+  async getDevOtp(phone: string): Promise<{ otp: string; expires_at: Date }> {
+    const formattedPhone = formatPhoneNumber(phone);
+    const otp = await this.otpRepository.findOne({
+      where: { phone: formattedPhone, is_used: false },
+      order: { created_at: 'DESC' },
+    });
+
+    if (!otp || otp.expires_at < new Date()) {
+      throw new BadRequestException('No valid OTP found for this number. Request a new OTP first.');
+    }
+
+    return { otp: otp.otp_code, expires_at: otp.expires_at };
   }
 
   /**

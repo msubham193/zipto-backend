@@ -12,10 +12,12 @@ import {
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiQuery, ApiBearerAuth } from '@nestjs/swagger';
 import { BookingService } from './booking.service';
+import { BookingGateway } from './booking.gateway';
 import {
   EstimateFareDto,
   CreateBookingDto,
   CancelBookingDto,
+  StartTripDto,
   CompleteTripDto,
 } from './dto/booking.dto';
 import { Roles } from '../../common/decorators/roles.decorator';
@@ -27,7 +29,10 @@ import { Public } from '../../common/decorators/public.decorator';
 @Controller('booking')
 @ApiBearerAuth()
 export class BookingController {
-  constructor(private readonly bookingService: BookingService) {}
+  constructor(
+    private readonly bookingService: BookingService,
+    private readonly bookingGateway: BookingGateway,
+  ) {}
 
   // Public/Customer Endpoints
 
@@ -53,6 +58,22 @@ export class BookingController {
   @ApiResponse({ status: 201, description: 'Booking created successfully' })
   async create(@GetUser() user: User, @Body() createBookingDto: CreateBookingDto) {
     return this.bookingService.create(user.id, createBookingDto);
+  }
+
+  @Get('offer/:offerId/status')
+  @Roles('customer')
+  @ApiOperation({ summary: 'Poll offer status while searching for a driver' })
+  @ApiResponse({ status: 200, description: 'searching | accepted (with booking_id) | expired' })
+  async getOfferStatus(@Param('offerId') offerId: string, @GetUser() user: User) {
+    return this.bookingService.getOfferStatus(offerId, user.id);
+  }
+
+  @Put('offer/:offerId/cancel')
+  @Roles('customer')
+  @ApiOperation({ summary: 'Cancel an offer before any driver accepts' })
+  @ApiResponse({ status: 200, description: 'Offer cancelled' })
+  async cancelOffer(@Param('offerId') offerId: string, @GetUser() user: User) {
+    return this.bookingService.cancelOffer(offerId, user.id);
   }
 
   @Get(':id')
@@ -109,6 +130,35 @@ export class BookingController {
     return this.bookingService.getNearbyBookings(latitude, longitude, radius);
   }
 
+  @Get('available')
+  @Roles('driver')
+  @ApiOperation({
+    summary: '[Driver] Get broadcast bookings available to accept',
+    description:
+      'Returns all PENDING bookings that were broadcast to nearby drivers and have not yet been accepted. The driver must be online and within range. Used to populate the Notifications screen.',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'List of broadcast bookings the driver can accept',
+    schema: {
+      example: [
+        {
+          id: 'booking-uuid',
+          pickup_address: '12 MG Road, Bangalore',
+          drop_address: 'Koramangala, Bangalore',
+          estimated_fare: 185,
+          distance: 6.4,
+          vehicle_type: 'bike',
+          created_at: '2024-03-10T10:30:00.000Z',
+        },
+      ],
+    },
+  })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  async getAvailableBookings(@GetUser() user: User) {
+    return this.bookingService.getAvailableBookings(user.id);
+  }
+
   @Get('driver/active')
   @Roles('driver')
   @ApiOperation({ summary: 'Get driver current active booking' })
@@ -139,10 +189,15 @@ export class BookingController {
 
   @Put(':id/start')
   @Roles('driver')
-  @ApiOperation({ summary: 'Start the trip' })
+  @ApiOperation({ summary: 'Start the trip (requires pickup OTP from customer)' })
   @ApiResponse({ status: 200, description: 'Trip started successfully' })
-  async startTrip(@Param('id') id: string, @GetUser() user: User) {
-    return this.bookingService.startTrip(id, user.id);
+  @ApiResponse({ status: 400, description: 'Invalid pickup OTP' })
+  async startTrip(
+    @Param('id') id: string,
+    @GetUser() user: User,
+    @Body() startTripDto: StartTripDto,
+  ) {
+    return this.bookingService.startTrip(id, user.id, startTripDto.pickup_otp);
   }
 
   @Put(':id/complete')
@@ -169,5 +224,38 @@ export class BookingController {
     @Query('limit', new DefaultValuePipe(10), ParseIntPipe) limit: number,
   ) {
     return this.bookingService.getDriverHistory(user.id, page, limit);
+  }
+
+  // ─── DEV ONLY ────────────────────────────────────────────────────────────────
+
+  @Public()
+  @Post('test/fire-offer')
+  @ApiOperation({ summary: '[DEV] Fire a fake booking_offer to a driver via WebSocket' })
+  @ApiResponse({ status: 200, description: 'Offer fired' })
+  async testFireOffer(
+    @Body()
+    body: {
+      driverId: string;
+      pickup?: string;
+      drop?: string;
+      fare?: number;
+      distance?: number;
+      vehicleType?: string;
+      timeLeft?: number;
+    },
+  ) {
+    const offer = {
+      bookingId: `test-${Date.now()}`,
+      pickup: body.pickup ?? 'Nayapalli, Bhubaneswar',
+      drop: body.drop ?? 'Esplanade, Bhubaneswar',
+      fare: body.fare ?? 120,
+      distance: body.distance ?? 4.5,
+      vehicleType: body.vehicleType ?? 'bike',
+      timeLeft: body.timeLeft ?? 30,
+    };
+
+    this.bookingGateway.emitBookingOffer(body.driverId, offer);
+
+    return { sent: true, driverId: body.driverId, offer };
   }
 }

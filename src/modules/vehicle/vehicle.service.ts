@@ -9,6 +9,7 @@ import { Repository } from 'typeorm';
 import { Vehicle, VehicleType } from './entities/vehicle.entity';
 import { DriverProfile } from '../driver/entities/driver-profile.entity';
 import { RegisterVehicleDto, UpdateVehicleDto } from './dto/vehicle.dto';
+import { NotificationService } from '../notification/notification.service';
 
 @Injectable()
 export class VehicleService {
@@ -17,6 +18,7 @@ export class VehicleService {
     private vehicleRepository: Repository<Vehicle>,
     @InjectRepository(DriverProfile)
     private driverProfileRepository: Repository<DriverProfile>,
+    private readonly notificationService: NotificationService,
   ) {}
 
   /**
@@ -52,6 +54,14 @@ export class VehicleService {
     await this.driverProfileRepository.update(driverProfile.id, {
       vehicle_id: savedVehicle.id,
     });
+
+    // Notify admin about new vehicle submission
+    await this.notificationService.pushAdmin(
+      'vehicle_submitted',
+      'New Vehicle Submitted for Approval',
+      `Vehicle ${savedVehicle.registration_number} (${savedVehicle.vehicle_type ?? 'unknown'}) has been submitted and is pending verification.`,
+      { vehicleId: savedVehicle.id, driverProfileId: driverProfile.id },
+    );
 
     return savedVehicle;
   }

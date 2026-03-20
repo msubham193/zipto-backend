@@ -1,9 +1,16 @@
-import { Controller, Get, Query, ParseIntPipe, DefaultValuePipe } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse, ApiQuery, ApiBearerAuth } from '@nestjs/swagger';
+import { Controller, Get, Post, Body, Query, ParseIntPipe, DefaultValuePipe, BadRequestException } from '@nestjs/common';
+import { ApiTags, ApiOperation, ApiResponse, ApiQuery, ApiBearerAuth, ApiBody } from '@nestjs/swagger';
 import { CoinService } from './coin.service';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { GetUser } from '../../common/decorators/get-user.decorator';
 import { User } from '../auth/entities/user.entity';
+import { IsInt, Min } from 'class-validator';
+
+class TransferToWalletDto {
+  @IsInt()
+  @Min(100, { message: 'Minimum 100 coins required to transfer to wallet' })
+  coins: number;
+}
 
 @ApiTags('Coins')
 @Controller('coins')
@@ -17,6 +24,16 @@ export class CoinController {
   @ApiResponse({ status: 200, description: 'Coin balance retrieved' })
   async getBalance(@GetUser() user: User) {
     return this.coinService.getBalance(user.id);
+  }
+
+  @Post('transfer-to-wallet')
+  @Roles('customer')
+  @ApiOperation({ summary: 'Transfer coins to wallet (min 100 coins)' })
+  @ApiBody({ type: TransferToWalletDto })
+  @ApiResponse({ status: 200, description: 'Coins transferred to wallet' })
+  @ApiResponse({ status: 400, description: 'Minimum 100 coins required' })
+  async transferToWallet(@GetUser() user: User, @Body() body: TransferToWalletDto) {
+    return this.coinService.transferToWallet(user.id, body.coins);
   }
 
   @Get('history')

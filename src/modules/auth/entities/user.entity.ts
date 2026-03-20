@@ -53,6 +53,9 @@ export class User {
   @Column({ type: 'integer', default: 0 })
   coins: number;
 
+  @Column({ type: 'decimal', precision: 10, scale: 2, default: 0 })
+  wallet_balance: number;
+
   @Column({ type: 'varchar', length: 10, default: 'en' })
   language_preference: string;
 

@@ -10,12 +10,14 @@ import { DriverProfile } from '../driver/entities/driver-profile.entity';
 import { Vehicle } from '../vehicle/entities/vehicle.entity';
 import { AuthModule } from '../auth/auth.module';
 import { BookingModule } from '../booking/booking.module';
+import { NotificationModule } from '../notification/notification.module';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([User, Booking, PricingRule, Payment, DriverProfile, Vehicle]),
     AuthModule,
     BookingModule,
+    NotificationModule,
   ],
   controllers: [AdminController],
   providers: [AdminService],

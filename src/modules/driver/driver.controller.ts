@@ -3,12 +3,15 @@ import {
   Get,
   Put,
   Post,
+  Delete,
   Body,
   Query,
+  Param,
   ParseIntPipe,
   DefaultValuePipe,
   UseInterceptors,
   UploadedFiles,
+  ParseFloatPipe,
 } from '@nestjs/common';
 import { FileFieldsInterceptor } from '@nestjs/platform-express';
 import {
@@ -27,6 +30,7 @@ import {
   UpdateLocationDto,
   OnboardDriverDto,
 } from './dto/driver.dto';
+import { CreateBankAccountDto, UpdateBankAccountDto } from './dto/bank-account.dto';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { GetUser } from '../../common/decorators/get-user.decorator';
 import { User } from '../auth/entities/user.entity';
@@ -84,11 +88,95 @@ export class DriverController {
   }
 
   @Get('earnings')
-  @ApiOperation({ summary: 'Get driver earnings dashboard' })
-  @ApiResponse({ status: 200, description: 'Earnings retrieved successfully' })
+  @ApiOperation({
+    summary: 'Get driver earnings dashboard',
+    description:
+      'Returns total earnings, trip count, fare breakdown, and current wallet balance for the given period (today / week / month).',
+  })
+  @ApiQuery({
+    name: 'period',
+    required: false,
+    enum: ['today', 'week', 'month'],
+    example: 'today',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Earnings dashboard retrieved successfully',
+    schema: {
+      example: {
+        period: 'today',
+        wallet_balance: 4500.0,
+        total_earnings: 2850.0,
+        trip_count: 12,
+        breakdown: {
+          base_fare: 1800.0,
+          distance_charge: 600.0,
+          other_charges: 450.0,
+          platform_fee: 570.0,
+          gross_fare: 3420.0,
+        },
+      },
+    },
+  })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
-  async getEarnings(@GetUser() user: User) {
-    return this.driverService.getEarnings(user.id);
+  async getEarnings(
+    @GetUser() user: User,
+    @Query('period') period: string = 'today',
+  ) {
+    const resolved: 'today' | 'week' | 'month' =
+      period === 'week' ? 'week' : period === 'month' ? 'month' : 'today';
+    return this.driverService.getEarningsDashboard(user.id, resolved);
+  }
+
+  @Post('earnings/withdraw')
+  @ApiOperation({
+    summary: 'Request a wallet withdrawal',
+    description:
+      'Deducts the requested amount from the driver wallet balance and creates a pending withdrawal request. Minimum ₹100.',
+  })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      required: ['amount'],
+      properties: {
+        amount: { type: 'number', example: 1000 },
+        bank_account_id: {
+          type: 'string',
+          format: 'uuid',
+          description: 'Optional. Defaults to primary bank account.',
+        },
+      },
+    },
+  })
+  @ApiResponse({
+    status: 201,
+    description: 'Withdrawal request created',
+    schema: {
+      example: {
+        success: true,
+        message: 'Withdrawal request submitted successfully',
+        withdrawal_id: 'uuid',
+        amount: 1000,
+        remaining_balance: 3500.0,
+      },
+    },
+  })
+  @ApiResponse({ status: 400, description: 'Insufficient balance or amount too low' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  async requestWithdrawal(
+    @GetUser() user: User,
+    @Body('amount') amount: number,
+    @Body('bank_account_id') bankAccountId?: string,
+  ) {
+    return this.driverService.requestWithdrawal(user.id, Number(amount), bankAccountId);
+  }
+
+  @Get('earnings/withdrawals')
+  @ApiOperation({ summary: 'Get withdrawal request history' })
+  @ApiResponse({ status: 200, description: 'Withdrawal history retrieved' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  async getWithdrawalHistory(@GetUser() user: User) {
+    return this.driverService.getWithdrawalHistory(user.id);
   }
 
   @Get('daily-stats')
@@ -113,6 +201,162 @@ export class DriverController {
     @Query('status') status?: string,
   ) {
     return this.driverService.getTripHistory(user.id, page, limit, status);
+  }
+
+  @Get('calendar')
+  @ApiOperation({
+    summary: 'Get driver attendance calendar',
+    description:
+      'Returns per-day presence status, earnings, trip count, and hours worked for a given month or week. ' +
+      'Use `period=month` with `year` + `month`, or `period=week` with optional `week_start` (YYYY-MM-DD, defaults to current Monday).',
+  })
+  @ApiQuery({ name: 'period', required: false, enum: ['month', 'week'], example: 'month' })
+  @ApiQuery({ name: 'year', required: false, type: Number, example: 2024 })
+  @ApiQuery({ name: 'month', required: false, type: Number, example: 3, description: '1–12' })
+  @ApiQuery({
+    name: 'week_start',
+    required: false,
+    type: String,
+    example: '2024-03-04',
+    description: 'ISO date (YYYY-MM-DD) of the Monday to start the week from (period=week only)',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Calendar data with per-day breakdown and summary',
+    schema: {
+      example: {
+        period: 'month',
+        year: 2024,
+        month: 3,
+        week_start: null,
+        week_end: null,
+        summary: {
+          days_present: 18,
+          total_days: 31,
+          total_earnings: 45000,
+          total_trips: 72,
+          total_hours: 142.5,
+        },
+        days: [
+          {
+            date: '2024-03-01',
+            day_of_week: 'Fri',
+            is_present: true,
+            earnings: 2850,
+            trips: 4,
+            hours_worked: 8.5,
+            first_trip_at: '09:15',
+            last_trip_at: '17:45',
+          },
+          {
+            date: '2024-03-02',
+            day_of_week: 'Sat',
+            is_present: false,
+            earnings: 0,
+            trips: 0,
+            hours_worked: 0,
+            first_trip_at: null,
+            last_trip_at: null,
+          },
+        ],
+      },
+    },
+  })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  async getCalendar(
+    @GetUser() user: User,
+    @Query('period') period: string = 'month',
+    @Query('year', new DefaultValuePipe(0), ParseIntPipe) year: number,
+    @Query('month', new DefaultValuePipe(0), ParseIntPipe) month: number,
+    @Query('week_start') weekStart?: string,
+  ) {
+    const now = new Date();
+    const resolvedYear = year || now.getFullYear();
+    const resolvedMonth = month || now.getMonth() + 1;
+    const resolvedPeriod: 'month' | 'week' =
+      period === 'week' ? 'week' : 'month';
+    return this.driverService.getCalendar(
+      user.id,
+      resolvedPeriod,
+      resolvedYear,
+      resolvedMonth,
+      weekStart,
+    );
+  }
+
+  // ─── Bank Accounts ────────────────────────────────────────────────────────
+
+  @Get('bank-accounts')
+  @ApiOperation({ summary: '[Driver] Get all my bank accounts' })
+  @ApiResponse({
+    status: 200,
+    description: 'List of bank accounts (primary first)',
+    schema: {
+      example: [
+        {
+          id: 'uuid',
+          account_holder_name: 'Rahul Kumar',
+          bank_name: 'State Bank of India',
+          account_number: '123456789012',
+          ifsc_code: 'SBIN0001234',
+          branch: 'MG Road, Bangalore',
+          account_type: 'savings',
+          is_primary: true,
+          is_verified: false,
+          created_at: '2024-03-01T10:00:00.000Z',
+        },
+      ],
+    },
+  })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  async getBankAccounts(@GetUser() user: User) {
+    return this.driverService.getBankAccounts(user.id);
+  }
+
+  @Post('bank-accounts')
+  @ApiOperation({ summary: '[Driver] Add a bank account' })
+  @ApiBody({ type: CreateBankAccountDto })
+  @ApiResponse({
+    status: 201,
+    description: 'Bank account created. First account is auto-set as primary.',
+  })
+  @ApiResponse({ status: 400, description: 'Validation error' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  async addBankAccount(@GetUser() user: User, @Body() dto: CreateBankAccountDto) {
+    return this.driverService.addBankAccount(user.id, dto);
+  }
+
+  @Put('bank-accounts/:id')
+  @ApiOperation({ summary: '[Driver] Update a bank account' })
+  @ApiBody({ type: UpdateBankAccountDto })
+  @ApiResponse({ status: 200, description: 'Bank account updated' })
+  @ApiResponse({ status: 404, description: 'Bank account not found' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  async updateBankAccount(
+    @GetUser() user: User,
+    @Param('id') id: string,
+    @Body() dto: UpdateBankAccountDto,
+  ) {
+    return this.driverService.updateBankAccount(user.id, id, dto);
+  }
+
+  @Delete('bank-accounts/:id')
+  @ApiOperation({ summary: '[Driver] Delete a bank account' })
+  @ApiResponse({ status: 200, description: 'Bank account deleted' })
+  @ApiResponse({ status: 404, description: 'Bank account not found' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  async deleteBankAccount(@GetUser() user: User, @Param('id') id: string) {
+    await this.driverService.deleteBankAccount(user.id, id);
+    return { success: true };
+  }
+
+  @Put('bank-accounts/:id/primary')
+  @ApiOperation({ summary: '[Driver] Set a bank account as primary' })
+  @ApiResponse({ status: 200, description: 'Bank account set as primary' })
+  @ApiResponse({ status: 404, description: 'Bank account not found' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  async setPrimaryBankAccount(@GetUser() user: User, @Param('id') id: string) {
+    return this.driverService.setPrimaryBankAccount(user.id, id);
   }
 
   @Post('onboard')

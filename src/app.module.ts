@@ -23,6 +23,7 @@ import { AdminModule } from './modules/admin/admin.module';
 import { NotificationModule } from './modules/notification/notification.module';
 import { CoinModule } from './modules/coin/coin.module';
 import { BullModule } from '@nestjs/bull';
+import { ScheduleModule } from '@nestjs/schedule';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { RolesGuard } from './common/guards/roles.guard';
 
@@ -61,14 +62,23 @@ import { RolesGuard } from './common/guards/roles.guard';
     BullModule.forRootAsync({
       imports: [ConfigModule],
       inject: [ConfigService],
-      useFactory: async (configService: ConfigService) => ({
-        redis: {
-          host: configService.get('redis.host'),
-          port: configService.get('redis.port'),
-          password: configService.get('redis.password'),
-        },
-      }),
+      useFactory: async (configService: ConfigService) => {
+        const host = configService.get('redis.host') || 'localhost';
+        const port = configService.get('redis.port') || 6379;
+        const password = configService.get('redis.password') || undefined;
+        console.log(`[BullModule] Connecting to Redis at ${host}:${port}`);
+        return {
+          redis: {
+            host,
+            port,
+            password,
+          },
+        };
+      },
     }),
+
+    // Scheduling
+    ScheduleModule.forRoot(),
 
     // Global Services
     ServicesModule,
