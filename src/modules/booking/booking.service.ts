@@ -957,9 +957,21 @@ export class BookingService {
    * Start trip — driver must provide pickup OTP received from customer
    */
   async startTrip(bookingId: string, driverId: string, pickupOtp: string) {
-    const booking = await this.bookingRepository.findOne({
+    // Resolve offerId → real bookingId (driver may still hold the offer UUID)
+    let resolvedId = bookingId;
+    let booking = await this.bookingRepository.findOne({
       where: { id: bookingId, driver_id: driverId },
     });
+
+    if (!booking) {
+      const realId = await this.cacheManager.get<string>(`offer:accepted:${bookingId}`);
+      if (realId) {
+        resolvedId = realId;
+        booking = await this.bookingRepository.findOne({
+          where: { id: realId, driver_id: driverId },
+        });
+      }
+    }
 
     if (!booking) {
       throw new NotFoundException('Booking not found');
@@ -1000,10 +1012,21 @@ export class BookingService {
   async completeTrip(bookingId: string, driverId: string, completeTripDto?: CompleteTripDto) {
     await this.ensureDefaultPricingRules();
 
-    const booking = await this.bookingRepository.findOne({
+    // Resolve offerId → real bookingId
+    let booking = await this.bookingRepository.findOne({
       where: { id: bookingId, driver_id: driverId },
       relations: ['vehicle'],
     });
+
+    if (!booking) {
+      const realId = await this.cacheManager.get<string>(`offer:accepted:${bookingId}`);
+      if (realId) {
+        booking = await this.bookingRepository.findOne({
+          where: { id: realId, driver_id: driverId },
+          relations: ['vehicle'],
+        });
+      }
+    }
 
     if (!booking) {
       throw new NotFoundException('Booking not found');
