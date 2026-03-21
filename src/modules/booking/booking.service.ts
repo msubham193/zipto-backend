@@ -304,7 +304,6 @@ export class BookingService {
       duration:         fareEstimate.duration,
       estimated_fare:   fareEstimate.estimated_fare,
       fare_breakdown:   fareEstimate.breakdown,
-      is_night_booking: fareEstimate.is_night_booking,
       pickup_otp,
       delivery_otp,
     }, OFFER_TTL_MS);
@@ -855,7 +854,7 @@ export class BookingService {
         fare_breakdown:  offerData.fare_breakdown,
         number_of_helpers: 0,
         extra_stops_count: (offerData.extra_drop_locations || []).length,
-        is_night_booking: offerData.is_night_booking,
+        is_night_booking: this.isNightTime(),
         status:          BookingStatus.ACCEPTED,
         scheduled_time:  offerData.scheduled_time ? new Date(offerData.scheduled_time) : undefined,
         receiver_name:   offerData.receiver_name,
