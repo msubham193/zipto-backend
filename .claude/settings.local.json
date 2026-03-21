@@ -57,7 +57,10 @@
       "Bash(powershell -Command \"Get-Content ''C:\\\\Users\\\\subha\\\\Desktop\\\\DESKTOP\\\\sandeep\\\\Zipto\\\\app.json''\")",
       "Bash(grep -rn \"StartTripDto\\\\|pickup_otp\" \"C:\\\\Users\\\\subha\\\\Desktop\\\\DESKTOP\\\\zipto-freelancing\\\\skido-backend\\\\src\\\\modules\\\\booking\"\" --include=\"*.ts \")",
       "Bash(docker ps:*)",
-      "Bash(find C:UserssubhaDesktopDESKTOPzipto-freelancingzipto_rider -name *.ts -path */api/*)"
+      "Bash(find C:UserssubhaDesktopDESKTOPzipto-freelancingzipto_rider -name *.ts -path */api/*)",
+      "Bash(find C:UserssubhaDesktopDESKTOPsandeepZiptosrcmodulesbooking -name *.ts -o -name *.controller.ts)",
+      "Bash(find C:UserssubhaDesktopDESKTOPzipto-freelancingskido-backend -name *booking*controller* -o -name *booking.controller*)",
+      "Bash(find C:UserssubhaDesktopDESKTOPzipto-freelancingskido-backend -type f -path */modules/booking/*)"
     ]
   }
 }

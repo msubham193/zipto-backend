@@ -97,6 +97,13 @@ export class BookingController {
     return this.bookingService.cancel(id, user.id, cancelDto);
   }
 
+  @Get('customer/active')
+  @Roles('customer')
+  @ApiOperation({ summary: 'Get current active booking for customer' })
+  async getCustomerActiveBooking(@GetUser() user: User) {
+    return this.bookingService.getCustomerActiveBooking(user.id);
+  }
+
   @Get('customer/history')
   @Roles('customer')
   @ApiOperation({ summary: 'Get customer booking history' })

@@ -141,50 +141,42 @@ export class BookingService {
       throw new NotFoundException(`Pricing rule not found for vehicle type: ${vehicle_type}`);
     }
 
+    // --- Constants ---
+    const PLATFORM_FEE = 5;
+    const PLATFORM_FEE_GST_RATE = 0.18;
+    const platformFeeGst = this.round(PLATFORM_FEE * PLATFORM_FEE_GST_RATE);
+    const totalPlatformFee = PLATFORM_FEE + platformFeeGst;
+
     // --- Calculate fare breakdown ---
     const baseFare = Number(pricingRule.base_fare);
     const perKmRate = Number(pricingRule.per_km_rate);
     const multiStopFee = Number(pricingRule.multi_stop_fee);
-    const nightSurchargePercent = Number(pricingRule.night_surcharge_percent);
     const commissionPercent = Number(pricingRule.commission_percent);
 
-    // 1. Distance charge: Fare = BaseFare + (Distance - BaseKM) × PerKM
+    // 1. Distance charge: max(0, distance - baseKM) × perKM
     const baseDistanceKm = Number(pricingRule.base_distance_km);
     const chargeableDistance = Math.max(0, distance - baseDistanceKm);
     const distanceCharge = this.round(chargeableDistance * perKmRate);
 
-    // 2. Time cost removed from pricing model
-    const timeCharge = 0;
-
-    // 3. Multi-stop charge: fee per extra drop-off
+    // 2. Multi-stop charge
     const multiStopCharge = this.round(extra_stops * multiStopFee);
 
-    // 4. Subtotal before demand adjustment
-    let subtotal = baseFare + distanceCharge + multiStopCharge;
+    // 3. fare = baseFare + distanceCharge + multiStopCharge + platformFee(incl. GST)
+    const fareBeforeSurge = baseFare + distanceCharge + multiStopCharge + totalPlatformFee;
 
-    // 6. Demand adjustment (currently applied during night deliveries)
-    const isNight = this.isNightTime();
-    const demandAdjustmentPercent = isNight ? nightSurchargePercent : 0;
-    const demandAdjustment = isNight ? this.round(subtotal * (demandAdjustmentPercent / 100)) : 0;
+    // 4. Dynamic surge multiplier (peak hours + demand)
+    const surgeMultiplier = await this.calculateSurgeMultiplier();
 
-    // 7. Estimated fare
-    let estimatedFare = subtotal + demandAdjustment;
+    // 5. finalFare = fare * surgeMultiplier
+    let estimatedFare = this.round(fareBeforeSurge * surgeMultiplier);
 
-    // 8. Apply any configured surge multiplier
-    const surgeMultiplier = Number(pricingRule.surge_multiplier);
-    if (surgeMultiplier && surgeMultiplier > 1) {
-      estimatedFare = this.round(estimatedFare * surgeMultiplier);
-    }
-
-    // 9. Apply minimum fare floor
+    // 6. Apply minimum fare floor
     const minimumFare = pricingRule.minimum_fare ? Number(pricingRule.minimum_fare) : null;
     if (minimumFare && estimatedFare < minimumFare) {
       estimatedFare = minimumFare;
     }
 
-    estimatedFare = this.round(estimatedFare);
-
-    // 10. Calculate commission split (for display purposes)
+    // 7. Commission split
     const skidoCommission = this.round(estimatedFare * (commissionPercent / 100));
     const driverEarnings = this.round(estimatedFare - skidoCommission);
 
@@ -192,19 +184,16 @@ export class BookingService {
       distance: this.round(distance),
       duration,
       estimated_fare: estimatedFare,
-      is_night_booking: isNight,
       breakdown: {
         base_fare: baseFare,
-        base_distance_km: Number(pricingRule.base_distance_km),
+        base_distance_km: baseDistanceKm,
         distance_charge: distanceCharge,
-        time_charge: timeCharge,
+        time_charge: 0,
         multi_stop_charge: multiStopCharge,
-        demand_adjustment: demandAdjustment,
-        night_surcharge: demandAdjustment,
-        waiting_charge: 0, // Calculated at trip completion
-        toll_amount: 0, // Added at trip completion
+        platform_fee: PLATFORM_FEE,
+        platform_fee_gst: platformFeeGst,
         surge_multiplier: surgeMultiplier,
-        subtotal: this.round(subtotal),
+        subtotal: this.round(fareBeforeSurge),
         minimum_fare_applied: minimumFare ? estimatedFare === minimumFare : false,
         skido_commission: skidoCommission,
         driver_earnings: driverEarnings,
@@ -214,11 +203,39 @@ export class BookingService {
         free_waiting_minutes: Number(pricingRule.free_waiting_minutes),
         waiting_charge_per_minute: Number(pricingRule.waiting_charge_per_minute),
         multi_stop_fee: multiStopFee,
-        demand_adjustment_percent: demandAdjustmentPercent,
-        night_surcharge_percent: nightSurchargePercent,
         commission_percent: commissionPercent,
       },
     };
+  }
+
+  /**
+   * Dynamic surge multiplier based on peak hours and live demand.
+   * Levels: 1.0 (normal) → 1.2 (light) → 1.3 (medium) → 1.4 (high) → 1.6 (peak)
+   */
+  private async calculateSurgeMultiplier(): Promise<number> {
+    const hour = new Date().getHours(); // 0-23 local server time
+
+    // Peak-hour time surges
+    let timeSurge = 1.0;
+    if (hour >= 8 && hour < 10) timeSurge = 1.2;   // Morning rush
+    if (hour >= 18 && hour < 21) timeSurge = 1.3;  // Evening rush
+
+    // Demand-based surge: count active pending bookings in DB
+    let demandSurge = 1.0;
+    try {
+      const activeCount = await this.bookingRepository.count({
+        where: { status: In([BookingStatus.PENDING, BookingStatus.ACCEPTED, BookingStatus.DRIVER_ASSIGNED]) },
+      });
+      if (activeCount >= 30) demandSurge = 1.6;
+      else if (activeCount >= 20) demandSurge = 1.4;
+      else if (activeCount >= 12) demandSurge = 1.3;
+      else if (activeCount >= 6) demandSurge = 1.2;
+    } catch {
+      // If query fails, fall back to time-only surge
+    }
+
+    // Use the higher of time-based or demand-based surge, cap at 1.6
+    return Math.min(1.6, Math.max(timeSurge, demandSurge));
   }
 
   /**
@@ -291,6 +308,9 @@ export class BookingService {
       pickup_otp,
       delivery_otp,
     }, OFFER_TTL_MS);
+
+    // Track active offer per customer so the status banner can find it
+    await this.cacheManager.set(`customer:active_offer:${userId}`, offerId, OFFER_TTL_MS);
 
     this.logger.log(`Offer created: ${offerId}, type: ${booking_type}, vehicle: ${vehicle_type}`);
 
@@ -1138,6 +1158,80 @@ export class BookingService {
         driver_earnings: driverEarnings,
       },
     };
+  }
+
+  /**
+   * Get the current active booking for a customer (used by the live status banner).
+   * Checks Redis for a searching offer first, then DB for accepted/ongoing bookings.
+   */
+  async getCustomerActiveBooking(userId: string): Promise<any> {
+    // 1. Check DB for an active booking
+    const booking = await this.bookingRepository.findOne({
+      where: {
+        customer_id: userId,
+        status: In([
+          BookingStatus.PENDING,
+          BookingStatus.ACCEPTED,
+          BookingStatus.DRIVER_ASSIGNED,
+          BookingStatus.ONGOING,
+        ]),
+      },
+      order: { created_at: 'DESC' },
+    });
+
+    if (booking) {
+      return {
+        id: booking.id,
+        status: booking.status,
+        pickup_address: booking.pickup_address,
+        drop_address: booking.drop_address,
+        estimated_fare: booking.estimated_fare,
+        vehicle_type: booking.vehicle_type,
+        has_driver: !!booking.driver_id,
+      };
+    }
+
+    // 2. Check Redis for a still-searching offer
+    const activeOfferId = await this.cacheManager.get<string>(`customer:active_offer:${userId}`);
+    if (!activeOfferId) return null;
+
+    // Check if offer was accepted → get real booking
+    const realBookingId = await this.cacheManager.get<string>(`offer:accepted:${activeOfferId}`);
+    if (realBookingId) {
+      const realBooking = await this.bookingRepository.findOne({ where: { id: realBookingId } });
+      if (realBooking && realBooking.status !== BookingStatus.COMPLETED && realBooking.status !== BookingStatus.CANCELLED) {
+        return {
+          id: realBookingId,
+          offer_id: activeOfferId,
+          status: realBooking.status,
+          pickup_address: realBooking.pickup_address,
+          drop_address: realBooking.drop_address,
+          estimated_fare: realBooking.estimated_fare,
+          vehicle_type: realBooking.vehicle_type,
+          has_driver: true,
+        };
+      }
+      await this.cacheManager.del(`customer:active_offer:${userId}`);
+      return null;
+    }
+
+    // Offer still searching in Redis
+    const offerData = await this.cacheManager.get<any>(`offer:${activeOfferId}`);
+    if (offerData) {
+      return {
+        id: activeOfferId,
+        status: BookingStatus.PENDING,
+        pickup_address: offerData.pickup_address,
+        drop_address: offerData.drop_address,
+        estimated_fare: offerData.estimated_fare,
+        vehicle_type: offerData.vehicle_type,
+        has_driver: false,
+      };
+    }
+
+    // Offer expired
+    await this.cacheManager.del(`customer:active_offer:${userId}`);
+    return null;
   }
 
   /**

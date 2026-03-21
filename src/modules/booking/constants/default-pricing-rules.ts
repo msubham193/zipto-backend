@@ -44,7 +44,6 @@ const COMMON_RULE_FIELDS = {
   free_waiting_minutes: 70,
   waiting_charge_per_minute: 2,
   night_surcharge_percent: 15,
-  commission_percent: 25,
   city: DEFAULT_PRICING_CITY,
   is_active: true,
 } as const;
@@ -64,6 +63,7 @@ export function getDefaultPricingRules(city: string = DEFAULT_PRICING_CITY): Def
       best_for: 'Documents, food, medicines',
       multi_stop_fee: 20,
       helper_charge_per_person: 0,
+      commission_percent: 20,
     },
     {
       ...COMMON_RULE_FIELDS,
@@ -78,6 +78,7 @@ export function getDefaultPricingRules(city: string = DEFAULT_PRICING_CITY): Def
       best_for: 'Small parcels, groceries',
       multi_stop_fee: 20,
       helper_charge_per_person: 0,
+      commission_percent: 20,
     },
     {
       ...COMMON_RULE_FIELDS,
@@ -92,6 +93,7 @@ export function getDefaultPricingRules(city: string = DEFAULT_PRICING_CITY): Def
       best_for: 'Shop deliveries, bulk groceries',
       multi_stop_fee: 25,
       helper_charge_per_person: 200,
+      commission_percent: 18,
     },
     {
       ...COMMON_RULE_FIELDS,
@@ -106,6 +108,7 @@ export function getDefaultPricingRules(city: string = DEFAULT_PRICING_CITY): Def
       best_for: 'Furniture, appliances',
       multi_stop_fee: 30,
       helper_charge_per_person: 200,
+      commission_percent: 15,
     },
     {
       ...COMMON_RULE_FIELDS,
@@ -120,6 +123,7 @@ export function getDefaultPricingRules(city: string = DEFAULT_PRICING_CITY): Def
       best_for: 'Warehouse to shop, heavy goods',
       multi_stop_fee: 30,
       helper_charge_per_person: 200,
+      commission_percent: 12,
     },
   ];
 }
