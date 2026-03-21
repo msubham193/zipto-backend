@@ -478,11 +478,9 @@ export class BookingService {
     const nearbyDrivers = await this.findNearbyDrivers(latitude, longitude, 10, vehicleType);
 
     if (nearbyDrivers.length === 0) {
-      this.bookingGateway.notifyUser(offerData.customer_id, 'no_drivers_found', {
-        bookingId: offerId,
-        message: 'No drivers available in your area. Please try again.',
-      });
-      await this.cleanupOffer(offerId);
+      // No drivers to broadcast to — leave offer in Redis and let the
+      // search_timeout job (60s) handle cleanup and customer notification.
+      this.logger.log(`[broadcastBookingToNearby] No nearby drivers for offer ${offerId}, awaiting search_timeout`);
       return;
     }
 
