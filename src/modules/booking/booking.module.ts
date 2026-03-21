@@ -7,7 +7,6 @@ import { PricingRule } from './entities/pricing-rule.entity';
 import { AuthModule } from '../auth/auth.module';
 import { CoinModule } from '../coin/coin.module';
 import { BullModule } from '@nestjs/bull';
-import { CacheModule } from '@nestjs/cache-manager';
 import { BookingGateway } from './booking.gateway';
 import { BookingProcessor } from './booking.processor';
 import { Payment } from '../payment/entities/payment.entity';
@@ -17,7 +16,6 @@ import { Payment } from '../payment/entities/payment.entity';
     TypeOrmModule.forFeature([Booking, PricingRule, Payment]),
     AuthModule,
     CoinModule,
-    CacheModule.register({ ttl: 0, max: 500 }),
     BullModule.registerQueue({
       name: 'booking_assignment',
     }),

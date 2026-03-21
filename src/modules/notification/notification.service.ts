@@ -1,9 +1,8 @@
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Cron, CronExpression } from '@nestjs/schedule';
-import { CACHE_MANAGER } from '@nestjs/cache-manager';
-import { Cache } from 'cache-manager';
+import { RedisService } from '../../services/redis.service';
 import { v4 as uuidv4 } from 'uuid';
 import { Booking, BookingStatus } from '../booking/entities/booking.entity';
 import { DriverProfile } from '../driver/entities/driver-profile.entity';
@@ -53,7 +52,7 @@ export class NotificationService {
   private readonly logger = new Logger(NotificationService.name);
 
   constructor(
-    @Inject(CACHE_MANAGER) private cacheManager: Cache,
+    private cacheManager: RedisService,
     private bookingGateway: BookingGateway,
     @InjectRepository(Booking) private bookingRepository: Repository<Booking>,
     @InjectRepository(DriverProfile)
@@ -247,12 +246,11 @@ export class NotificationService {
   }
 
   private async safeGet<T>(key: string): Promise<T | undefined> {
-    const raw = await (this.cacheManager as any).get(key);
-    return raw as T | undefined;
+    return (await this.cacheManager.get<T>(key)) ?? undefined;
   }
 
   private async safeSet(key: string, value: unknown): Promise<void> {
-    await (this.cacheManager as any).set(key, value, NOTIFICATION_TTL_MS);
+    await this.cacheManager.set(key, value, NOTIFICATION_TTL_MS);
   }
 
   // ─────────────────────────────────────────────────────────────────────────

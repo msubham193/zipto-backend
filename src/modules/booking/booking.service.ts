@@ -1,5 +1,4 @@
 import {
-  Inject,
   Injectable,
   Logger,
   NotFoundException,
@@ -25,8 +24,7 @@ import { CoinService } from '../coin/coin.service';
 import { InjectQueue } from '@nestjs/bull';
 import { Queue } from 'bull';
 import { BookingGateway } from './booking.gateway';
-import { CACHE_MANAGER } from '@nestjs/cache-manager';
-import { Cache } from 'cache-manager';
+import { RedisService } from '../../services/redis.service';
 import {
   DEFAULT_PRICING_CITY,
   getDefaultPricingRules,
@@ -53,7 +51,7 @@ export class BookingService {
     private coinService: CoinService,
     @InjectQueue('booking_assignment') private bookingQueue: Queue,
     private bookingGateway: BookingGateway,
-    @Inject(CACHE_MANAGER) private cacheManager: Cache,
+    private cacheManager: RedisService,
   ) {}
 
   private async ensureDefaultPricingRules() {
