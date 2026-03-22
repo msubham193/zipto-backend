@@ -159,7 +159,9 @@ export class AdminService {
    * Get all vehicles with pagination, optional status filter and search
    */
   async getAllVehicles(query: { page?: number; limit?: number; status?: string; search?: string }) {
-    const { page = 1, limit = 20, status, search } = query;
+    const page = Number(query.page) || 1;
+    const limit = Number(query.limit) || 20;
+    const { status, search } = query;
 
     const qb = this.vehicleRepository
       .createQueryBuilder('vehicle')
@@ -232,7 +234,9 @@ export class AdminService {
    * Get all bookings with filters
    */
   async getAllBookings(query: { status?: BookingStatus; page?: number; limit?: number }) {
-    const { status, page = 1, limit = 20 } = query;
+    const { status } = query;
+    const page = Number(query.page) || 1;
+    const limit = Number(query.limit) || 20;
 
     const queryBuilder = this.bookingRepository
       .createQueryBuilder('booking')
@@ -296,7 +300,8 @@ export class AdminService {
    * Get all customers with pagination
    */
   async getAllCustomers(query: { page?: number; limit?: number }) {
-    const { page = 1, limit = 20 } = query;
+    const page = Number(query.page) || 1;
+    const limit = Number(query.limit) || 20;
 
     const [customers, total] = await this.userRepository.findAndCount({
       where: { role: UserRole.CUSTOMER },
@@ -318,7 +323,8 @@ export class AdminService {
    * Get all drivers with pagination
    */
   async getAllDrivers(query: { page?: number; limit?: number }) {
-    const { page = 1, limit = 20 } = query;
+    const page = Number(query.page) || 1;
+    const limit = Number(query.limit) || 20;
 
     const [drivers, total] = await this.driverProfileRepository.findAndCount({
       relations: ['user'],
@@ -441,7 +447,8 @@ export class AdminService {
    * Get customer booking history (paginated)
    */
   async getCustomerBookings(customerId: string, query: { page?: number; limit?: number }) {
-    const { page = 1, limit = 20 } = query;
+    const page = Number(query.page) || 1;
+    const limit = Number(query.limit) || 20;
     const [bookings, total] = await this.bookingRepository.findAndCount({
       where: { customer_id: customerId },
       relations: ['driver', 'payments'],
@@ -534,7 +541,9 @@ export class AdminService {
    * Get all payments with pagination
    */
   async getAllPayments(query: { page?: number; limit?: number; status?: string }) {
-    const { page = 1, limit = 20, status } = query;
+    const page = Number(query.page) || 1;
+    const limit = Number(query.limit) || 20;
+    const { status } = query;
     const qb = this.paymentRepository
       .createQueryBuilder('payment')
       .leftJoinAndSelect('payment.booking', 'booking')
@@ -556,7 +565,8 @@ export class AdminService {
    * Get customer payment history
    */
   async getCustomerPayments(customerId: string, query: { page?: number; limit?: number }) {
-    const { page = 1, limit = 20 } = query;
+    const page = Number(query.page) || 1;
+    const limit = Number(query.limit) || 20;
     const customer = await this.userRepository.findOne({ where: { id: customerId, role: UserRole.CUSTOMER } });
     if (!customer) throw new NotFoundException('Customer not found');
 
