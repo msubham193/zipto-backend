@@ -673,7 +673,10 @@ export class AdminService {
     // Set end of today
     end.setHours(23, 59, 59, 999);
 
-    switch (query.period) {
+    // If no period but custom dates provided, treat as custom
+    const period = query.period || (query.startDate || query.endDate ? 'custom' : undefined);
+
+    switch (period) {
       case 'today':
         start.setHours(0, 0, 0, 0);
         break;
@@ -767,17 +770,17 @@ export class AdminService {
     const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) || 1;
 
     return {
-      success: true,
-      data: {
-        chartData: bookingsByDay,
-        summary: {
-          totalBookings,
-          completed,
-          cancelled,
-          completionRate:
-            totalBookings > 0 ? parseFloat(((completed / totalBookings) * 100).toFixed(1)) : 0,
-          avgPerDay: Math.round(totalBookings / diffDays),
-        },
+      chartData: bookingsByDay.map((row) => ({
+        date: row.date,
+        value: parseInt(row.value, 10) || 0,
+      })),
+      summary: {
+        totalBookings,
+        completed,
+        cancelled,
+        completionRate:
+          totalBookings > 0 ? parseFloat(((completed / totalBookings) * 100).toFixed(1)) : 0,
+        avgPerDay: Math.round(totalBookings / diffDays),
       },
     };
   }
@@ -817,25 +820,25 @@ export class AdminService {
     const summaryResult = await queryBuilder
       .clone()
       .select('SUM(payment.amount)', 'totalRevenue')
+      .addSelect('SUM(payment.driver_earnings)', 'driverPayouts')
       .getRawOne();
 
     const totalRevenue = parseFloat(summaryResult?.totalRevenue || '0');
-    // Assuming 20% platform fee if not explicitly tracked
-    const platformFee = totalRevenue * 0.2;
-    const driverPayouts = totalRevenue * 0.8;
+    const driverPayouts = parseFloat(summaryResult?.driverPayouts || '0');
+    const platformFee = parseFloat((totalRevenue - driverPayouts).toFixed(2));
 
     const totalPayments = await queryBuilder.clone().getCount();
 
     return {
-      success: true,
-      data: {
-        chartData: revenueByDay,
-        summary: {
-          totalRevenue,
-          platformFee,
-          driverPayouts,
-          avgOrderValue: totalPayments > 0 ? Math.round(totalRevenue / totalPayments) : 0,
-        },
+      chartData: revenueByDay.map((row) => ({
+        date: row.date,
+        value: parseFloat(row.value) || 0,
+      })),
+      summary: {
+        totalRevenue,
+        platformFee,
+        driverPayouts,
+        avgOrderValue: totalPayments > 0 ? parseFloat((totalRevenue / totalPayments).toFixed(2)) : 0,
       },
     };
   }
@@ -897,10 +900,7 @@ export class AdminService {
     }));
 
     return {
-      success: true,
-      data: {
-        topDrivers: formattedDrivers,
-      },
+      topDrivers: formattedDrivers,
     };
   }
 
@@ -969,20 +969,16 @@ export class AdminService {
     const averageRating = parseFloat(avgRatingResult?.avg || '0').toFixed(1);
 
     return {
-      success: true,
-      data: {
-        acquisition: {
-          newCustomers,
-          returningCustomers,
-          retentionRate,
-          churnRate,
-        },
-        satisfaction: {
-          averageRating: parseFloat(averageRating),
-          fiveStarReviews: 0, // Placeholder as we lack reviews table
-          supportTickets: 0, // Placeholder
-          resolutionRate: 0, // Placeholder
-        },
+      acquisition: {
+        newCustomers,
+        returningCustomers,
+        retentionRate,
+        churnRate,
+      },
+      satisfaction: {
+        averageRating: parseFloat(averageRating),
+        fiveStarReviews: 0,
+        supportTickets: 0,
       },
     };
   }
@@ -1005,18 +1001,23 @@ export class AdminService {
     switch (query.type) {
       case 'bookings':
         const bookingReport = await this.getBookingReports(query);
-        data = bookingReport.data.chartData;
+        data = bookingReport.chartData;
         headers = ['Date', 'Bookings'];
         break;
       case 'revenue':
         const revenueReport = await this.getRevenueReports(query);
-        data = revenueReport.data.chartData;
+        data = revenueReport.chartData;
         headers = ['Date', 'Revenue'];
         break;
       case 'drivers':
         const driverReport = await this.getDriverReports(query);
-        data = driverReport.data.topDrivers;
+        data = driverReport.topDrivers;
         headers = ['ID', 'Name', 'Trips', 'Earnings', 'Rating'];
+        break;
+      case 'customers':
+        const customerReport = await this.getCustomerReports(query);
+        data = [customerReport.acquisition];
+        headers = ['NewCustomers', 'ReturningCustomers', 'RetentionRate', 'ChurnRate'];
         break;
       default:
         throw new Error('Invalid export type');
