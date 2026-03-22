@@ -8,6 +8,7 @@ import { GetBookingsDto } from './dto/get-bookings.dto';
 import { PaginationDto } from './dto/pagination.dto';
 import { ReportsQueryDto } from './dto/reports-query.dto';
 import { CreatePricingRuleDto, UpdatePricingRuleDto } from './dto/pricing-rule.dto';
+import { VehiclesQueryDto } from './dto/vehicles-query.dto';
 
 @ApiTags('Admin')
 @Controller('admin')
@@ -48,6 +49,20 @@ export class AdminController {
     return this.adminService.rejectDriver(id);
   }
 
+  @Put('drivers/:id/suspend')
+  @ApiOperation({ summary: 'Suspend a driver' })
+  @ApiResponse({ status: 200, description: 'Driver suspended' })
+  async suspendDriver(@Param('id') id: string, @Body('reason') reason?: string) {
+    return this.adminService.suspendDriver(id, reason);
+  }
+
+  @Put('drivers/:id/activate')
+  @ApiOperation({ summary: 'Activate a suspended driver' })
+  @ApiResponse({ status: 200, description: 'Driver activated' })
+  async activateDriver(@Param('id') id: string) {
+    return this.adminService.activateDriver(id);
+  }
+
   @Get('vehicles/pending')
   @ApiOperation({ summary: 'Get pending vehicle verifications' })
   @ApiResponse({ status: 200, description: 'Pending vehicles retrieved' })
@@ -56,9 +71,9 @@ export class AdminController {
   }
 
   @Get('vehicles')
-  @ApiOperation({ summary: 'Get all vehicles with pagination' })
+  @ApiOperation({ summary: 'Get all vehicles with pagination, optional status/search filter' })
   @ApiResponse({ status: 200, description: 'Vehicles retrieved' })
-  async getAllVehicles(@Query() query: PaginationDto) {
+  async getAllVehicles(@Query() query: VehiclesQueryDto) {
     return this.adminService.getAllVehicles(query);
   }
 
@@ -91,6 +106,35 @@ export class AdminController {
     return this.adminService.getAllBookings(query);
   }
 
+  @Get('bookings/:id')
+  @ApiOperation({ summary: 'Get booking details by ID' })
+  @ApiResponse({ status: 200, description: 'Booking retrieved' })
+  async getBookingById(@Param('id') id: string) {
+    return this.adminService.getBookingById(id);
+  }
+
+  @Get('bookings/:id/tracking')
+  @ApiOperation({ summary: 'Get booking live tracking info' })
+  @ApiResponse({ status: 200, description: 'Tracking info retrieved' })
+  @ApiResponse({ status: 404, description: 'Booking not found' })
+  async getBookingTracking(@Param('id') id: string) {
+    return this.adminService.getBookingTracking(id);
+  }
+
+  @Put('bookings/:id/cancel')
+  @ApiOperation({ summary: 'Cancel booking as admin' })
+  @ApiResponse({ status: 200, description: 'Booking cancelled' })
+  async cancelBooking(@Param('id') id: string, @Body('reason') reason: string) {
+    return this.adminService.cancelBooking(id, reason || 'Cancelled by admin');
+  }
+
+  @Put('bookings/:id/reassign')
+  @ApiOperation({ summary: 'Reassign booking to a different driver' })
+  @ApiResponse({ status: 200, description: 'Booking reassigned' })
+  async reassignBooking(@Param('id') id: string, @Body('driverId') driverId: string) {
+    return this.adminService.reassignBooking(id, driverId);
+  }
+
   @Get('analytics')
   @ApiOperation({ summary: 'Get analytics data (last 30 days)' })
   @ApiResponse({ status: 200, description: 'Analytics retrieved' })
@@ -103,6 +147,49 @@ export class AdminController {
   @ApiResponse({ status: 200, description: 'Customers retrieved' })
   async getAllCustomers(@Query() query: PaginationDto) {
     return this.adminService.getAllCustomers(query);
+  }
+
+  @Get('customers/:id')
+  @ApiOperation({ summary: 'Get customer by ID with stats' })
+  @ApiResponse({ status: 200, description: 'Customer retrieved' })
+  async getCustomerById(@Param('id') id: string) {
+    return this.adminService.getCustomerById(id);
+  }
+
+  @Put('customers/:id/block')
+  @ApiOperation({ summary: 'Block a customer' })
+  @ApiResponse({ status: 200, description: 'Customer blocked' })
+  async blockCustomer(@Param('id') id: string) {
+    return this.adminService.blockCustomer(id);
+  }
+
+  @Put('customers/:id/unblock')
+  @ApiOperation({ summary: 'Unblock a customer' })
+  @ApiResponse({ status: 200, description: 'Customer unblocked' })
+  async unblockCustomer(@Param('id') id: string) {
+    return this.adminService.unblockCustomer(id);
+  }
+
+  @Get('customers/:id/bookings')
+  @ApiOperation({ summary: 'Get customer booking history' })
+  @ApiResponse({ status: 200, description: 'Bookings retrieved' })
+  async getCustomerBookings(
+    @Param('id') id: string,
+    @Query('page') page?: number,
+    @Query('limit') limit?: number,
+  ) {
+    return this.adminService.getCustomerBookings(id, { page, limit });
+  }
+
+  @Get('customers/:id/payments')
+  @ApiOperation({ summary: 'Get customer payment history' })
+  @ApiResponse({ status: 200, description: 'Payments retrieved' })
+  async getCustomerPayments(
+    @Param('id') id: string,
+    @Query('page') page?: number,
+    @Query('limit') limit?: number,
+  ) {
+    return this.adminService.getCustomerPayments(id, { page, limit });
   }
 
   @Get('drivers')
@@ -118,6 +205,14 @@ export class AdminController {
   @ApiResponse({ status: 404, description: 'Driver not found' })
   async getDriverById(@Param('id') id: string) {
     return this.adminService.getDriverById(id);
+  }
+
+  @Get('drivers/:id/kyc')
+  @ApiOperation({ summary: 'Get driver KYC documents' })
+  @ApiResponse({ status: 200, description: 'KYC documents retrieved' })
+  @ApiResponse({ status: 404, description: 'Driver not found' })
+  async getDriverKyc(@Param('id') id: string) {
+    return this.adminService.getDriverKyc(id);
   }
 
   @Get('reports/bookings')
@@ -216,6 +311,17 @@ export class AdminController {
   async clearAdminNotifications() {
     await this.notificationService.clearAdminNotifications();
     return { success: true };
+  }
+
+  @Get('payments')
+  @ApiOperation({ summary: 'Get all payments with pagination' })
+  @ApiResponse({ status: 200, description: 'Payments retrieved' })
+  async getAllPayments(
+    @Query('page') page?: number,
+    @Query('limit') limit?: number,
+    @Query('status') status?: string,
+  ) {
+    return this.adminService.getAllPayments({ page, limit, status });
   }
 
   // ─── Withdrawal Management ────────────────────────────────────────────────

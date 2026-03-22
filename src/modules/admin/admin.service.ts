@@ -156,17 +156,31 @@ export class AdminService {
   }
 
   /**
-   * Get all vehicles with pagination
+   * Get all vehicles with pagination, optional status filter and search
    */
-  async getAllVehicles(query: { page?: number; limit?: number }) {
-    const { page = 1, limit = 20 } = query;
+  async getAllVehicles(query: { page?: number; limit?: number; status?: string; search?: string }) {
+    const { page = 1, limit = 20, status, search } = query;
 
-    const [vehicles, total] = await this.vehicleRepository.findAndCount({
-      relations: ['driver', 'driver.user'],
-      order: { created_at: 'DESC' },
-      skip: (page - 1) * limit,
-      take: limit,
-    });
+    const qb = this.vehicleRepository
+      .createQueryBuilder('vehicle')
+      .leftJoinAndSelect('vehicle.driver', 'driver')
+      .leftJoinAndSelect('driver.user', 'user')
+      .orderBy('vehicle.created_at', 'DESC')
+      .skip((page - 1) * limit)
+      .take(limit);
+
+    if (status && status !== 'all') {
+      qb.andWhere('vehicle.verification_status = :status', { status });
+    }
+
+    if (search) {
+      qb.andWhere(
+        '(LOWER(vehicle.vehicle_model) LIKE :search OR LOWER(vehicle.registration_number) LIKE :search OR LOWER(user.name) LIKE :search)',
+        { search: `%${search.toLowerCase()}%` },
+      );
+    }
+
+    const [vehicles, total] = await qb.getManyAndCount();
 
     return {
       vehicles,
@@ -367,6 +381,271 @@ export class AdminService {
         completed_bookings: completedBookings,
         total_earnings: parseFloat(totalEarnings?.total || '0'),
       },
+    };
+  }
+
+  /**
+   * Get customer by ID with booking stats
+   */
+  async getCustomerById(customerId: string) {
+    const customer = await this.userRepository.findOne({
+      where: { id: customerId, role: UserRole.CUSTOMER },
+      select: ['id', 'phone', 'email', 'name', 'is_verified', 'is_active', 'created_at'],
+    });
+
+    if (!customer) throw new NotFoundException('Customer not found');
+
+    const [totalBookings, completedBookings, totalSpent] = await Promise.all([
+      this.bookingRepository.count({ where: { customer_id: customerId } }),
+      this.bookingRepository.count({ where: { customer_id: customerId, status: BookingStatus.COMPLETED } }),
+      this.paymentRepository
+        .createQueryBuilder('payment')
+        .leftJoin('payment.booking', 'booking')
+        .where('booking.customer_id = :customerId', { customerId })
+        .andWhere('payment.payment_status = :status', { status: PaymentStatus.COMPLETED })
+        .select('SUM(payment.amount)', 'total')
+        .getRawOne(),
+    ]);
+
+    return {
+      ...customer,
+      statistics: {
+        total_bookings: totalBookings,
+        completed_bookings: completedBookings,
+        total_spent: parseFloat(totalSpent?.total || '0'),
+      },
+    };
+  }
+
+  /**
+   * Block a customer
+   */
+  async blockCustomer(customerId: string) {
+    const customer = await this.userRepository.findOne({ where: { id: customerId, role: UserRole.CUSTOMER } });
+    if (!customer) throw new NotFoundException('Customer not found');
+    await this.userRepository.update(customerId, { is_active: false });
+    return { message: 'Customer blocked successfully' };
+  }
+
+  /**
+   * Unblock a customer
+   */
+  async unblockCustomer(customerId: string) {
+    const customer = await this.userRepository.findOne({ where: { id: customerId, role: UserRole.CUSTOMER } });
+    if (!customer) throw new NotFoundException('Customer not found');
+    await this.userRepository.update(customerId, { is_active: true });
+    return { message: 'Customer unblocked successfully' };
+  }
+
+  /**
+   * Get customer booking history (paginated)
+   */
+  async getCustomerBookings(customerId: string, query: { page?: number; limit?: number }) {
+    const { page = 1, limit = 20 } = query;
+    const [bookings, total] = await this.bookingRepository.findAndCount({
+      where: { customer_id: customerId },
+      relations: ['driver', 'payments'],
+      order: { created_at: 'DESC' },
+      skip: (page - 1) * limit,
+      take: limit,
+    });
+    return { bookings, total, page, pages: Math.ceil(total / limit) };
+  }
+
+  /**
+   * Suspend a driver
+   */
+  async suspendDriver(driverProfileId: string, reason?: string) {
+    const profile = await this.driverProfileRepository.findOne({ where: { id: driverProfileId } });
+    if (!profile) throw new NotFoundException('Driver not found');
+    await this.userRepository.update(profile.user_id, { is_active: false });
+    await this.notificationService.push(
+      profile.user_id,
+      'general',
+      'Account Suspended',
+      reason || 'Your account has been suspended by admin.',
+    );
+    return { message: 'Driver suspended successfully' };
+  }
+
+  /**
+   * Activate a driver
+   */
+  async activateDriver(driverProfileId: string) {
+    const profile = await this.driverProfileRepository.findOne({ where: { id: driverProfileId } });
+    if (!profile) throw new NotFoundException('Driver not found');
+    await this.userRepository.update(profile.user_id, { is_active: true });
+    await this.notificationService.push(
+      profile.user_id,
+      'general',
+      'Account Activated',
+      'Your account has been reactivated. You can now receive bookings.',
+    );
+    return { message: 'Driver activated successfully' };
+  }
+
+  /**
+   * Get booking by ID (admin full detail)
+   */
+  async getBookingById(bookingId: string) {
+    const booking = await this.bookingRepository.findOne({
+      where: { id: bookingId },
+      relations: ['customer', 'driver', 'vehicle', 'payments'],
+    });
+    if (!booking) throw new NotFoundException('Booking not found');
+    return booking;
+  }
+
+  /**
+   * Cancel booking as admin
+   */
+  async cancelBooking(bookingId: string, reason: string) {
+    const booking = await this.bookingRepository.findOne({ where: { id: bookingId } });
+    if (!booking) throw new NotFoundException('Booking not found');
+    if ([BookingStatus.COMPLETED, BookingStatus.CANCELLED].includes(booking.status)) {
+      throw new Error(`Booking is already ${booking.status}`);
+    }
+    await this.bookingRepository.update(bookingId, {
+      status: BookingStatus.CANCELLED,
+      cancellation_reason: reason,
+    });
+    return { message: 'Booking cancelled successfully' };
+  }
+
+  /**
+   * Reassign booking to a different driver
+   */
+  async reassignBooking(bookingId: string, newDriverId: string) {
+    const booking = await this.bookingRepository.findOne({ where: { id: bookingId } });
+    if (!booking) throw new NotFoundException('Booking not found');
+    const driver = await this.userRepository.findOne({ where: { id: newDriverId, role: UserRole.DRIVER } });
+    if (!driver) throw new NotFoundException('Driver not found');
+    await this.bookingRepository.update(bookingId, { driver_id: newDriverId, status: BookingStatus.DRIVER_ASSIGNED });
+    await this.notificationService.push(
+      newDriverId,
+      'general',
+      'Booking Assigned',
+      'A booking has been assigned to you by admin.',
+    );
+    return { message: 'Booking reassigned successfully' };
+  }
+
+  /**
+   * Get all payments with pagination
+   */
+  async getAllPayments(query: { page?: number; limit?: number; status?: string }) {
+    const { page = 1, limit = 20, status } = query;
+    const qb = this.paymentRepository
+      .createQueryBuilder('payment')
+      .leftJoinAndSelect('payment.booking', 'booking')
+      .leftJoinAndSelect('booking.customer', 'customer')
+      .leftJoinAndSelect('booking.driver', 'driver')
+      .orderBy('payment.created_at', 'DESC')
+      .skip((page - 1) * limit)
+      .take(limit);
+
+    if (status && status !== 'all') {
+      qb.where('payment.payment_status = :status', { status });
+    }
+
+    const [payments, total] = await qb.getManyAndCount();
+    return { payments, total, page, pages: Math.ceil(total / limit) };
+  }
+
+  /**
+   * Get customer payment history
+   */
+  async getCustomerPayments(customerId: string, query: { page?: number; limit?: number }) {
+    const { page = 1, limit = 20 } = query;
+    const customer = await this.userRepository.findOne({ where: { id: customerId, role: UserRole.CUSTOMER } });
+    if (!customer) throw new NotFoundException('Customer not found');
+
+    const [payments, total] = await this.paymentRepository
+      .createQueryBuilder('payment')
+      .leftJoinAndSelect('payment.booking', 'booking')
+      .where('booking.customer_id = :customerId', { customerId })
+      .orderBy('payment.created_at', 'DESC')
+      .skip((page - 1) * limit)
+      .take(limit)
+      .getManyAndCount();
+
+    return { payments, total, page, pages: Math.ceil(total / limit) };
+  }
+
+  /**
+   * Get driver KYC documents
+   */
+  async getDriverKyc(driverId: string) {
+    const profile = await this.driverProfileRepository.findOne({
+      where: { id: driverId },
+      relations: ['user'],
+    });
+    if (!profile) throw new NotFoundException('Driver not found');
+
+    return {
+      driver_id: profile.id,
+      user_id: profile.user_id,
+      name: profile.user?.name,
+      phone: profile.user?.phone,
+      verification_status: profile.verification_status,
+      license_number: profile.license_number,
+      license_expiry: profile.license_expiry,
+      documents: {
+        aadhar_front: profile.aadhar_front_image,
+        aadhar_back: profile.aadhar_back_image,
+        driving_license: profile.driving_license_image,
+        vehicle_rc: profile.vehicle_rc_image,
+        profile_image: profile.profile_image,
+      },
+    };
+  }
+
+  /**
+   * Get booking live tracking info (status + driver current location)
+   */
+  async getBookingTracking(bookingId: string) {
+    const booking = await this.bookingRepository.findOne({
+      where: { id: bookingId },
+      relations: ['driver'],
+    });
+    if (!booking) throw new NotFoundException('Booking not found');
+
+    let driverLocation: { latitude: number; longitude: number } | null = null;
+
+    if (booking.driver_id) {
+      const driverProfile = await this.driverProfileRepository.findOne({
+        where: { user_id: booking.driver_id },
+        select: ['current_location'],
+      });
+
+      if (driverProfile?.current_location) {
+        try {
+          const geo = typeof driverProfile.current_location === 'string'
+            ? JSON.parse(driverProfile.current_location)
+            : driverProfile.current_location as any;
+          driverLocation = {
+            longitude: geo.coordinates?.[0],
+            latitude: geo.coordinates?.[1],
+          };
+        } catch {
+          // ignore parse errors
+        }
+      }
+    }
+
+    return {
+      booking_id: booking.id,
+      status: booking.status,
+      pickup_location: booking.pickup_location,
+      pickup_address: booking.pickup_address,
+      drop_location: booking.drop_location,
+      drop_address: booking.drop_address,
+      driver: booking.driver
+        ? { id: booking.driver.id, name: booking.driver.name, phone: booking.driver.phone }
+        : null,
+      driver_current_location: driverLocation,
+      acceptance_time: booking.acceptance_time,
+      start_time: booking.start_time,
     };
   }
 

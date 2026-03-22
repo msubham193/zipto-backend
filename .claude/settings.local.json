@@ -60,7 +60,20 @@
       "Bash(find C:UserssubhaDesktopDESKTOPzipto-freelancingzipto_rider -name *.ts -path */api/*)",
       "Bash(find C:UserssubhaDesktopDESKTOPsandeepZiptosrcmodulesbooking -name *.ts -o -name *.controller.ts)",
       "Bash(find C:UserssubhaDesktopDESKTOPzipto-freelancingskido-backend -name *booking*controller* -o -name *booking.controller*)",
-      "Bash(find C:UserssubhaDesktopDESKTOPzipto-freelancingskido-backend -type f -path */modules/booking/*)"
+      "Bash(find C:UserssubhaDesktopDESKTOPzipto-freelancingskido-backend -type f -path */modules/booking/*)",
+      "Bash(grep -E \"\\\\.\\(ts|tsx|js|jsx\\)$\")",
+      "Bash(ls -la \"C:\\\\Users\\\\subha\\\\Desktop\\\\DESKTOP\\\\zipto-freelancing\\\\zipto-admin\\\\src\\\\features\\\\bookings\\\\api\"\" 2>/dev/null || echo \"Directory not found \")",
+      "Bash(mkdir -p /c/Users/subha/Desktop/DESKTOP/zipto-freelancing/zipto-admin/src/features/pricing/api)",
+      "Bash(mkdir -p /c/Users/subha/Desktop/DESKTOP/zipto-freelancing/zipto-admin/src/features/payments/api)",
+      "Bash(mkdir -p /c/Users/subha/Desktop/DESKTOP/zipto-freelancing/zipto-admin/src/features/reports/api)",
+      "Read(//c/Users/subha/AppData/Local/Temp/claude/c--Users-subha-Desktop-DESKTOP-zipto-freelancing-skido-backend/25e20248-a839-4f40-a110-182fa1c2c68f/tasks/**)"
+    ],
+    "additionalDirectories": [
+      "C:\\Users\\subha\\Desktop\\DESKTOP\\zipto-freelancing\\zipto-admin\\src\\features\\reports\\pages",
+      "C:\\Users\\subha\\Desktop\\DESKTOP\\zipto-freelancing\\zipto-admin\\src\\types",
+      "C:\\Users\\subha\\Desktop\\DESKTOP\\zipto-freelancing\\zipto-admin\\src\\features\\drivers\\pages",
+      "C:\\Users\\subha\\Desktop\\DESKTOP\\zipto-freelancing\\zipto-admin\\src\\features\\vehicles\\api",
+      "C:\\Users\\subha\\Desktop\\DESKTOP\\zipto-freelancing\\zipto-admin\\src\\features\\vehicles\\pages"
     ]
   }
 }
