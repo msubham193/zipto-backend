@@ -67,7 +67,11 @@
       "Bash(mkdir -p /c/Users/subha/Desktop/DESKTOP/zipto-freelancing/zipto-admin/src/features/payments/api)",
       "Bash(mkdir -p /c/Users/subha/Desktop/DESKTOP/zipto-freelancing/zipto-admin/src/features/reports/api)",
       "Read(//c/Users/subha/AppData/Local/Temp/claude/c--Users-subha-Desktop-DESKTOP-zipto-freelancing-skido-backend/25e20248-a839-4f40-a110-182fa1c2c68f/tasks/**)",
-      "Bash(npx --prefix \"C:\\\\Users\\\\subha\\\\Desktop\\\\DESKTOP\\\\zipto-freelancing\\\\zipto-admin\" tsc --noEmit)"
+      "Bash(npx --prefix \"C:\\\\Users\\\\subha\\\\Desktop\\\\DESKTOP\\\\zipto-freelancing\\\\zipto-admin\" tsc --noEmit)",
+      "Read(//etc/nginx/sites-available/**)",
+      "Read(//etc/nginx/sites-enabled/**)",
+      "Read(//etc/nginx/**)",
+      "Bash(cat /etc/nginx/conf.d/*.conf)"
     ],
     "additionalDirectories": [
       "C:\\Users\\subha\\Desktop\\DESKTOP\\zipto-freelancing\\zipto-admin\\src\\features\\reports\\pages",

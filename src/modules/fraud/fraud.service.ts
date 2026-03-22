@@ -1,4 +1,5 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, OnModuleInit } from '@nestjs/common';
+import { ModuleRef } from '@nestjs/core';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, MoreThan, LessThanOrEqual } from 'typeorm';
 import { Cron, CronExpression } from '@nestjs/schedule';
@@ -10,7 +11,9 @@ import { NotificationService } from '../notification/notification.service';
 import { BlockCustomerDto, ProcessUnblockDto, ReportCustomerDto, ReportReason, SubmitUnblockRequestDto } from './dto/fraud.dto';
 
 @Injectable()
-export class FraudService {
+export class FraudService implements OnModuleInit {
+  private notificationService: NotificationService;
+
   constructor(
     @InjectRepository(CustomerReport)
     private reportRepository: Repository<CustomerReport>,
@@ -20,8 +23,12 @@ export class FraudService {
     private userRepository: Repository<User>,
     @InjectRepository(Booking)
     private bookingRepository: Repository<Booking>,
-    private notificationService: NotificationService,
+    private moduleRef: ModuleRef,
   ) {}
+
+  onModuleInit() {
+    this.notificationService = this.moduleRef.get(NotificationService, { strict: false });
+  }
 
   /**
    * Called after every booking cancellation (fire-and-forget)
