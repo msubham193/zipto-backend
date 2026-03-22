@@ -344,7 +344,7 @@ export class FraudService {
     }
 
     block.unblock_request_status = dto.status === 'approved' ? UnblockRequestStatus.APPROVED : UnblockRequestStatus.REJECTED;
-    block.admin_notes = dto.admin_notes;
+    if (dto.admin_notes) block.admin_notes = dto.admin_notes;
 
     if (dto.status === 'approved') {
       block.status = BlockStatus.LIFTED;
