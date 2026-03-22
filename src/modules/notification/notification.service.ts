@@ -254,6 +254,37 @@ export class NotificationService {
   }
 
   // ─────────────────────────────────────────────────────────────────────────
+  // Fraud / Block helpers
+  // ─────────────────────────────────────────────────────────────────────────
+
+  async notifyCustomerBlocked(userId: string, reason: string, blockedUntil: Date): Promise<void> {
+    await this.push(
+      userId,
+      'general',
+      'Account Temporarily Suspended',
+      `Your account has been suspended until ${blockedUntil.toLocaleDateString()}. Reason: ${reason}. You may submit an appeal from the app.`,
+    );
+  }
+
+  async notifyCustomerUnblocked(userId: string): Promise<void> {
+    await this.push(
+      userId,
+      'general',
+      'Account Reactivated',
+      'Your account has been reactivated. You can now book rides.',
+    );
+  }
+
+  async notifyAdminFraudFlag(customerId: string, customerName: string, reportType: string, severity: string): Promise<void> {
+    await this.pushAdmin(
+      'general',
+      `Fraud Alert: ${severity.toUpperCase()} severity`,
+      `Customer ${customerName} flagged for ${reportType.replace(/_/g, ' ')}`,
+      { customerId, reportType, severity } as Record<string, unknown>,
+    );
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
   private key(userId: string) {
     return `driver_notifications:${userId}`;
   }

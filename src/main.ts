@@ -37,7 +37,8 @@ async function bootstrap() {
       'http://localhost:3000',
       'http://localhost:4200',
       'http://localhost:5173', // Vite dev server
-      'https://zipto-admin.vercel.app', // Production frontend
+      'https://zipto-admin.vercel.app', // Production frontend (Vercel)
+      'https://admin.ridezipto.com',    // Production frontend (custom domain)
     ],
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization'],

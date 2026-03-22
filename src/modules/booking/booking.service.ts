@@ -32,6 +32,7 @@ import {
   LEGACY_VEHICLE_TYPES,
   PUBLIC_VEHICLE_TYPES,
 } from './constants/default-pricing-rules';
+import { FraudService } from '../fraud/fraud.service';
 
 @Injectable()
 export class BookingService {
@@ -52,6 +53,7 @@ export class BookingService {
     @InjectQueue('booking_assignment') private bookingQueue: Queue,
     private bookingGateway: BookingGateway,
     private cacheManager: RedisService,
+    private fraudService: FraudService,
   ) {}
 
   private async ensureDefaultPricingRules() {
@@ -722,7 +724,12 @@ export class BookingService {
     booking.status = BookingStatus.CANCELLED;
     booking.cancellation_reason = cancelDto.reason;
 
-    return this.bookingRepository.save(booking);
+    const saved = await this.bookingRepository.save(booking);
+
+    // Fire-and-forget fraud checks
+    this.fraudService.runFraudChecks(booking.customer_id, bookingId).catch(() => {});
+
+    return saved;
   }
 
   /**

@@ -12,6 +12,7 @@ import { Vehicle } from '../vehicle/entities/vehicle.entity';
 import { AuthModule } from '../auth/auth.module';
 import { BookingModule } from '../booking/booking.module';
 import { NotificationModule } from '../notification/notification.module';
+import { FraudModule } from '../fraud/fraud.module';
 
 @Module({
   imports: [
@@ -19,6 +20,7 @@ import { NotificationModule } from '../notification/notification.module';
     AuthModule,
     BookingModule,
     NotificationModule,
+    FraudModule,
   ],
   controllers: [AdminController],
   providers: [AdminService],

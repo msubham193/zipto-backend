@@ -22,6 +22,7 @@ import { RatingModule } from './modules/rating/rating.module';
 import { AdminModule } from './modules/admin/admin.module';
 import { NotificationModule } from './modules/notification/notification.module';
 import { CoinModule } from './modules/coin/coin.module';
+import { FraudModule } from './modules/fraud/fraud.module';
 import { BullModule } from '@nestjs/bull';
 import { ScheduleModule } from '@nestjs/schedule';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
@@ -94,6 +95,7 @@ import { RolesGuard } from './common/guards/roles.guard';
     AdminModule,
     NotificationModule,
     CoinModule,
+    FraudModule,
     ServeStaticModule.forRoot({
       rootPath: join(__dirname, '..', 'uploads'),
       serveRoot: '/uploads',

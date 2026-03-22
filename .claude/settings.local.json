@@ -66,7 +66,8 @@
       "Bash(mkdir -p /c/Users/subha/Desktop/DESKTOP/zipto-freelancing/zipto-admin/src/features/pricing/api)",
       "Bash(mkdir -p /c/Users/subha/Desktop/DESKTOP/zipto-freelancing/zipto-admin/src/features/payments/api)",
       "Bash(mkdir -p /c/Users/subha/Desktop/DESKTOP/zipto-freelancing/zipto-admin/src/features/reports/api)",
-      "Read(//c/Users/subha/AppData/Local/Temp/claude/c--Users-subha-Desktop-DESKTOP-zipto-freelancing-skido-backend/25e20248-a839-4f40-a110-182fa1c2c68f/tasks/**)"
+      "Read(//c/Users/subha/AppData/Local/Temp/claude/c--Users-subha-Desktop-DESKTOP-zipto-freelancing-skido-backend/25e20248-a839-4f40-a110-182fa1c2c68f/tasks/**)",
+      "Bash(npx --prefix \"C:\\\\Users\\\\subha\\\\Desktop\\\\DESKTOP\\\\zipto-freelancing\\\\zipto-admin\" tsc --noEmit)"
     ],
     "additionalDirectories": [
       "C:\\Users\\subha\\Desktop\\DESKTOP\\zipto-freelancing\\zipto-admin\\src\\features\\reports\\pages",
@@ -75,7 +76,17 @@
       "C:\\Users\\subha\\Desktop\\DESKTOP\\zipto-freelancing\\zipto-admin\\src\\features\\vehicles\\api",
       "C:\\Users\\subha\\Desktop\\DESKTOP\\zipto-freelancing\\zipto-admin\\src\\features\\vehicles\\pages",
       "C:\\Users\\subha\\Desktop\\DESKTOP\\zipto-freelancing\\zipto-admin\\src\\features\\bookings\\api",
-      "C:\\Users\\subha\\Desktop\\DESKTOP\\zipto-freelancing\\zipto-admin\\src\\features\\bookings\\pages"
+      "C:\\Users\\subha\\Desktop\\DESKTOP\\zipto-freelancing\\zipto-admin\\src\\features\\bookings\\pages",
+      "C:\\Users\\subha\\Desktop\\DESKTOP\\zipto-freelancing\\zipto-admin\\src\\features\\customers\\api",
+      "C:\\Users\\subha\\Desktop\\DESKTOP\\zipto-freelancing\\zipto-admin\\src\\features\\customers\\pages",
+      "C:\\Users\\subha\\Desktop\\DESKTOP\\zipto-freelancing\\zipto-admin\\src\\lib",
+      "C:\\Users\\subha\\Desktop\\DESKTOP\\zipto-freelancing\\zipto-admin\\src\\features\\fraud\\api",
+      "C:\\Users\\subha\\Desktop\\DESKTOP\\zipto-freelancing\\zipto-admin\\src\\features\\fraud\\hooks",
+      "C:\\Users\\subha\\Desktop\\DESKTOP\\zipto-freelancing\\zipto-admin\\src\\features\\fraud\\components",
+      "C:\\Users\\subha\\Desktop\\DESKTOP\\zipto-freelancing\\zipto-admin\\src\\features\\fraud\\pages",
+      "C:\\Users\\subha\\Desktop\\DESKTOP\\zipto-freelancing\\zipto-admin\\src\\app",
+      "C:\\Users\\subha\\Desktop\\DESKTOP\\zipto-freelancing\\zipto-admin\\src\\layouts",
+      "C:\\Users\\subha\\Desktop\\DESKTOP\\zipto-freelancing\\zipto-admin"
     ]
   }
 }

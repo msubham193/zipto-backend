@@ -156,20 +156,6 @@ export class AdminController {
     return this.adminService.getCustomerById(id);
   }
 
-  @Put('customers/:id/block')
-  @ApiOperation({ summary: 'Block a customer' })
-  @ApiResponse({ status: 200, description: 'Customer blocked' })
-  async blockCustomer(@Param('id') id: string) {
-    return this.adminService.blockCustomer(id);
-  }
-
-  @Put('customers/:id/unblock')
-  @ApiOperation({ summary: 'Unblock a customer' })
-  @ApiResponse({ status: 200, description: 'Customer unblocked' })
-  async unblockCustomer(@Param('id') id: string) {
-    return this.adminService.unblockCustomer(id);
-  }
-
   @Get('customers/:id/bookings')
   @ApiOperation({ summary: 'Get customer booking history' })
   @ApiResponse({ status: 200, description: 'Bookings retrieved' })
