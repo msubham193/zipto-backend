@@ -11,6 +11,7 @@ import {
   DefaultValuePipe,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiQuery, ApiBearerAuth } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
 import { BookingService } from './booking.service';
 import { BookingGateway } from './booking.gateway';
 import {
@@ -46,6 +47,7 @@ export class BookingController {
 
   @Post('estimate-fare')
   @Roles('customer')
+  @Throttle({ default: { ttl: 10000, limit: 5 } }) // max 5 fare estimates per 10s per user
   @ApiOperation({ summary: 'Estimate fare for a trip' })
   @ApiResponse({ status: 200, description: 'Fare estimated successfully' })
   async estimateFare(@Body() estimateFareDto: EstimateFareDto) {
@@ -54,6 +56,7 @@ export class BookingController {
 
   @Post('create')
   @Roles('customer')
+  @Throttle({ default: { ttl: 30000, limit: 3 } }) // max 3 bookings per 30s per user
   @ApiOperation({ summary: 'Create new booking' })
   @ApiResponse({ status: 201, description: 'Booking created successfully' })
   async create(@GetUser() user: User, @Body() createBookingDto: CreateBookingDto) {

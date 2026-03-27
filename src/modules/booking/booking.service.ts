@@ -122,7 +122,7 @@ export class BookingService {
       extra_stops = 0,
     } = estimateFareDto;
 
-    // Get distance and duration from Mapbox Directions API
+    // Get distance and duration from Google Directions API
     const routeData = await this.mapboxService.getDistanceMatrix(
       pickup_location.latitude,
       pickup_location.longitude,
@@ -258,6 +258,7 @@ export class BookingService {
       receiver_name,
       receiver_phone,
       alternative_phone,
+      paid_by = 'sender',
     } = createBookingDto;
 
     // Validate scheduled time
@@ -302,6 +303,7 @@ export class BookingService {
       receiver_name,
       receiver_phone,
       alternative_phone,
+      paid_by,
       distance:         fareEstimate.distance,
       duration:         fareEstimate.duration,
       estimated_fare:   fareEstimate.estimated_fare,
@@ -438,6 +440,7 @@ export class BookingService {
       fare:        offerData.estimated_fare,
       distance:    offerData.distance,
       vehicleType: resolvedVehicleType,
+      paid_by:     offerData.paid_by || 'sender',
       timeLeft:    15,
     });
     this.logger.log(`[processDriverSearch] offer emitted to driver ${nearestDriver.user_id}`);
@@ -517,6 +520,7 @@ export class BookingService {
       fare:      offerData.estimated_fare,
       distance:  offerData.distance,
       vehicleType,
+      paid_by:   offerData.paid_by || 'sender',
     };
 
     for (const driverId of driverIds) {
@@ -591,6 +595,7 @@ export class BookingService {
         vehicle_type:    offerData.vehicle_type,
         city:            offerData.city,
         service_category: offerData.service_category,
+        paid_by:         offerData.paid_by || 'sender',
       });
     }
 
@@ -657,6 +662,7 @@ export class BookingService {
         estimated_fare:  offerData.estimated_fare,
         distance:        offerData.distance,
         vehicle_type:    offerData.vehicle_type,
+        paid_by:         offerData.paid_by || 'sender',
         customer_id:     userId,
       };
     }
@@ -680,11 +686,15 @@ export class BookingService {
       throw new ForbiddenException('You do not have access to this booking');
     }
 
-    // Attach driver profile stats if driver is assigned
+    // Attach driver profile stats + live location if driver is assigned
     let driverStats: { average_rating: number | null; total_trips: number } | null = null;
+    let driverLocation: { latitude: number; longitude: number } | null = null;
     if (booking.driver_id) {
       const [profile] = await this.bookingRepository.manager.query(
-        `SELECT average_rating, total_trips FROM driver_profiles WHERE user_id = $1 LIMIT 1`,
+        `SELECT average_rating, total_trips,
+                ST_Y(current_location::geometry) AS lat,
+                ST_X(current_location::geometry) AS lng
+         FROM driver_profiles WHERE user_id = $1 LIMIT 1`,
         [booking.driver_id],
       );
       if (profile) {
@@ -692,12 +702,19 @@ export class BookingService {
           average_rating: profile.average_rating ? parseFloat(profile.average_rating) : null,
           total_trips: parseInt(profile.total_trips, 10) || 0,
         };
+        if (profile.lat && profile.lng) {
+          driverLocation = {
+            latitude: parseFloat(profile.lat),
+            longitude: parseFloat(profile.lng),
+          };
+        }
       }
     }
 
     return {
       ...booking,
       driver_stats: driverStats,
+      driver_location: driverLocation,
       pickup_otp: booking.pickup_otp,
       delivery_otp: booking.delivery_otp,
     };
@@ -867,6 +884,7 @@ export class BookingService {
         receiver_name:   offerData.receiver_name,
         receiver_phone:  offerData.receiver_phone,
         alternative_phone: offerData.alternative_phone,
+        paid_by:         offerData.paid_by || 'sender',
         pickup_otp:      offerData.pickup_otp,
         pickup_otp_verified: false,
         delivery_otp:    offerData.delivery_otp,

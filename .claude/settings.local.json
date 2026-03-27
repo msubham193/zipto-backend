@@ -71,7 +71,14 @@
       "Read(//etc/nginx/sites-available/**)",
       "Read(//etc/nginx/sites-enabled/**)",
       "Read(//etc/nginx/**)",
-      "Bash(cat /etc/nginx/conf.d/*.conf)"
+      "Bash(cat /etc/nginx/conf.d/*.conf)",
+      "Bash(find /c/Users/subha/Desktop/DESKTOP/zipto-freelancing/zipto_rider/src -type f -name *payment* -o -name *booking*)",
+      "Bash(find /c/Users/subha/Desktop/DESKTOP/zipto-freelancing/zipto-admin/src -type f -name *payment* -o -name *booking*)",
+      "Bash(ls -d \"C:/Users/subha/Desktop/DESKTOP/zipto-freelancing\"/*/)",
+      "Bash(find C:/Users/subha/Desktop/DESKTOP -maxdepth 2 -type d -name *customer* -o -type d -name *app* -o -type d -name *user*)",
+      "Bash(find \"C:\\\\Users\\\\subha\\\\Desktop\\\\DESKTOP\\\\sandeep\\\\Zipto\\\\src\\\\screens\"\" -type f -name \"*.js\" -o -name \"*.jsx\" -o -name \"*.ts\" -o -name \"*.tsx \")",
+      "Bash(npx nest:*)",
+      "Bash(npm run:*)"
     ],
     "additionalDirectories": [
       "C:\\Users\\subha\\Desktop\\DESKTOP\\zipto-freelancing\\zipto-admin\\src\\features\\reports\\pages",

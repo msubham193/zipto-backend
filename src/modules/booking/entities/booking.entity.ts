@@ -34,6 +34,11 @@ export enum BookingStatus {
   CANCELLED = 'cancelled',
 }
 
+export enum PaidBy {
+  SENDER = 'sender',
+  RECEIVER = 'receiver',
+}
+
 @Entity('bookings')
 export class Booking {
   @PrimaryGeneratedColumn('uuid')
@@ -79,6 +84,13 @@ export class Booking {
 
   @Column({ type: 'varchar', length: 15, nullable: true })
   alternative_phone: string;
+
+  @Column({
+    type: 'enum',
+    enum: PaidBy,
+    default: PaidBy.SENDER,
+  })
+  paid_by: PaidBy;
 
   @Column({ type: 'varchar', length: 6, nullable: true })
   pickup_otp: string;

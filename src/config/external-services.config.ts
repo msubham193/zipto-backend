@@ -1,8 +1,8 @@
 import { registerAs } from '@nestjs/config';
 
 export default registerAs('externalServices', () => ({
-  mapbox: {
-    accessToken: process.env.MAPBOX_ACCESS_TOKEN || '',
+  googleMaps: {
+    apiKey: process.env.GOOGLE_MAPS_API_KEY || '',
   },
   razorpay: {
     keyId: process.env.RAZORPAY_KEY_ID || '',

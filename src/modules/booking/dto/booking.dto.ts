@@ -17,7 +17,7 @@ import {
 import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { VehicleType } from '../../vehicle/entities/vehicle.entity';
-import { BookingType, ServiceCategory } from '../entities/booking.entity';
+import { BookingType, PaidBy, ServiceCategory } from '../entities/booking.entity';
 
 export class LocationDto {
   @ApiProperty({ example: 20.2961 })
@@ -127,6 +127,15 @@ export class CreateBookingDto {
   @ApiProperty({ enum: BookingType, example: BookingType.INSTANT })
   @IsEnum(BookingType)
   booking_type: BookingType;
+
+  @ApiPropertyOptional({
+    enum: PaidBy,
+    example: PaidBy.SENDER,
+    description: 'Who pays for the delivery: sender (at pickup) or receiver (at delivery)',
+  })
+  @IsOptional()
+  @IsEnum(PaidBy)
+  paid_by?: PaidBy;
 
   @ApiPropertyOptional({ example: '2024-01-20T10:00:00Z' })
   @IsDateString()
