@@ -37,9 +37,13 @@ export class AdminService {
   ) {}
 
   /**
-   * Get dashboard statistics
+   * Get dashboard statistics with growth metrics (vs previous 30-day period)
    */
   async getDashboardStats() {
+    const now = new Date();
+    const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+    const sixtyDaysAgo = new Date(now.getTime() - 60 * 24 * 60 * 60 * 1000);
+
     const [
       totalUsers,
       totalCustomers,
@@ -48,6 +52,17 @@ export class AdminService {
       completedBookings,
       ongoingBookings,
       totalRevenue,
+      pendingKYC,
+      // Current period (last 30 days)
+      newCustomersThisPeriod,
+      newDriversThisPeriod,
+      bookingsThisPeriod,
+      revenueThisPeriod,
+      // Previous period (30-60 days ago)
+      newCustomersPrevPeriod,
+      newDriversPrevPeriod,
+      bookingsPrevPeriod,
+      revenuePrevPeriod,
     ] = await Promise.all([
       this.userRepository.count(),
       this.userRepository.count({ where: { role: UserRole.CUSTOMER } }),
@@ -60,7 +75,42 @@ export class AdminService {
         .select('SUM(payment.amount)', 'total')
         .where('payment.payment_status = :status', { status: PaymentStatus.COMPLETED })
         .getRawOne(),
+      this.driverProfileRepository.count({ where: { verification_status: VerificationStatus.PENDING } }),
+      // Current period counts
+      this.userRepository.count({ where: { role: UserRole.CUSTOMER, created_at: Between(thirtyDaysAgo, now) } }),
+      this.userRepository.count({ where: { role: UserRole.DRIVER, created_at: Between(thirtyDaysAgo, now) } }),
+      this.bookingRepository.count({ where: { created_at: Between(thirtyDaysAgo, now) } }),
+      this.paymentRepository
+        .createQueryBuilder('payment')
+        .select('SUM(payment.amount)', 'total')
+        .where('payment.payment_status = :status AND payment.created_at BETWEEN :from AND :to', {
+          status: PaymentStatus.COMPLETED,
+          from: thirtyDaysAgo,
+          to: now,
+        })
+        .getRawOne(),
+      // Previous period counts
+      this.userRepository.count({ where: { role: UserRole.CUSTOMER, created_at: Between(sixtyDaysAgo, thirtyDaysAgo) } }),
+      this.userRepository.count({ where: { role: UserRole.DRIVER, created_at: Between(sixtyDaysAgo, thirtyDaysAgo) } }),
+      this.bookingRepository.count({ where: { created_at: Between(sixtyDaysAgo, thirtyDaysAgo) } }),
+      this.paymentRepository
+        .createQueryBuilder('payment')
+        .select('SUM(payment.amount)', 'total')
+        .where('payment.payment_status = :status AND payment.created_at BETWEEN :from AND :to', {
+          status: PaymentStatus.COMPLETED,
+          from: sixtyDaysAgo,
+          to: thirtyDaysAgo,
+        })
+        .getRawOne(),
     ]);
+
+    const calcGrowth = (current: number, previous: number): number => {
+      if (previous === 0) return current > 0 ? 100 : 0;
+      return parseFloat((((current - previous) / previous) * 100).toFixed(1));
+    };
+
+    const revCurrent = parseFloat(revenueThisPeriod?.total || '0');
+    const revPrev = parseFloat(revenuePrevPeriod?.total || '0');
 
     return {
       users: {
@@ -75,6 +125,13 @@ export class AdminService {
       },
       revenue: {
         total: parseFloat(totalRevenue?.total || '0'),
+      },
+      pending_kyc: pendingKYC,
+      growth: {
+        customers: calcGrowth(newCustomersThisPeriod, newCustomersPrevPeriod),
+        drivers: calcGrowth(newDriversThisPeriod, newDriversPrevPeriod),
+        bookings: calcGrowth(bookingsThisPeriod, bookingsPrevPeriod),
+        revenue: calcGrowth(revCurrent, revPrev),
       },
     };
   }
