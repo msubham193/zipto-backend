@@ -1,9 +1,19 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  BadRequestException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, DataSource } from 'typeorm';
 import { CustomerProfile } from './entities/customer-profile.entity';
 import { User } from '../auth/entities/user.entity';
+import {
+  WalletTransaction,
+  WalletTxnType,
+  WalletTxnSource,
+} from './entities/wallet-transaction.entity';
 import { UpdateCustomerDto, SavedLocationDto } from './dto/customer.dto';
+import { RazorpayService } from '../../services/razorpay.service';
 
 @Injectable()
 export class CustomerService {
@@ -12,11 +22,16 @@ export class CustomerService {
     private customerProfileRepository: Repository<CustomerProfile>,
     @InjectRepository(User)
     private userRepository: Repository<User>,
+    @InjectRepository(WalletTransaction)
+    private walletTxnRepository: Repository<WalletTransaction>,
+    private dataSource: DataSource,
+    private razorpayService: RazorpayService,
   ) {}
 
-  /**
-   * Get customer profile (create if doesn't exist)
-   */
+  // ─────────────────────────────────────────────────────────────────────────
+  // Profile
+  // ─────────────────────────────────────────────────────────────────────────
+
   async getProfile(userId: string) {
     let profile = await this.customerProfileRepository.findOne({
       where: { user_id: userId },
@@ -24,14 +39,12 @@ export class CustomerService {
     });
 
     if (!profile) {
-      // Auto-create profile if doesn't exist
       const newProfile = this.customerProfileRepository.create({
         user_id: userId,
         saved_locations: [],
       });
       await this.customerProfileRepository.save(newProfile);
 
-      // Load the user relation
       profile = await this.customerProfileRepository.findOne({
         where: { user_id: userId },
         relations: ['user'],
@@ -45,13 +58,9 @@ export class CustomerService {
     return profile;
   }
 
-  /**
-   * Update customer profile
-   */
   async updateProfile(userId: string, updateCustomerDto: UpdateCustomerDto) {
     const profile = await this.getProfile(userId);
 
-    // Update user fields
     const { name, email, language_preference } = updateCustomerDto;
     if (name || email || language_preference) {
       await this.userRepository.update(userId, {
@@ -61,46 +70,31 @@ export class CustomerService {
       });
     }
 
-    // Update profile fields
     const { address } = updateCustomerDto;
     if (address !== undefined) {
       profile.address = address;
       await this.customerProfileRepository.save(profile);
     }
 
-    // Return updated profile
     return this.getProfile(userId);
   }
 
-  /**
-   * Get saved locations
-   */
   async getSavedLocations(userId: string) {
     const profile = await this.getProfile(userId);
     return profile.saved_locations || [];
   }
 
-  /**
-   * Add saved location
-   */
   async addSavedLocation(userId: string, locationDto: SavedLocationDto) {
     const profile = await this.getProfile(userId);
-
     const locations = profile.saved_locations || [];
     locations.push(locationDto);
-
     profile.saved_locations = locations;
     await this.customerProfileRepository.save(profile);
-
     return profile.saved_locations;
   }
 
-  /**
-   * Remove saved location by index
-   */
   async removeSavedLocation(userId: string, index: number) {
     const profile = await this.getProfile(userId);
-
     const locations = profile.saved_locations || [];
 
     if (index < 0 || index >= locations.length) {
@@ -110,7 +104,200 @@ export class CustomerService {
     locations.splice(index, 1);
     profile.saved_locations = locations;
     await this.customerProfileRepository.save(profile);
-
     return profile.saved_locations;
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Wallet
+  // ─────────────────────────────────────────────────────────────────────────
+
+  async getWallet(userId: string) {
+    const user = await this.userRepository.findOne({
+      where: { id: userId },
+      select: ['id', 'wallet_balance'],
+    });
+    if (!user) throw new NotFoundException('User not found');
+
+    const transactions = await this.walletTxnRepository.find({
+      where: { user_id: userId },
+      order: { created_at: 'DESC' },
+      take: 20,
+    });
+
+    return {
+      balance: parseFloat(user.wallet_balance as unknown as string),
+      transactions,
+    };
+  }
+
+  async getWalletTransactions(userId: string, page = 1, limit = 20) {
+    const [transactions, total] = await this.walletTxnRepository.findAndCount({
+      where: { user_id: userId },
+      order: { created_at: 'DESC' },
+      skip: (page - 1) * limit,
+      take: limit,
+    });
+
+    return { transactions, total, page, limit };
+  }
+
+  /**
+   * Step 1 — create Razorpay order for wallet top-up
+   */
+  async initiateAddMoney(userId: string, amount: number) {
+    if (amount < 10) {
+      throw new BadRequestException('Minimum top-up amount is ₹10');
+    }
+    if (amount > 50000) {
+      throw new BadRequestException('Maximum top-up amount is ₹50,000');
+    }
+
+    const receipt = `wallet_${userId.slice(-8)}_${Date.now()}`;
+    const order = await this.razorpayService.createOrder(amount, receipt);
+
+    return {
+      order_id: order.id,
+      amount: order.amount,
+      currency: order.currency,
+      key_id: process.env.RAZORPAY_KEY_ID,
+    };
+  }
+
+  /**
+   * Step 2 — verify Razorpay payment and credit wallet
+   */
+  async verifyAddMoney(
+    userId: string,
+    orderId: string,
+    paymentId: string,
+    signature: string,
+    amount: number,
+  ) {
+    // Verify signature
+    const isValid = this.razorpayService.verifyPaymentSignature(
+      orderId,
+      paymentId,
+      signature,
+    );
+    if (!isValid) {
+      throw new BadRequestException('Payment verification failed');
+    }
+
+    // Prevent duplicate crediting
+    const existing = await this.walletTxnRepository.findOne({
+      where: { reference_id: paymentId },
+    });
+    if (existing) {
+      throw new BadRequestException('Payment already processed');
+    }
+
+    // Credit wallet atomically
+    return this.dataSource.transaction(async (manager) => {
+      const user = await manager.findOne(User, {
+        where: { id: userId },
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (!user) throw new NotFoundException('User not found');
+
+      const currentBalance = parseFloat(
+        user.wallet_balance as unknown as string,
+      );
+      const newBalance = currentBalance + amount;
+
+      await manager.update(User, userId, { wallet_balance: newBalance });
+
+      const txn = manager.create(WalletTransaction, {
+        user_id: userId,
+        type: WalletTxnType.CREDIT,
+        amount,
+        balance_after: newBalance,
+        description: `Wallet top-up via Razorpay`,
+        source: WalletTxnSource.RAZORPAY,
+        reference_id: paymentId,
+      });
+      await manager.save(txn);
+
+      return { success: true, balance: newBalance, transaction: txn };
+    });
+  }
+
+  /**
+   * Internal — deduct wallet balance during booking payment
+   */
+  async deductWallet(
+    userId: string,
+    amount: number,
+    description: string,
+    referenceId?: string,
+  ) {
+    return this.dataSource.transaction(async (manager) => {
+      const user = await manager.findOne(User, {
+        where: { id: userId },
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (!user) throw new NotFoundException('User not found');
+
+      const currentBalance = parseFloat(
+        user.wallet_balance as unknown as string,
+      );
+      if (currentBalance < amount) {
+        throw new BadRequestException('Insufficient wallet balance');
+      }
+
+      const newBalance = currentBalance - amount;
+      await manager.update(User, userId, { wallet_balance: newBalance });
+
+      const txn = manager.create(WalletTransaction, {
+        user_id: userId,
+        type: WalletTxnType.DEBIT,
+        amount,
+        balance_after: newBalance,
+        description,
+        source: WalletTxnSource.BOOKING_PAYMENT,
+        reference_id: referenceId ?? null,
+      });
+      await manager.save(txn);
+
+      return { balance: newBalance, transaction: txn };
+    });
+  }
+
+  /**
+   * Internal — credit wallet (refund / cashback)
+   */
+  async creditWallet(
+    userId: string,
+    amount: number,
+    description: string,
+    source: WalletTxnSource = WalletTxnSource.REFUND,
+    referenceId?: string,
+  ) {
+    return this.dataSource.transaction(async (manager) => {
+      const user = await manager.findOne(User, {
+        where: { id: userId },
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (!user) throw new NotFoundException('User not found');
+
+      const currentBalance = parseFloat(
+        user.wallet_balance as unknown as string,
+      );
+      const newBalance = currentBalance + amount;
+
+      await manager.update(User, userId, { wallet_balance: newBalance });
+
+      const txn = manager.create(WalletTransaction, {
+        user_id: userId,
+        type: WalletTxnType.CREDIT,
+        amount,
+        balance_after: newBalance,
+        description,
+        source,
+        reference_id: referenceId ?? null,
+      });
+      await manager.save(txn);
+
+      return { balance: newBalance, transaction: txn };
+    });
   }
 }

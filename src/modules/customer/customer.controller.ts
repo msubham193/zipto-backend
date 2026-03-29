@@ -1,10 +1,55 @@
-import { Controller, Get, Put, Post, Delete, Body, Param, ParseIntPipe } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
+import {
+  Controller,
+  Get,
+  Put,
+  Post,
+  Delete,
+  Body,
+  Param,
+  Query,
+  ParseIntPipe,
+  DefaultValuePipe,
+} from '@nestjs/common';
+import {
+  ApiTags,
+  ApiOperation,
+  ApiResponse,
+  ApiBearerAuth,
+  ApiQuery,
+  ApiProperty,
+} from '@nestjs/swagger';
+import { IsNumber, Min, Max } from 'class-validator';
+import { Type } from 'class-transformer';
 import { CustomerService } from './customer.service';
 import { UpdateCustomerDto, SavedLocationDto } from './dto/customer.dto';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { GetUser } from '../../common/decorators/get-user.decorator';
 import { User } from '../auth/entities/user.entity';
+
+class InitiateAddMoneyDto {
+  @ApiProperty({ example: 500, description: 'Amount in INR (min ₹10, max ₹50,000)' })
+  @IsNumber()
+  @Min(10)
+  @Max(50000)
+  @Type(() => Number)
+  amount: number;
+}
+
+class VerifyAddMoneyDto {
+  @ApiProperty({ example: 'order_xyz' })
+  order_id: string;
+
+  @ApiProperty({ example: 'pay_xyz' })
+  payment_id: string;
+
+  @ApiProperty({ example: 'sig_xyz' })
+  signature: string;
+
+  @ApiProperty({ example: 500 })
+  @IsNumber()
+  @Type(() => Number)
+  amount: number;
+}
 
 @ApiTags('Customer')
 @Controller('customer')
@@ -13,44 +58,102 @@ import { User } from '../auth/entities/user.entity';
 export class CustomerController {
   constructor(private readonly customerService: CustomerService) {}
 
+  // ─────────────────────────────────────────────────────────────────────────
+  // Profile
+  // ─────────────────────────────────────────────────────────────────────────
+
   @Get('profile')
   @ApiOperation({ summary: 'Get customer profile' })
-  @ApiResponse({ status: 200, description: 'Profile retrieved successfully' })
-  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 200 })
   async getProfile(@GetUser() user: User) {
     return this.customerService.getProfile(user.id);
   }
 
   @Put('profile')
   @ApiOperation({ summary: 'Update customer profile' })
-  @ApiResponse({ status: 200, description: 'Profile updated successfully' })
-  @ApiResponse({ status: 401, description: 'Unauthorized' })
-  async updateProfile(@GetUser() user: User, @Body() updateCustomerDto: UpdateCustomerDto) {
+  @ApiResponse({ status: 200 })
+  async updateProfile(
+    @GetUser() user: User,
+    @Body() updateCustomerDto: UpdateCustomerDto,
+  ) {
     return this.customerService.updateProfile(user.id, updateCustomerDto);
   }
 
   @Get('saved-locations')
   @ApiOperation({ summary: 'Get all saved locations' })
-  @ApiResponse({ status: 200, description: 'Saved locations retrieved' })
-  @ApiResponse({ status: 401, description: 'Unauthorized' })
   async getSavedLocations(@GetUser() user: User) {
     return this.customerService.getSavedLocations(user.id);
   }
 
   @Post('saved-locations')
-  @ApiOperation({ summary: 'Add new saved location' })
-  @ApiResponse({ status: 201, description: 'Location added successfully' })
-  @ApiResponse({ status: 401, description: 'Unauthorized' })
-  async addSavedLocation(@GetUser() user: User, @Body() locationDto: SavedLocationDto) {
+  @ApiOperation({ summary: 'Add saved location' })
+  async addSavedLocation(
+    @GetUser() user: User,
+    @Body() locationDto: SavedLocationDto,
+  ) {
     return this.customerService.addSavedLocation(user.id, locationDto);
   }
 
   @Delete('saved-locations/:index')
   @ApiOperation({ summary: 'Delete saved location by index' })
-  @ApiResponse({ status: 200, description: 'Location deleted successfully' })
-  @ApiResponse({ status: 404, description: 'Location not found' })
-  @ApiResponse({ status: 401, description: 'Unauthorized' })
-  async removeSavedLocation(@GetUser() user: User, @Param('index', ParseIntPipe) index: number) {
+  async removeSavedLocation(
+    @GetUser() user: User,
+    @Param('index', ParseIntPipe) index: number,
+  ) {
     return this.customerService.removeSavedLocation(user.id, index);
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Wallet
+  // ─────────────────────────────────────────────────────────────────────────
+
+  @Get('wallet')
+  @ApiOperation({ summary: 'Get wallet balance + recent 20 transactions' })
+  async getWallet(@GetUser() user: User) {
+    const data = await this.customerService.getWallet(user.id);
+    return { success: true, data };
+  }
+
+  @Get('wallet/transactions')
+  @ApiOperation({ summary: 'Full wallet transaction history (paginated)' })
+  @ApiQuery({ name: 'page', required: false, type: Number })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
+  async getTransactions(
+    @GetUser() user: User,
+    @Query('page', new DefaultValuePipe(1), ParseIntPipe) page: number,
+    @Query('limit', new DefaultValuePipe(20), ParseIntPipe) limit: number,
+  ) {
+    const data = await this.customerService.getWalletTransactions(
+      user.id,
+      page,
+      limit,
+    );
+    return { success: true, data };
+  }
+
+  @Post('wallet/add-money/initiate')
+  @ApiOperation({ summary: 'Create Razorpay order for wallet top-up' })
+  async initiateAddMoney(
+    @GetUser() user: User,
+    @Body() dto: InitiateAddMoneyDto,
+  ) {
+    const data = await this.customerService.initiateAddMoney(user.id, dto.amount);
+    return { success: true, data };
+  }
+
+  @Post('wallet/add-money/verify')
+  @ApiOperation({ summary: 'Verify Razorpay payment + credit wallet' })
+  async verifyAddMoney(
+    @GetUser() user: User,
+    @Body() dto: VerifyAddMoneyDto,
+  ) {
+    const data = await this.customerService.verifyAddMoney(
+      user.id,
+      dto.order_id,
+      dto.payment_id,
+      dto.signature,
+      dto.amount,
+    );
+    return { success: true, data };
   }
 }
