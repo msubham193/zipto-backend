@@ -1,4 +1,12 @@
-import { Controller, Post, Get, Delete, Body } from '@nestjs/common';
+import {
+  Controller,
+  Post,
+  Get,
+  Delete,
+  Put,
+  Body,
+  BadRequestException,
+} from '@nestjs/common';
 import {
   ApiTags,
   ApiOperation,
@@ -7,7 +15,12 @@ import {
   ApiBody,
 } from '@nestjs/swagger';
 import { NotificationService } from './notification.service';
-import { SendNotificationDto, DriverNotificationDto } from './dto/notification.dto';
+import {
+  SendNotificationDto,
+  BroadcastNotificationDto,
+  RegisterFcmTokenDto,
+  DriverNotificationDto,
+} from './dto/notification.dto';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { GetUser } from '../../common/decorators/get-user.decorator';
 import { User } from '../auth/entities/user.entity';
@@ -18,112 +31,133 @@ import { User } from '../auth/entities/user.entity';
 export class NotificationController {
   constructor(private readonly notificationService: NotificationService) {}
 
-  /**
-   * Admin — push a custom notification to any user
-   */
-  @Post('send')
-  @Roles('admin')
-  @ApiOperation({ summary: '[Admin] Send a push notification to any user' })
-  @ApiBody({ type: SendNotificationDto })
-  @ApiResponse({
-    status: 201,
-    description: 'Notification queued and delivered',
-    schema: {
-      example: {
-        message: 'Notification sent',
-        user_id: 'uuid',
-        title: 'Hello',
-        body: 'Your message here',
-      },
-    },
-  })
-  @ApiResponse({ status: 401, description: 'Unauthorized' })
-  async sendNotification(@Body() sendNotificationDto: SendNotificationDto) {
-    return this.notificationService.sendPushNotification(sendNotificationDto);
-  }
+  // ─────────────────────────────────────────────────────────────────────────
+  // FCM Token — any authenticated user
+  // ─────────────────────────────────────────────────────────────────────────
 
   /**
-   * Driver — fetch their own notification inbox
+   * Register or update the device FCM token for push notifications.
+   * Called on app launch after the device grants notification permission.
    */
-  @Get()
-  @Roles('driver')
+  @Put('fcm-token')
+  @Roles('driver', 'customer', 'admin')
+  @ApiOperation({ summary: 'Register device FCM token for push notifications' })
+  @ApiBody({ type: RegisterFcmTokenDto })
+  @ApiResponse({ status: 200, schema: { example: { success: true } } })
+  async registerFcmToken(
+    @GetUser() user: User,
+    @Body() dto: RegisterFcmTokenDto,
+  ) {
+    await this.notificationService.registerFcmToken(user.id, dto.token);
+    return { success: true };
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Admin — broadcast
+  // ─────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Broadcast a push notification to a target group or specific user.
+   */
+  @Post('broadcast')
+  @Roles('admin')
   @ApiOperation({
-    summary: '[Driver] Get my notifications',
+    summary: '[Admin] Broadcast push notification',
     description:
-      'Returns up to 50 notifications stored in Redis (approval, rejection, payment, weekly summary, general). Persisted for 30 days.',
+      'Send push (FCM) + in-app notification to: all, drivers, customers, or a specific user.',
   })
+  @ApiBody({ type: BroadcastNotificationDto })
   @ApiResponse({
-    status: 200,
-    description: 'List of notifications (newest first)',
+    status: 201,
     schema: {
       example: {
         success: true,
-        data: [
-          {
-            id: 'c3a1b2d4-...',
-            type: 'approval',
-            title: '🎉 Account Approved!',
-            message: 'Your driver account has been verified.',
-            data: null,
-            createdAt: 1710000000000,
-            read: false,
-          },
-          {
-            id: 'f1e2d3c4-...',
-            type: 'payment',
-            title: '💸 Payment Received',
-            message: '₹250 has been credited to your account for trip #ABC123.',
-            data: { bookingId: 'uuid', amount: 250 },
-            createdAt: 1709990000000,
-            read: true,
-          },
-        ],
+        target: 'drivers',
+        fcm: { success: 42, failure: 2 },
+        inApp: 44,
       },
     },
   })
-  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  async broadcast(@Body() dto: BroadcastNotificationDto) {
+    if (dto.target === 'user' && !dto.user_id) {
+      throw new BadRequestException('user_id is required when target is "user"');
+    }
+    const result = await this.notificationService.broadcast(dto);
+    return { success: true, ...result };
+  }
+
+  /**
+   * [Admin] Push to a single specific user (legacy endpoint kept for compat).
+   */
+  @Post('send')
+  @Roles('admin')
+  @ApiOperation({ summary: '[Admin] Send notification to a specific user' })
+  @ApiBody({ type: SendNotificationDto })
+  async sendNotification(@Body() dto: SendNotificationDto) {
+    return this.notificationService.sendPushNotification(dto);
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Driver notifications
+  // ─────────────────────────────────────────────────────────────────────────
+
+  @Get()
+  @Roles('driver')
+  @ApiOperation({ summary: '[Driver] Get notification inbox' })
+  @ApiResponse({
+    status: 200,
+    description: 'List of driver notifications (newest first)',
+  })
   async getNotifications(@GetUser() user: User) {
     const notifications = await this.notificationService.getForUser(user.id);
     return { success: true, data: notifications };
   }
 
-  /**
-   * Driver — mark every notification as read
-   */
   @Post('read-all')
   @Roles('driver')
-  @ApiOperation({
-    summary: '[Driver] Mark all notifications as read',
-    description: 'Sets read=true on every notification in the driver\'s inbox.',
-  })
-  @ApiResponse({
-    status: 201,
-    description: 'All notifications marked as read',
-    schema: { example: { success: true } },
-  })
-  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiOperation({ summary: '[Driver] Mark all notifications as read' })
   async markAllRead(@GetUser() user: User) {
     await this.notificationService.markAllRead(user.id);
     return { success: true };
   }
 
-  /**
-   * Driver — clear / delete entire inbox
-   */
   @Delete('clear')
   @Roles('driver')
-  @ApiOperation({
-    summary: '[Driver] Clear all notifications',
-    description: 'Permanently deletes the entire notification inbox from Redis.',
-  })
-  @ApiResponse({
-    status: 200,
-    description: 'Inbox cleared',
-    schema: { example: { success: true } },
-  })
-  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiOperation({ summary: '[Driver] Clear all notifications' })
   async clearNotifications(@GetUser() user: User) {
     await this.notificationService.clearForUser(user.id);
+    return { success: true };
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Customer notifications
+  // ─────────────────────────────────────────────────────────────────────────
+
+  @Get('customer')
+  @Roles('customer')
+  @ApiOperation({ summary: '[Customer] Get notification inbox' })
+  @ApiResponse({
+    status: 200,
+    description: 'List of customer notifications (newest first)',
+  })
+  async getCustomerNotifications(@GetUser() user: User) {
+    const notifications = await this.notificationService.getForCustomer(user.id);
+    return { success: true, data: notifications };
+  }
+
+  @Post('customer/read-all')
+  @Roles('customer')
+  @ApiOperation({ summary: '[Customer] Mark all notifications as read' })
+  async markAllReadCustomer(@GetUser() user: User) {
+    await this.notificationService.markAllReadForCustomer(user.id);
+    return { success: true };
+  }
+
+  @Delete('customer/clear')
+  @Roles('customer')
+  @ApiOperation({ summary: '[Customer] Clear all notifications' })
+  async clearCustomerNotifications(@GetUser() user: User) {
+    await this.notificationService.clearForCustomer(user.id);
     return { success: true };
   }
 }

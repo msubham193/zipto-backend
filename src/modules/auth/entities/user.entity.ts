@@ -63,6 +63,9 @@ export class User {
   @Exclude()
   refresh_token: string;
 
+  @Column({ type: 'text', nullable: true })
+  fcm_token: string | null;
+
   @CreateDateColumn()
   created_at: Date;
 

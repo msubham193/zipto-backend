@@ -1,133 +1,163 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
-interface FCMNotification {
-  title: string;
-  body: string;
-  data?: Record<string, any>;
-}
-
 @Injectable()
-export class FcmService {
+export class FcmService implements OnModuleInit {
   private readonly logger = new Logger(FcmService.name);
-  private readonly serverKey: string;
-  private admin: any;
+  private messaging: any = null;
 
-  constructor(private configService: ConfigService) {
-    this.serverKey = this.configService.get<string>('externalServices.fcm.serverKey') || '';
+  constructor(private readonly config: ConfigService) {}
 
-    // Initialize Firebase Admin SDK if serverKey is available
-    if (this.serverKey) {
-      try {
-        const admin = require('firebase-admin');
+  onModuleInit() {
+    const projectId = this.config.get<string>('FIREBASE_PROJECT_ID');
+    const clientEmail = this.config.get<string>('FIREBASE_CLIENT_EMAIL');
+    const privateKey = this.config
+      .get<string>('FIREBASE_PRIVATE_KEY')
+      ?.replace(/\\n/g, '\n');
 
-        // Initialize with server key (for testing)
-        // In production, use service account JSON
+    if (!projectId || !clientEmail || !privateKey) {
+      this.logger.warn(
+        'Firebase credentials not set — push notifications disabled. ' +
+          'Set FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL, FIREBASE_PRIVATE_KEY in .env',
+      );
+      return;
+    }
+
+    try {
+      const admin = require('firebase-admin');
+      if (!admin.apps.length) {
         admin.initializeApp({
-          credential: admin.credential.cert({
-            // TODO: Replace with actual service account JSON
-            projectId: 'skido-project',
-            privateKey: this.serverKey,
-            clientEmail: 'firebase-adminsdk@skido-project.iam.gserviceaccount.com',
-          }),
+          credential: admin.credential.cert({ projectId, clientEmail, privateKey }),
         });
-
-        this.admin = admin;
-        this.logger.log('Firebase Admin SDK initialized');
-      } catch (error: any) {
-        this.logger.warn(`Firebase Admin SDK initialization failed: ${error.message}`);
       }
-    } else {
-      this.logger.warn('FCM server key not configured, using mock mode');
+      this.messaging = admin.messaging();
+      this.logger.log('Firebase Admin SDK initialized — push notifications enabled');
+    } catch (err: any) {
+      this.logger.error(`Firebase Admin SDK init failed: ${err.message}`);
     }
   }
 
-  /**
-   * Send push notification to a device token
-   */
-  async sendToDevice(deviceToken: string, notification: FCMNotification): Promise<boolean> {
-    if (!this.admin) {
-      this.logger.log(`[MOCK FCM] Notification to ${deviceToken.substring(0, 20)}...`);
-      this.logger.log(`Title: ${notification.title}, Body: ${notification.body}`);
-      return true; // Mock success
-    }
-
-    try {
-      const message = {
-        token: deviceToken,
-        notification: {
-          title: notification.title,
-          body: notification.body,
-        },
-        data: notification.data || {},
-      };
-
-      const response = await this.admin.messaging().send(message);
-      this.logger.log(`FCM notification sent successfully: ${response}`);
-      return true;
-    } catch (error: any) {
-      this.logger.error(`FCM send failed: ${error.message}`);
-      return false;
-    }
+  get isEnabled(): boolean {
+    return this.messaging !== null;
   }
 
   /**
-   * Send to multiple devices
+   * Send push notification to a single device token.
+   * Returns false for invalid/stale tokens so the caller can clean them up.
    */
-  async sendToMultipleDevices(
-    deviceTokens: string[],
-    notification: FCMNotification,
+  async sendToToken(
+    token: string,
+    title: string,
+    body: string,
+    data?: Record<string, string>,
   ): Promise<boolean> {
-    if (!this.admin) {
-      this.logger.log(`[MOCK FCM] Sending to ${deviceTokens.length} devices`);
-      this.logger.log(`Title: ${notification.title}, Body: ${notification.body}`);
-      return true;
-    }
-
+    if (!this.messaging) return false;
     try {
-      const message = {
-        tokens: deviceTokens,
-        notification: {
-          title: notification.title,
-          body: notification.body,
+      await this.messaging.send({
+        token,
+        notification: { title, body },
+        data: data ?? {},
+        android: {
+          priority: 'high',
+          notification: {
+            channelId: 'zipto_default',
+            sound: 'default',
+          },
         },
-        data: notification.data || {},
-      };
-
-      const response = await this.admin.messaging().sendMulticast(message);
-      this.logger.log(`FCM sent to ${response.successCount}/${deviceTokens.length} devices`);
-      return response.successCount > 0;
-    } catch (error: any) {
-      this.logger.error(`FCM multicast send failed: ${error.message}`);
+        apns: {
+          payload: {
+            aps: {
+              sound: 'default',
+              badge: 1,
+              'content-available': 1,
+            },
+          },
+        },
+      });
+      return true;
+    } catch (err: any) {
+      const staleTokenCodes = [
+        'messaging/registration-token-not-registered',
+        'messaging/invalid-registration-token',
+        'messaging/invalid-argument',
+      ];
+      if (staleTokenCodes.includes(err.code)) {
+        return false; // stale — caller should remove from DB
+      }
+      this.logger.warn(
+        `FCM send failed for token ...${token.slice(-8)}: ${err.message}`,
+      );
       return false;
     }
   }
 
   /**
-   * Send to a topic
+   * Send to many tokens at once (auto-chunked at 500).
    */
-  async sendToTopic(topic: string, notification: FCMNotification): Promise<boolean> {
-    if (!this.admin) {
-      this.logger.log(`[MOCK FCM] Sending to topic: ${topic}`);
-      this.logger.log(`Title: ${notification.title}, Body: ${notification.body}`);
-      return true;
+  async sendToTokens(
+    tokens: string[],
+    title: string,
+    body: string,
+    data?: Record<string, string>,
+  ): Promise<{ success: number; failure: number }> {
+    if (!this.messaging || tokens.length === 0) {
+      return { success: 0, failure: 0 };
     }
 
-    try {
-      const message = {
-        topic,
-        notification: {
-          title: notification.title,
-          body: notification.body,
-        },
-        data: notification.data || {},
-      };
+    let success = 0;
+    let failure = 0;
 
-      const response = await this.admin.messaging().send(message);
-      this.logger.log(`FCM notification sent to topic ${topic}: ${response}`);
+    for (let i = 0; i < tokens.length; i += 500) {
+      const chunk = tokens.slice(i, i + 500);
+      try {
+        const res = await this.messaging.sendEachForMulticast({
+          tokens: chunk,
+          notification: { title, body },
+          data: data ?? {},
+          android: { priority: 'high' },
+          apns: {
+            payload: {
+              aps: { sound: 'default', badge: 1, 'content-available': 1 },
+            },
+          },
+        });
+        success += res.successCount;
+        failure += res.failureCount;
+      } catch (err: any) {
+        this.logger.warn(
+          `FCM batch send failed [${i}–${i + chunk.length}]: ${err.message}`,
+        );
+        failure += chunk.length;
+      }
+    }
+
+    this.logger.log(
+      `FCM batch sent to ${tokens.length} tokens — success: ${success}, failure: ${failure}`,
+    );
+    return { success, failure };
+  }
+
+  // Legacy compat methods used by existing code
+  async sendToDevice(deviceToken: string, notification: { title: string; body: string; data?: Record<string, any> }): Promise<boolean> {
+    return this.sendToToken(deviceToken, notification.title, notification.body);
+  }
+
+  async sendToMultipleDevices(deviceTokens: string[], notification: { title: string; body: string; data?: Record<string, any> }): Promise<boolean> {
+    const res = await this.sendToTokens(deviceTokens, notification.title, notification.body);
+    return res.success > 0;
+  }
+
+  async sendToTopic(topic: string, notification: { title: string; body: string; data?: Record<string, any> }): Promise<boolean> {
+    if (!this.messaging) return false;
+    try {
+      await this.messaging.send({
+        topic,
+        notification: { title: notification.title, body: notification.body },
+        data: notification.data ?? {},
+      });
       return true;
-    } catch (error: any) {
-      this.logger.error(`FCM topic send failed: ${error.message}`);
+    } catch (err: any) {
+      this.logger.error(`FCM topic send failed: ${err.message}`);
       return false;
     }
   }
