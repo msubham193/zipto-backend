@@ -681,7 +681,7 @@ export class DriverService {
    * Earnings dashboard for a given period (today | week | month).
    * Returns totals + a simple fare breakdown + current wallet balance.
    */
-  async getEarningsDashboard(userId: string, period: 'today' | 'week' | 'month') {
+  async getEarningsDashboard(userId: string, period: 'today' | 'week' | 'month' | 'all') {
     const now = new Date();
     let from: Date;
     let to: Date = new Date(now);
@@ -696,6 +696,9 @@ export class DriverService {
       from = new Date(now);
       from.setDate(now.getDate() + diff);
       from.setHours(0, 0, 0, 0);
+    } else if (period === 'all') {
+      from = new Date(0); // epoch — all time
+      to = new Date(8640000000000000); // max date
     } else {
       from = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
     }

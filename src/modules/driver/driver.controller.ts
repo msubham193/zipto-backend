@@ -123,8 +123,8 @@ export class DriverController {
     @GetUser() user: User,
     @Query('period') period: string = 'today',
   ) {
-    const resolved: 'today' | 'week' | 'month' =
-      period === 'week' ? 'week' : period === 'month' ? 'month' : 'today';
+    const resolved: 'today' | 'week' | 'month' | 'all' =
+      period === 'week' ? 'week' : period === 'month' ? 'month' : period === 'all' ? 'all' : 'today';
     return this.driverService.getEarningsDashboard(user.id, resolved);
   }
 
