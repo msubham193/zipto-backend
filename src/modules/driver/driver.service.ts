@@ -54,12 +54,18 @@ export class DriverService {
       throw new NotFoundException('Driver profile not found');
     }
 
+    // Count actual completed trips from bookings (source of truth)
+    const totalTrips = await this.bookingRepository.count({
+      where: { driver_id: userId, status: BookingStatus.COMPLETED },
+    });
+
     // Surface user-level fields so frontend can read profile.name directly
     return {
       ...profile,
       name: profile.user?.name ?? null,
       phone: profile.user?.phone ?? null,
       email: profile.user?.email ?? null,
+      total_trips: totalTrips,
     };
   }
 
