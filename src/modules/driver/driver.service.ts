@@ -59,6 +59,12 @@ export class DriverService {
       where: { driver_id: userId, status: BookingStatus.COMPLETED },
     });
 
+    // Count total feedback/ratings received
+    const [{ count: ratingCount }] = await this.bookingRepository.manager.query(
+      `SELECT COUNT(*)::int AS count FROM ratings WHERE driver_id = $1`,
+      [userId],
+    );
+
     // Surface user-level fields so frontend can read profile.name directly
     return {
       ...profile,
@@ -66,6 +72,7 @@ export class DriverService {
       phone: profile.user?.phone ?? null,
       email: profile.user?.email ?? null,
       total_trips: totalTrips,
+      total_ratings: ratingCount as number,
     };
   }
 
