@@ -16,6 +16,7 @@ async function bootstrap() {
   const port = configService.get<number>('app.port') || 3000;
   const apiPrefix = configService.get<string>('app.apiPrefix') || 'api';
   const appName = configService.get<string>('app.name') || 'SkiDO';
+  const corsOrigins = configService.get<string[]>('app.corsOrigins') || [];
 
   // Security - Configure Helmet to allow Swagger docs
   app.use(
@@ -33,13 +34,14 @@ async function bootstrap() {
 
   // CORS
   app.enableCors({
-    origin: [
-      'http://localhost:3000',
-      'http://localhost:4200',
-      'http://localhost:5173', // Vite dev server
-      'https://zipto-admin.vercel.app', // Production frontend (Vercel)
-      'https://admin.ridezipto.com',    // Production frontend (custom domain)
-    ],
+    origin: (origin, callback) => {
+      if (!origin || corsOrigins.includes(origin)) {
+        callback(null, true);
+        return;
+      }
+
+      callback(new Error(`CORS blocked for origin: ${origin}`), false);
+    },
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization'],
     credentials: true,
