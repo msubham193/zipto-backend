@@ -1,4 +1,4 @@
-import { Controller, Get, Put, Post, Delete, Param, Query, Body } from '@nestjs/common';
+import { Controller, Get, Put, Post, Delete, Param, Query, Body, BadRequestException } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { AdminService } from './admin.service';
 import { BookingService } from '../booking/booking.service';
@@ -9,6 +9,7 @@ import { PaginationDto } from './dto/pagination.dto';
 import { ReportsQueryDto } from './dto/reports-query.dto';
 import { CreatePricingRuleDto, UpdatePricingRuleDto } from './dto/pricing-rule.dto';
 import { VehiclesQueryDto } from './dto/vehicles-query.dto';
+import { SystemSettingsService } from '../settings/system-settings.service';
 
 @ApiTags('Admin')
 @Controller('admin')
@@ -19,6 +20,7 @@ export class AdminController {
     private readonly adminService: AdminService,
     private readonly bookingService: BookingService,
     private readonly notificationService: NotificationService,
+    private readonly systemSettings: SystemSettingsService,
   ) {}
 
   @Get('dashboard/stats')
@@ -333,5 +335,29 @@ export class AdminController {
   @ApiResponse({ status: 404, description: 'Withdrawal not found' })
   async rejectWithdrawal(@Param('id') id: string, @Body('remarks') remarks?: string) {
     return this.adminService.rejectWithdrawal(id, remarks);
+  }
+
+  // ─── System Settings ──────────────────────────────────────────────────────
+
+  @Get('settings')
+  @ApiOperation({ summary: 'Get all system settings' })
+  @ApiResponse({ status: 200, description: 'Settings retrieved' })
+  async getSettings() {
+    const rows = await this.systemSettings.getAll();
+    return { success: true, data: rows };
+  }
+
+  @Put('settings/:key')
+  @ApiOperation({ summary: 'Update a system setting by key' })
+  @ApiResponse({ status: 200, description: 'Setting updated' })
+  async updateSetting(
+    @Param('key') key: string,
+    @Body('value') value: string,
+  ) {
+    if (value === undefined || value === null || String(value).trim() === '') {
+      throw new BadRequestException('value is required');
+    }
+    const updated = await this.systemSettings.update(key, String(value));
+    return { success: true, data: updated };
   }
 }

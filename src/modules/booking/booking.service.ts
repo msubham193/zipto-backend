@@ -33,6 +33,7 @@ import {
   PUBLIC_VEHICLE_TYPES,
 } from './constants/default-pricing-rules';
 import { FraudService } from '../fraud/fraud.service';
+import { SystemSettingsService } from '../settings/system-settings.service';
 
 @Injectable()
 export class BookingService {
@@ -54,6 +55,7 @@ export class BookingService {
     private bookingGateway: BookingGateway,
     private cacheManager: RedisService,
     private fraudService: FraudService,
+    private systemSettings: SystemSettingsService,
   ) {}
 
   private async ensureDefaultPricingRules() {
@@ -397,7 +399,8 @@ export class BookingService {
     vehicleType?: string,
     attempt: number = 1,
   ) {
-    const MAX_ATTEMPTS = 10;
+    const settings = await this.systemSettings.getDispatchSettings();
+    const MAX_ATTEMPTS = settings.max_search_attempts;
 
     const offerData = await this.cacheManager.get<any>(`offer:${offerId}`);
     this.logger.log(`[processDriverSearch] offer=${offerId}, found=${!!offerData}, attempt=${attempt}`);
@@ -405,15 +408,15 @@ export class BookingService {
 
     const resolvedVehicleType = vehicleType || offerData.vehicle_type;
     const { latitude, longitude } = offerData.pickup_location;
-    this.logger.log(`[processDriverSearch] pickup=(${latitude},${longitude}), vehicleType: ${resolvedVehicleType}`);
+    this.logger.log(`[processDriverSearch] pickup=(${latitude},${longitude}), vehicleType: ${resolvedVehicleType}, radius: ${settings.search_radius_km}km`);
 
     if (attempt > MAX_ATTEMPTS) {
       await this.broadcastBookingToNearby(offerId, resolvedVehicleType);
       return;
     }
 
-    const nearbyDrivers = await this.findNearbyDrivers(latitude, longitude, 5, resolvedVehicleType);
-    this.logger.log(`[processDriverSearch] found ${nearbyDrivers.length} nearby drivers`);
+    const nearbyDrivers = await this.findNearbyDrivers(latitude, longitude, settings.search_radius_km, resolvedVehicleType);
+    this.logger.log(`[processDriverSearch] found ${nearbyDrivers.length} nearby drivers within ${settings.search_radius_km}km`);
 
     const eligibleDrivers = nearbyDrivers.filter(
       (driver: any) => !excludedDriverIds.includes(driver.user_id),
@@ -454,7 +457,7 @@ export class BookingService {
         vehicleType:      resolvedVehicleType,
         attempt:          attempt + 1,
       },
-      { delay: 15000 },
+      { delay: settings.offer_timeout_seconds * 1000 },
     );
   }
 
@@ -498,8 +501,9 @@ export class BookingService {
     const offerData = await this.cacheManager.get<any>(`offer:${offerId}`);
     if (!offerData) return; // offer accepted or expired
 
+    const settings = await this.systemSettings.getDispatchSettings();
     const { latitude, longitude } = offerData.pickup_location;
-    const nearbyDrivers = await this.findNearbyDrivers(latitude, longitude, 10, vehicleType);
+    const nearbyDrivers = await this.findNearbyDrivers(latitude, longitude, settings.broadcast_radius_km, vehicleType);
 
     if (nearbyDrivers.length === 0) {
       // No drivers to broadcast to — leave offer in Redis and let the
@@ -611,6 +615,11 @@ export class BookingService {
     radiusKm: number,
     vehicleType?: string,
   ) {
+    if (!lat || !lng || isNaN(lat) || isNaN(lng)) {
+      this.logger.warn('[findNearbyDrivers] Invalid coordinates, skipping search');
+      return [];
+    }
+
     const params: any[] = [lng, lat, radiusKm * 1000];
     let vehicleFilter = '';
 
@@ -619,28 +628,36 @@ export class BookingService {
       vehicleFilter = `AND v.vehicle_type = $4`;
     }
 
-    return this.bookingRepository.manager.query(
-      `
-      SELECT dp.user_id,
-             ST_Distance(
-               dp.current_location,
-               ST_SetSRID(ST_MakePoint($1, $2), 4326)::geography
-             ) AS distance
-      FROM driver_profiles dp
-      JOIN vehicles v ON v.id = dp.vehicle_id
-        AND v.verification_status = 'approved'
-        ${vehicleFilter}
-      WHERE dp.availability_status = 'online'
-      AND ST_DWithin(
-        dp.current_location,
-        ST_SetSRID(ST_MakePoint($1, $2), 4326)::geography,
-        $3
-      )
-      ORDER BY distance ASC
-      LIMIT 10
-      `,
-      params,
-    );
+    try {
+      const results = await this.bookingRepository.manager.query(
+        `
+        SELECT dp.user_id,
+               ST_Distance(
+                 dp.current_location,
+                 ST_SetSRID(ST_MakePoint($1, $2), 4326)::geography
+               ) AS distance
+        FROM driver_profiles dp
+        -- FIX: join via vehicles.driver_id → driver_profiles.id (not dp.vehicle_id which may be null)
+        JOIN vehicles v ON v.driver_id = dp.id
+          AND v.verification_status = 'approved'
+          ${vehicleFilter}
+        WHERE dp.availability_status = 'online'
+          AND dp.current_location IS NOT NULL
+          AND ST_DWithin(
+            dp.current_location,
+            ST_SetSRID(ST_MakePoint($1, $2), 4326)::geography,
+            $3
+          )
+        ORDER BY distance ASC
+        LIMIT 10
+        `,
+        params,
+      );
+      return results;
+    } catch (err) {
+      this.logger.error('[findNearbyDrivers] Query failed', err);
+      return [];
+    }
   }
 
   /**

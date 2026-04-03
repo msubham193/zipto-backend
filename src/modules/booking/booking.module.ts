@@ -11,6 +11,7 @@ import { BookingGateway } from './booking.gateway';
 import { BookingProcessor } from './booking.processor';
 import { Payment } from '../payment/entities/payment.entity';
 import { FraudModule } from '../fraud/fraud.module';
+import { SettingsModule } from '../settings/settings.module';
 
 @Module({
   imports: [
@@ -21,6 +22,7 @@ import { FraudModule } from '../fraud/fraud.module';
       name: 'booking_assignment',
     }),
     forwardRef(() => FraudModule),
+    SettingsModule,
   ],
   controllers: [BookingController],
   providers: [BookingService, BookingGateway, BookingProcessor],

@@ -13,6 +13,7 @@ import { AuthModule } from '../auth/auth.module';
 import { BookingModule } from '../booking/booking.module';
 import { NotificationModule } from '../notification/notification.module';
 import { FraudModule } from '../fraud/fraud.module';
+import { SettingsModule } from '../settings/settings.module';
 
 @Module({
   imports: [
@@ -21,6 +22,7 @@ import { FraudModule } from '../fraud/fraud.module';
     BookingModule,
     NotificationModule,
     FraudModule,
+    SettingsModule,
   ],
   controllers: [AdminController],
   providers: [AdminService],
