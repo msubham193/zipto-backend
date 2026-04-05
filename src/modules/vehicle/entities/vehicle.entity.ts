@@ -46,8 +46,8 @@ export class Vehicle {
   @Index()
   registration_number: string;
 
-  @Column({ type: 'integer' })
-  capacity: number; // in kg
+  @Column({ type: 'integer', nullable: true, default: 0 })
+  capacity: number; // in kg (deprecated — kept for DB compatibility)
 
   @Column({ type: 'varchar', length: 100, nullable: true })
   vehicle_model: string;

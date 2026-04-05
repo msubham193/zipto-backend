@@ -12,10 +12,11 @@ export class RegisterVehicleDto {
   @IsNotEmpty()
   registration_number: string;
 
-  @ApiProperty({ example: 750, description: 'Capacity in kg' })
+  @ApiPropertyOptional({ example: 750, description: 'Capacity in kg (deprecated)' })
   @IsNumber()
-  @Min(1)
-  capacity: number;
+  @Min(0)
+  @IsOptional()
+  capacity?: number;
 
   @ApiPropertyOptional({ example: 'Tata Ace Gold' })
   @IsString()

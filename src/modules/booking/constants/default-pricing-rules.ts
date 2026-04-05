@@ -27,8 +27,6 @@ export type DefaultPricingRule = {
   surge_multiplier: number;
   free_waiting_minutes: number;
   waiting_charge_per_minute: number;
-  capacity_min: number;
-  capacity_max: number;
   best_for: string;
   night_surcharge_percent: number;
   multi_stop_fee: number;
@@ -58,8 +56,6 @@ export function getDefaultPricingRules(city: string = DEFAULT_PRICING_CITY): Def
       per_km_rate: 7,
       per_minute_rate: 0,
       minimum_fare: 40,
-      capacity_min: 0,
-      capacity_max: 8,
       best_for: 'Documents, food, medicines',
       multi_stop_fee: 20,
       helper_charge_per_person: 0,
@@ -73,8 +69,6 @@ export function getDefaultPricingRules(city: string = DEFAULT_PRICING_CITY): Def
       per_km_rate: 7,
       per_minute_rate: 0,
       minimum_fare: 45,
-      capacity_min: 0,
-      capacity_max: 10,
       best_for: 'Small parcels, groceries',
       multi_stop_fee: 20,
       helper_charge_per_person: 0,
@@ -88,8 +82,6 @@ export function getDefaultPricingRules(city: string = DEFAULT_PRICING_CITY): Def
       per_km_rate: 12,
       per_minute_rate: 0,
       minimum_fare: 80,
-      capacity_min: 50,
-      capacity_max: 150,
       best_for: 'Shop deliveries, bulk groceries',
       multi_stop_fee: 25,
       helper_charge_per_person: 200,
@@ -103,8 +95,6 @@ export function getDefaultPricingRules(city: string = DEFAULT_PRICING_CITY): Def
       per_km_rate: 18,
       per_minute_rate: 0,
       minimum_fare: 120,
-      capacity_min: 300,
-      capacity_max: 700,
       best_for: 'Furniture, appliances',
       multi_stop_fee: 30,
       helper_charge_per_person: 200,
@@ -118,8 +108,6 @@ export function getDefaultPricingRules(city: string = DEFAULT_PRICING_CITY): Def
       per_km_rate: 22,
       per_minute_rate: 0,
       minimum_fare: 150,
-      capacity_min: 700,
-      capacity_max: 1500,
       best_for: 'Warehouse to shop, heavy goods',
       multi_stop_fee: 30,
       helper_charge_per_person: 200,

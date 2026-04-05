@@ -48,13 +48,7 @@ export class PricingRule {
   @Column({ type: 'decimal', precision: 10, scale: 2, default: 2.0 })
   waiting_charge_per_minute: number; // Per-minute charge after free time
 
-  // --- Capacity & Description ---
-
-  @Column({ type: 'integer', default: 0 })
-  capacity_min: number; // in kg
-
-  @Column({ type: 'integer', default: 0 })
-  capacity_max: number; // in kg
+  // --- Description ---
 
   @Column({ type: 'varchar', length: 255, nullable: true })
   best_for: string;

@@ -52,18 +52,6 @@ export class CreatePricingRuleDto {
   @Min(0)
   waiting_charge_per_minute?: number;
 
-  @ApiPropertyOptional({ example: 0 })
-  @IsOptional()
-  @IsNumber()
-  @Min(0)
-  capacity_min?: number;
-
-  @ApiPropertyOptional({ example: 8 })
-  @IsOptional()
-  @IsNumber()
-  @Min(0)
-  capacity_max?: number;
-
   @ApiPropertyOptional({ example: 'Documents, food, medicines' })
   @IsOptional()
   @IsString()
@@ -146,18 +134,6 @@ export class UpdatePricingRuleDto {
   @IsNumber()
   @Min(0)
   waiting_charge_per_minute?: number;
-
-  @ApiPropertyOptional({ example: 0 })
-  @IsOptional()
-  @IsNumber()
-  @Min(0)
-  capacity_min?: number;
-
-  @ApiPropertyOptional({ example: 8 })
-  @IsOptional()
-  @IsNumber()
-  @Min(0)
-  capacity_max?: number;
 
   @ApiPropertyOptional({ example: 'Documents, food, medicines' })
   @IsOptional()
