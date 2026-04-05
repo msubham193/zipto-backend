@@ -35,7 +35,7 @@ export class AuthController {
   @ApiResponse({ status: 200, description: 'OTP sent successfully' })
   @ApiResponse({ status: 409, description: 'User already exists' })
   async driverRegister(@Body() registerDto: RegisterDto) {
-    return this.authService.register({ ...registerDto, role: 'driver' as any });
+    return this.authService.registerDriver({ ...registerDto, role: 'driver' as any });
   }
 
   @Public()

@@ -41,6 +41,49 @@ export class AuthService {
   ) {}
 
   /**
+   * Register a new driver — throws ConflictException if phone already registered.
+   * Use this for the driver registration endpoint (strict new-user only).
+   */
+  async registerDriver(registerDto: RegisterDto) {
+    const { phone } = registerDto;
+    const formattedPhone = formatPhoneNumber(phone);
+
+    const existingUser = await this.userRepository.findOne({
+      where: { phone: formattedPhone },
+    });
+
+    if (existingUser) {
+      if (!existingUser.is_active) {
+        throw new UnauthorizedException('User account is deactivated');
+      }
+      throw new ConflictException(
+        'An account with this number already exists. Please login instead.',
+      );
+    }
+
+    const otpCode = await this.createOTP(formattedPhone, OTPPurpose.REGISTRATION);
+
+    const sent = await this.smsService.sendVerification(formattedPhone);
+    if (!sent) {
+      const isDev = this.configService.get<string>('NODE_ENV') !== 'production';
+      if (isDev) {
+        this.logger.warn(
+          `[DEV] Twilio failed. OTP for ${formattedPhone}: ${otpCode} — use this to register`,
+        );
+      } else {
+        throw new BadRequestException('Failed to send OTP. Please try again.');
+      }
+    }
+
+    return {
+      message: 'OTP sent successfully',
+      phone: formattedPhone,
+      isNewUser: true,
+      expiresIn: '10 minutes',
+    };
+  }
+
+  /**
    * Register or login user - send OTP
    */
   async register(registerDto: RegisterDto) {
