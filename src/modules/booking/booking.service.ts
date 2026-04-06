@@ -809,12 +809,18 @@ export class BookingService {
     return {
       ...booking,
       is_already_paid: isAlreadyPaid,
-      pickup_otp: booking.pickup_otp,
-      pickup_otp_verified: booking.pickup_otp_verified,
-      delivery_otp: booking.delivery_otp,
+      // Sender details
+      sender_name: booking.name,
+      sender_phone: booking.mobile_number,
+      // Receiver details
       receiver_name: booking.receiver_name,
       receiver_phone: booking.receiver_phone,
       alternative_phone: booking.alternative_phone,
+      // OTPs
+      pickup_otp: booking.pickup_otp,
+      pickup_otp_verified: booking.pickup_otp_verified,
+      delivery_otp: booking.delivery_otp,
+      delivery_otp_verified: booking.otp_verified,
     };
   }
 
@@ -1064,7 +1070,48 @@ export class BookingService {
     booking.start_time = new Date();
     booking.pickup_otp_verified = true;
 
-    return this.bookingRepository.save(booking);
+    await this.bookingRepository.save(booking);
+
+    // Send delivery OTP to receiver (or sender if no receiver) now that package is picked up
+    if (booking.delivery_otp) {
+      const receiverPhone = booking.receiver_phone || booking.mobile_number;
+      if (receiverPhone) {
+        const smsBody =
+          `Zipto Delivery OTP: *${booking.delivery_otp}*\n` +
+          `Your package is on the way! Share this OTP with the rider ONLY when the package arrives at your door.`;
+        this.smsService.sendSms(receiverPhone, smsBody).catch(err =>
+          this.logger.warn(`[startTrip] Failed to send delivery OTP SMS: ${err?.message}`),
+        );
+      }
+    }
+
+    return booking;
+  }
+
+  /**
+   * Resend delivery OTP SMS to receiver — only allowed if delivery is not yet completed.
+   */
+  async resendDeliveryOtp(bookingId: string, driverId: string) {
+    const booking = await this.bookingRepository.findOne({
+      where: { id: bookingId, driver_id: driverId },
+    });
+
+    if (!booking) throw new NotFoundException('Booking not found');
+    if (booking.otp_verified) throw new BadRequestException('Delivery OTP has already been verified. Cannot resend.');
+    if (!booking.delivery_otp) throw new BadRequestException('No delivery OTP found for this booking.');
+
+    const receiverPhone = booking.receiver_phone || booking.mobile_number;
+    if (!receiverPhone) throw new BadRequestException('No receiver phone number available.');
+
+    const smsBody =
+      `[Resent] Zipto Delivery OTP: *${booking.delivery_otp}*\n` +
+      `Share this OTP with the delivery rider ONLY when the package arrives.`;
+
+    const sent = await this.smsService.sendSms(receiverPhone, smsBody);
+    if (!sent) throw new BadRequestException('Failed to send SMS. Please try again.');
+
+    this.logger.log(`[resendDeliveryOtp] Resent to ${receiverPhone} for booking ${bookingId}`);
+    return { message: 'OTP resent successfully to receiver.' };
   }
 
   /**

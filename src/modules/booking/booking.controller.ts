@@ -210,6 +210,15 @@ export class BookingController {
     return this.bookingService.startTrip(id, user.id, startTripDto.pickup_otp);
   }
 
+  @Post(':id/resend-delivery-otp')
+  @Roles('driver')
+  @ApiOperation({ summary: 'Resend delivery OTP to receiver via SMS' })
+  @ApiResponse({ status: 200, description: 'OTP resent successfully' })
+  @ApiResponse({ status: 400, description: 'OTP already verified or no receiver phone' })
+  async resendDeliveryOtp(@Param('id') id: string, @GetUser() user: User) {
+    return this.bookingService.resendDeliveryOtp(id, user.id);
+  }
+
   @Put(':id/complete')
   @Roles('driver')
   @ApiOperation({ summary: 'Complete the trip' })
