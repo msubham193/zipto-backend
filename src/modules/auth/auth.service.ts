@@ -25,6 +25,7 @@ import {
   generateRandomUsername,
 } from '../../common/utils/helpers.util';
 import { SmsService } from '../../services/sms.service';
+import { DriverProfile, AvailabilityStatus } from '../driver/entities/driver-profile.entity';
 
 @Injectable()
 export class AuthService {
@@ -35,6 +36,8 @@ export class AuthService {
     private userRepository: Repository<User>,
     @InjectRepository(OTP)
     private otpRepository: Repository<OTP>,
+    @InjectRepository(DriverProfile)
+    private driverProfileRepository: Repository<DriverProfile>,
     private jwtService: JwtService,
     private configService: ConfigService,
     private smsService: SmsService,
@@ -202,6 +205,14 @@ export class AuthService {
         user.role = role as UserRole;
       }
       await this.userRepository.save(user);
+    }
+
+    // Force driver offline on every login — they must manually go online
+    if (user.role === UserRole.DRIVER) {
+      await this.driverProfileRepository.update(
+        { user_id: user.id },
+        { availability_status: AvailabilityStatus.OFFLINE },
+      );
     }
 
     // Generate tokens

@@ -7,13 +7,14 @@ import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { User } from './entities/user.entity';
 import { OTP } from './entities/otp.entity';
+import { DriverProfile } from '../driver/entities/driver-profile.entity';
 import { JwtStrategy } from './strategies/jwt.strategy';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([User, OTP]),
+    TypeOrmModule.forFeature([User, OTP, DriverProfile]),
     PassportModule.register({ defaultStrategy: 'jwt' }),
     JwtModule.registerAsync({
       imports: [ConfigModule],
