@@ -9,6 +9,7 @@ import {
   ParseIntPipe,
   ParseFloatPipe,
   DefaultValuePipe,
+  BadRequestException,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiQuery, ApiBearerAuth } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
@@ -217,6 +218,29 @@ export class BookingController {
   @ApiResponse({ status: 400, description: 'OTP already verified or no receiver phone' })
   async resendDeliveryOtp(@Param('id') id: string, @GetUser() user: User) {
     return this.bookingService.resendDeliveryOtp(id, user.id);
+  }
+
+  @Post(':id/call/:party')
+  @Roles('driver')
+  @Throttle({ default: { ttl: 30000, limit: 3 } }) // max 3 call attempts per 30s
+  @ApiOperation({
+    summary: '[Driver] Initiate masked call to booking contact',
+    description:
+      'Bridges a voice call so neither the rider nor the customer sees each other\'s personal number. ' +
+      'Twilio calls the rider\'s phone from the official Zipto number; when picked up it dials the contact. ' +
+      'party = "sender" (the customer who booked) or "receiver" (delivery recipient).',
+  })
+  @ApiResponse({ status: 200, description: 'Call initiated — rider\'s phone will ring shortly' })
+  @ApiResponse({ status: 400, description: 'No phone number available or misconfigured voice service' })
+  async callContact(
+    @Param('id') id: string,
+    @Param('party') party: string,
+    @GetUser() user: User,
+  ) {
+    if (party !== 'sender' && party !== 'receiver') {
+      throw new BadRequestException('party must be "sender" or "receiver"');
+    }
+    return this.bookingService.callContact(id, user.id, party as 'sender' | 'receiver');
   }
 
   @Put(':id/complete')

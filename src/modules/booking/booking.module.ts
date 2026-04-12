@@ -4,6 +4,7 @@ import { BookingController } from './booking.controller';
 import { BookingService } from './booking.service';
 import { Booking } from './entities/booking.entity';
 import { PricingRule } from './entities/pricing-rule.entity';
+import { User } from '../auth/entities/user.entity';
 import { AuthModule } from '../auth/auth.module';
 import { CoinModule } from '../coin/coin.module';
 import { BullModule } from '@nestjs/bull';
@@ -15,7 +16,7 @@ import { SettingsModule } from '../settings/settings.module';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Booking, PricingRule, Payment]),
+    TypeOrmModule.forFeature([Booking, PricingRule, Payment, User]),
     AuthModule,
     CoinModule,
     BullModule.registerQueue({

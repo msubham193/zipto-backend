@@ -11,6 +11,7 @@ import { In, Repository } from 'typeorm';
 import { Booking, BookingStatus, BookingType } from './entities/booking.entity';
 import { PricingRule } from './entities/pricing-rule.entity';
 import { Payment, PaymentMethod, PaymentStatus } from '../payment/entities/payment.entity';
+import { User } from '../auth/entities/user.entity';
 import {
   EstimateFareDto,
   CreateBookingDto,
@@ -20,6 +21,7 @@ import {
 import { getPaginationMeta } from '../../common/utils/helpers.util';
 import { MapboxService } from '../../services/mapbox.service';
 import { SmsService } from '../../services/sms.service';
+import { ExotelService } from '../../services/exotel.service';
 import { CoinService } from '../coin/coin.service';
 import { InjectQueue } from '@nestjs/bull';
 import { Queue } from 'bull';
@@ -48,8 +50,11 @@ export class BookingService {
     private pricingRuleRepository: Repository<PricingRule>,
     @InjectRepository(Payment)
     private paymentRepository: Repository<Payment>,
+    @InjectRepository(User)
+    private userRepository: Repository<User>,
     private mapboxService: MapboxService,
     private smsService: SmsService,
+    private exotelService: ExotelService,
     private coinService: CoinService,
     @InjectQueue('booking_assignment') private bookingQueue: Queue,
     private bookingGateway: BookingGateway,
@@ -637,7 +642,6 @@ export class BookingService {
                  ST_SetSRID(ST_MakePoint($1, $2), 4326)::geography
                ) AS distance
         FROM driver_profiles dp
-        -- FIX: join via vehicles.driver_id → driver_profiles.id (not dp.vehicle_id which may be null)
         JOIN vehicles v ON v.driver_id = dp.id
           AND v.verification_status = 'approved'
           ${vehicleFilter}
@@ -647,6 +651,12 @@ export class BookingService {
             dp.current_location,
             ST_SetSRID(ST_MakePoint($1, $2), 4326)::geography,
             $3
+          )
+          -- Exclude drivers who are currently busy with an active booking
+          AND NOT EXISTS (
+            SELECT 1 FROM bookings b
+            WHERE b.driver_id = dp.user_id
+              AND b.status IN ('accepted', 'driver_assigned', 'ongoing')
           )
         ORDER BY distance ASC
         LIMIT 10
@@ -733,7 +743,9 @@ export class BookingService {
       driver_stats: driverStats,
       driver_location: driverLocation,
       pickup_otp: booking.pickup_otp,
+      pickup_otp_verified: booking.pickup_otp_verified,
       delivery_otp: booking.delivery_otp,
+      delivery_otp_verified: booking.otp_verified,
     };
   }
 
@@ -1112,6 +1124,45 @@ export class BookingService {
 
     this.logger.log(`[resendDeliveryOtp] Resent to ${receiverPhone} for booking ${bookingId}`);
     return { message: 'OTP resent successfully to receiver.' };
+  }
+
+  /**
+   * Initiate a masked voice bridge call between rider and a booking contact.
+   * Twilio calls the rider's phone (showing the official Zipto number).
+   * When the rider picks up, the call is bridged to the customer/receiver.
+   * Neither party sees the other's personal number.
+   *
+   * @param party 'sender' = the customer who booked | 'receiver' = the delivery recipient
+   */
+  async callContact(bookingId: string, driverId: string, party: 'sender' | 'receiver') {
+    const booking = await this.bookingRepository.findOne({
+      where: { id: bookingId, driver_id: driverId },
+    });
+    if (!booking) throw new NotFoundException('Booking not found');
+
+    // Resolve target phone
+    let customerPhone: string | null | undefined;
+    if (party === 'sender') {
+      customerPhone = booking.mobile_number;
+    } else {
+      customerPhone = booking.receiver_phone || booking.alternative_phone;
+    }
+    if (!customerPhone) throw new BadRequestException(`No phone number available for ${party}.`);
+
+    // Get driver's registered phone number
+    const driver = await this.userRepository.findOne({
+      where: { id: driverId },
+      select: ['phone'],
+    });
+    if (!driver?.phone) throw new BadRequestException('Driver phone number not found.');
+
+    this.logger.log(`[callContact] Bridging driver ${driverId} → ${party} (${customerPhone}) for booking ${bookingId}`);
+
+    const callSid = await this.exotelService.initiateVoiceBridge(driver.phone, customerPhone);
+    return {
+      message: 'Call initiated. Your phone will ring shortly — pick up to connect.',
+      sid: callSid,
+    };
   }
 
   /**
