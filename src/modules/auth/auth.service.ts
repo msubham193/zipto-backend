@@ -25,6 +25,7 @@ import {
   generateRandomUsername,
 } from '../../common/utils/helpers.util';
 import { SmsService } from '../../services/sms.service';
+import { RedisService } from '../../services/redis.service';
 import { DriverProfile, AvailabilityStatus } from '../driver/entities/driver-profile.entity';
 
 @Injectable()
@@ -41,6 +42,7 @@ export class AuthService {
     private jwtService: JwtService,
     private configService: ConfigService,
     private smsService: SmsService,
+    private redisService: RedisService,
   ) {}
 
   /**
@@ -207,6 +209,16 @@ export class AuthService {
       await this.userRepository.save(user);
     }
 
+    // Block login if another session is already active on a different device
+    if (!isNewUser) {
+      const existingSession = await this.redisService.get<string>(`session:active:${user.id}`);
+      if (existingSession) {
+        throw new ConflictException(
+          'You are already logged in on another device. Please log out from that device first.',
+        );
+      }
+    }
+
     // Force driver offline on every login — they must manually go online
     if (user.role === UserRole.DRIVER) {
       await this.driverProfileRepository.update(
@@ -332,7 +344,8 @@ export class AuthService {
    */
   async logout(userId: string) {
     await this.userRepository.update(userId, { refresh_token: undefined });
-
+    // Release the session so the user can log in on another device
+    await this.redisService.del(`session:active:${userId}`);
     return { message: 'Logged out successfully' };
   }
 
@@ -432,9 +445,13 @@ export class AuthService {
       expiresIn: this.configService.get<string>('jwt.refreshExpiresIn'),
     });
 
-    // Save refresh token
+    // Save refresh token in DB
     user.refresh_token = refreshToken;
     await this.userRepository.save(user);
+
+    // Register active session in Redis — TTL matches refresh token (7 days)
+    const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+    await this.redisService.set(`session:active:${user.id}`, refreshToken, SESSION_TTL_MS);
 
     return {
       access_token: accessToken,

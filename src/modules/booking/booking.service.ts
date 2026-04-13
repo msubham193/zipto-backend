@@ -818,16 +818,23 @@ export class BookingService {
 
     const isAlreadyPaid = booking.payments?.some(p => p.payment_status === 'completed') ?? false;
 
+    // Normalize a phone to 10-digit local format for display
+    const normalizePhone = (phone: string | null | undefined) => {
+      if (!phone) return undefined;
+      const digits = phone.replace(/\D/g, '');
+      return digits.length >= 10 ? digits.slice(-10) : digits || undefined;
+    };
+
     return {
       ...booking,
       is_already_paid: isAlreadyPaid,
-      // Sender details
-      sender_name: booking.name,
-      sender_phone: booking.mobile_number,
+      // Sender details — fall back to customer relation if booking fields are empty
+      sender_name: booking.name || booking.customer?.name || undefined,
+      sender_phone: normalizePhone(booking.mobile_number) || normalizePhone(booking.customer?.phone),
       // Receiver details
-      receiver_name: booking.receiver_name,
-      receiver_phone: booking.receiver_phone,
-      alternative_phone: booking.alternative_phone,
+      receiver_name: booking.receiver_name || undefined,
+      receiver_phone: normalizePhone(booking.receiver_phone) || undefined,
+      alternative_phone: normalizePhone(booking.alternative_phone) || undefined,
       // OTPs
       pickup_otp: booking.pickup_otp,
       pickup_otp_verified: booking.pickup_otp_verified,
