@@ -145,6 +145,12 @@ export class CreateBookingDto {
   /** @deprecated labour/helper option has been removed */
   @IsOptional()
   number_of_helpers?: number;
+
+  @ApiPropertyOptional({ example: 100, description: 'Zipto coins to redeem for discount (multiples of 100, 0 = no discount)' })
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  coins_to_redeem?: number;
 }
 
 export class StartTripDto {

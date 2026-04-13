@@ -266,6 +266,7 @@ export class BookingService {
       receiver_phone,
       alternative_phone,
       paid_by = 'sender',
+      coins_to_redeem = 0,
     } = createBookingDto;
 
     // Validate scheduled time
@@ -276,6 +277,23 @@ export class BookingService {
       if (new Date(scheduled_time) <= new Date()) {
         throw new BadRequestException('Scheduled time must be in the future');
       }
+    }
+
+    // Validate coin redemption
+    let validatedCoins = 0;
+    let coinDiscount = 0;
+    if (coins_to_redeem > 0) {
+      if (coins_to_redeem < 100) {
+        throw new BadRequestException('Minimum 100 coins required to apply discount');
+      }
+      // Round down to nearest 100
+      validatedCoins = Math.floor(coins_to_redeem / 100) * 100;
+      // Check user balance
+      const user = await this.userRepository.findOne({ where: { id: userId }, select: ['coins'] });
+      if (!user || user.coins < validatedCoins) {
+        throw new BadRequestException(`Insufficient coins. You have ${user?.coins ?? 0} coins`);
+      }
+      coinDiscount = Math.round(validatedCoins * CoinService.COINS_TO_RUPEES_RATE * 100) / 100;
     }
 
     const fareEstimate = await this.estimateFare({
@@ -291,6 +309,9 @@ export class BookingService {
 
     const offerId = randomUUID();
     const OFFER_TTL_MS = 6 * 60 * 1000; // 6 minutes
+
+    // Apply coin discount to estimated fare (floor at 0)
+    const discountedFare = Math.max(0, Math.round((fareEstimate.estimated_fare - coinDiscount) * 100) / 100);
 
     // Store entire offer data in Redis — NO DB write yet
     await this.cacheManager.set(`offer:${offerId}`, {
@@ -313,10 +334,12 @@ export class BookingService {
       paid_by,
       distance:         fareEstimate.distance,
       duration:         fareEstimate.duration,
-      estimated_fare:   fareEstimate.estimated_fare,
+      estimated_fare:   discountedFare,
       fare_breakdown:   fareEstimate.breakdown,
       pickup_otp,
       delivery_otp,
+      coins_to_redeem:  validatedCoins,
+      coin_discount:    coinDiscount,
     }, OFFER_TTL_MS);
 
     // Track active offer per customer so the status banner can find it
@@ -904,6 +927,18 @@ export class BookingService {
 
     // ── Create the booking in DB for the first time ──────────────────────────
     try {
+      // Deduct coins if customer opted to redeem them
+      const coinsToRedeem: number = offerData.coins_to_redeem || 0;
+      const coinDiscount: number  = offerData.coin_discount    || 0;
+      if (coinsToRedeem > 0) {
+        await this.coinService.redeemCoins(
+          offerData.customer_id,
+          coinsToRedeem,
+          `Redeemed ${coinsToRedeem} coins for ₹${coinDiscount} discount on booking`,
+        );
+        this.logger.log(`[acceptBooking] Redeemed ${coinsToRedeem} coins (₹${coinDiscount} off) for customer ${offerData.customer_id}`);
+      }
+
       const booking = this.bookingRepository.create({
         customer_id:     offerData.customer_id,
         name:            offerData.name,
@@ -934,6 +969,8 @@ export class BookingService {
         driver_id:       driverId,
         vehicle_id:      vehicleId,
         acceptance_time: new Date(),
+        coins_redeemed:  coinsToRedeem,
+        coin_discount:   coinDiscount,
       });
 
       await this.bookingRepository
@@ -1001,6 +1038,18 @@ export class BookingService {
     } catch (dbError: any) {
       await this.cacheManager.del(`offer:${offerId}:accepting`);
       this.logger.error(`acceptBooking DB error: ${dbError?.message}`);
+
+      // Refund coins if they were already deducted before the failure
+      const coinsToRefund: number = offerData?.coins_to_redeem || 0;
+      if (coinsToRefund > 0) {
+        try {
+          await this.userRepository.increment({ id: offerData.customer_id }, 'coins', coinsToRefund);
+          this.logger.warn(`[acceptBooking] Refunded ${coinsToRefund} coins to customer ${offerData.customer_id} due to booking failure`);
+        } catch (refundErr: any) {
+          this.logger.error(`[acceptBooking] Failed to refund coins: ${refundErr?.message}`);
+        }
+      }
+
       throw new BadRequestException('Failed to confirm booking. Please try again.');
     }
   }
@@ -1044,7 +1093,6 @@ export class BookingService {
    */
   async startTrip(bookingId: string, driverId: string, pickupOtp: string) {
     // Resolve offerId → real bookingId (driver may still hold the offer UUID)
-    let resolvedId = bookingId;
     let booking = await this.bookingRepository.findOne({
       where: { id: bookingId, driver_id: driverId },
     });
@@ -1052,7 +1100,6 @@ export class BookingService {
     if (!booking) {
       const realId = await this.cacheManager.get<string>(`offer:accepted:${bookingId}`);
       if (realId) {
-        resolvedId = realId;
         booking = await this.bookingRepository.findOne({
           where: { id: realId, driver_id: driverId },
         });

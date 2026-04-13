@@ -155,6 +155,13 @@ export class Booking {
   @Column({ type: 'decimal', precision: 10, scale: 2, nullable: true })
   final_fare: number;
 
+  // --- Zipto Coins Discount ---
+  @Column({ type: 'integer', default: 0 })
+  coins_redeemed: number;
+
+  @Column({ type: 'decimal', precision: 10, scale: 2, default: 0 })
+  coin_discount: number;
+
   // --- Fare Breakdown & Additional Charges ---
 
   @Column({ type: 'jsonb', nullable: true })
