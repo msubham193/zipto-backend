@@ -95,7 +95,7 @@ export class CreateBookingDto {
   @ApiProperty({
     enum: ServiceCategory,
     example: ServiceCategory.SEND_PACKAGES,
-    description: 'Service type: send_packages, transport_goods, food_delivery, medicine',
+    description: 'Service category: food_delivery (From Restaurant), medicine (From Pharmacy), send_packages (Send Parcel), transport_goods (Move Goods)',
   })
   @IsEnum(ServiceCategory)
   service_category: ServiceCategory;
