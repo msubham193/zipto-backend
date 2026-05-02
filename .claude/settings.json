@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(./gradlew clean *)"
+    ],
+    "additionalDirectories": [
+      "C:\\Users\\subha\\Desktop\\DESKTOP\\sandeep\\Zipto\\android\\app",
+      "C:\\Users\\subha\\Desktop\\DESKTOP\\sandeep\\Zipto\\src\\store"
+    ]
+  }
+}

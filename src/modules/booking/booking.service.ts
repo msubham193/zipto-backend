@@ -856,7 +856,7 @@ export class BookingService {
       sender_phone: normalizePhone(booking.mobile_number) || normalizePhone(booking.customer?.phone),
       // Receiver details
       receiver_name: booking.receiver_name || undefined,
-      receiver_phone: normalizePhone(booking.receiver_phone) || undefined,
+      receiver_phone: normalizePhone(booking.receiver_phone) || normalizePhone(booking.alternative_phone) || normalizePhone(booking.mobile_number) || normalizePhone(booking.customer?.phone),
       alternative_phone: normalizePhone(booking.alternative_phone) || undefined,
       // OTPs
       pickup_otp: booking.pickup_otp,
@@ -1199,7 +1199,7 @@ export class BookingService {
     if (party === 'sender') {
       customerPhone = booking.mobile_number;
     } else {
-      customerPhone = booking.receiver_phone || booking.alternative_phone;
+      customerPhone = booking.receiver_phone || booking.alternative_phone || booking.mobile_number;
     }
     if (!customerPhone) throw new BadRequestException(`No phone number available for ${party}.`);
 

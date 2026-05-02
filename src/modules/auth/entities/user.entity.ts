@@ -19,9 +19,9 @@ export class User {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
-  @Column({ type: 'varchar', length: 15, unique: true })
+  @Column({ type: 'varchar', length: 15, unique: true, nullable: true })
   @Index()
-  phone: string;
+  phone: string | null;
 
   @Column({ type: 'varchar', length: 100, nullable: true })
   name: string;

@@ -64,3 +64,65 @@ export class ResendOTPDto {
   @IsNotEmpty()
   phone: string;
 }
+
+export class CustomerEmailLoginDto {
+  @ApiProperty({ example: 'customer@example.com' })
+  @IsEmail()
+  @IsNotEmpty()
+  email: string;
+
+  @ApiProperty({ example: 'Password@123' })
+  @IsString()
+  @IsNotEmpty()
+  @MinLength(6)
+  password: string;
+}
+
+export class CustomerEmailRegisterDto {
+  @ApiProperty({ example: 'John Doe' })
+  @IsString()
+  @IsNotEmpty()
+  name: string;
+
+  @ApiProperty({ example: 'customer@example.com' })
+  @IsEmail()
+  @IsNotEmpty()
+  email: string;
+
+  @ApiProperty({ example: 'Password@123' })
+  @IsString()
+  @IsNotEmpty()
+  @MinLength(6)
+  password: string;
+}
+
+export class DriverEmailLoginDto {
+  @ApiProperty({ example: 'driver@example.com' })
+  @IsEmail()
+  @IsNotEmpty()
+  email: string;
+
+  @ApiProperty({ example: 'Password@123' })
+  @IsString()
+  @IsNotEmpty()
+  @MinLength(6)
+  password: string;
+}
+
+export class DriverEmailRegisterDto {
+  @ApiProperty({ example: 'John Driver' })
+  @IsString()
+  @IsNotEmpty()
+  name: string;
+
+  @ApiProperty({ example: 'driver@example.com' })
+  @IsEmail()
+  @IsNotEmpty()
+  email: string;
+
+  @ApiProperty({ example: 'Password@123' })
+  @IsString()
+  @IsNotEmpty()
+  @MinLength(6)
+  password: string;
+}

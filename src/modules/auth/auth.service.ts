@@ -18,6 +18,10 @@ import {
   LoginDto,
   AdminLoginDto,
   RefreshTokenDto,
+  CustomerEmailLoginDto,
+  CustomerEmailRegisterDto,
+  DriverEmailLoginDto,
+  DriverEmailRegisterDto,
 } from './dto/auth.dto';
 import {
   generateOTP,
@@ -298,6 +302,149 @@ export class AuthService {
 
     return {
       user: this.sanitizeUser(user),
+      ...tokens,
+    };
+  }
+
+  /**
+   * Customer login with email and password (temporary — replaces OTP while Twilio is not production-ready)
+   */
+  async customerEmailLogin(dto: CustomerEmailLoginDto) {
+    const { email, password } = dto;
+
+    const user = await this.userRepository.findOne({
+      where: { email, role: UserRole.CUSTOMER },
+    });
+
+    if (!user) {
+      throw new UnauthorizedException('Invalid credentials');
+    }
+
+    if (!user.password_hash) {
+      throw new UnauthorizedException('Password not set for this account');
+    }
+
+    const isPasswordValid = await bcrypt.compare(password, user.password_hash);
+    if (!isPasswordValid) {
+      throw new UnauthorizedException('Invalid credentials');
+    }
+
+    if (!user.is_active) {
+      throw new UnauthorizedException('Account is deactivated');
+    }
+
+    const tokens = await this.generateTokens(user);
+
+    return {
+      user: this.sanitizeUser(user),
+      is_new_user: false,
+      ...tokens,
+    };
+  }
+
+  /**
+   * Customer registration with email and password (temporary — replaces OTP while Twilio is not production-ready)
+   */
+  async customerEmailRegister(dto: CustomerEmailRegisterDto) {
+    const { email, password, name } = dto;
+
+    const existingUser = await this.userRepository.findOne({ where: { email } });
+    if (existingUser) {
+      throw new ConflictException('An account with this email already exists.');
+    }
+
+    const passwordHash = await bcrypt.hash(password, 10);
+
+    const user = this.userRepository.create({
+      email,
+      name,
+      password_hash: passwordHash,
+      role: UserRole.CUSTOMER,
+      is_verified: true,
+      is_profile_complete: false,
+    });
+
+    await this.userRepository.save(user);
+
+    const tokens = await this.generateTokens(user);
+
+    return {
+      user: this.sanitizeUser(user),
+      is_new_user: true,
+      ...tokens,
+    };
+  }
+
+  /**
+   * Driver login with email and password (temporary — replaces OTP while Twilio is not production-ready)
+   */
+  async driverEmailLogin(dto: DriverEmailLoginDto) {
+    const { email, password } = dto;
+
+    const user = await this.userRepository.findOne({
+      where: { email, role: UserRole.DRIVER },
+    });
+
+    if (!user) {
+      throw new UnauthorizedException('Invalid credentials');
+    }
+
+    if (!user.password_hash) {
+      throw new UnauthorizedException('Password not set for this account');
+    }
+
+    const isPasswordValid = await bcrypt.compare(password, user.password_hash);
+    if (!isPasswordValid) {
+      throw new UnauthorizedException('Invalid credentials');
+    }
+
+    if (!user.is_active) {
+      throw new UnauthorizedException('Account is deactivated');
+    }
+
+    await this.driverProfileRepository.update(
+      { user_id: user.id },
+      { availability_status: AvailabilityStatus.OFFLINE },
+    );
+
+    const tokens = await this.generateTokens(user);
+
+    return {
+      user: this.sanitizeUser(user),
+      is_new_user: false,
+      ...tokens,
+    };
+  }
+
+  /**
+   * Driver registration with email and password (temporary — replaces OTP while Twilio is not production-ready)
+   */
+  async driverEmailRegister(dto: DriverEmailRegisterDto) {
+    const { email, password, name } = dto;
+
+    const existingUser = await this.userRepository.findOne({ where: { email } });
+    if (existingUser) {
+      throw new ConflictException('An account with this email already exists.');
+    }
+
+    const passwordHash = await bcrypt.hash(password, 10);
+
+    const user = this.userRepository.create({
+      email,
+      name,
+      password_hash: passwordHash,
+      role: UserRole.DRIVER,
+      is_verified: false,
+      is_profile_complete: false,
+    });
+
+    await this.userRepository.save(user);
+
+    const tokens = await this.generateTokens(user);
+
+    return {
+      user: this.sanitizeUser(user),
+      is_new_user: true,
       ...tokens,
     };
   }
