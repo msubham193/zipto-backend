@@ -3,6 +3,7 @@ import {
   BadRequestException,
   UnauthorizedException,
   ConflictException,
+  NotFoundException,
   Logger,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -22,6 +23,7 @@ import {
   CustomerEmailRegisterDto,
   DriverEmailLoginDto,
   DriverEmailRegisterDto,
+  DeleteAccountDto,
 } from './dto/auth.dto';
 import {
   generateOTP,
@@ -455,6 +457,32 @@ export class AuthService {
       is_new_user: true,
       ...tokens,
     };
+  }
+
+  /**
+   * Permanently delete an account by email
+   */
+  async deleteAccount(dto: DeleteAccountDto) {
+    const { email } = dto;
+
+    const user = await this.userRepository.findOne({ where: { email } });
+    if (!user) {
+      throw new NotFoundException('No account found with this email address');
+    }
+
+    // Delete OTPs linked to the user's phone (if any)
+    if (user.phone) {
+      await this.otpRepository.delete({ phone: user.phone });
+    }
+
+    // Delete driver profile (if driver)
+    if (user.role === UserRole.DRIVER) {
+      await this.driverProfileRepository.delete({ user_id: user.id });
+    }
+
+    await this.userRepository.delete(user.id);
+
+    return { message: 'Account deleted successfully' };
   }
 
   /**

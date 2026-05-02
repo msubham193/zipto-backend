@@ -126,3 +126,10 @@ export class DriverEmailRegisterDto {
   @MinLength(6)
   password: string;
 }
+
+export class DeleteAccountDto {
+  @ApiProperty({ example: 'user@example.com' })
+  @IsEmail()
+  @IsNotEmpty()
+  email: string;
+}

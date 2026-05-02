@@ -1,4 +1,4 @@
-import { Controller, Post, Body, Get, Param, HttpCode, HttpStatus, ForbiddenException } from '@nestjs/common';
+import { Controller, Post, Delete, Body, Get, Param, HttpCode, HttpStatus, ForbiddenException } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { AuthService } from './auth.service';
 import {
@@ -12,6 +12,7 @@ import {
   CustomerEmailRegisterDto,
   DriverEmailLoginDto,
   DriverEmailRegisterDto,
+  DeleteAccountDto,
 } from './dto/auth.dto';
 import { Public } from '../../common/decorators/public.decorator';
 import { GetUser } from '../../common/decorators/get-user.decorator';
@@ -130,6 +131,16 @@ export class AuthController {
   @ApiResponse({ status: 401, description: 'Invalid refresh token' })
   async refreshToken(@Body() refreshTokenDto: RefreshTokenDto) {
     return this.authService.refreshToken(refreshTokenDto);
+  }
+
+  @Public()
+  @Delete('account')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Permanently delete an account by email' })
+  @ApiResponse({ status: 200, description: 'Account deleted successfully' })
+  @ApiResponse({ status: 404, description: 'Account not found' })
+  async deleteAccount(@Body() dto: DeleteAccountDto) {
+    return this.authService.deleteAccount(dto);
   }
 
   @Public()

@@ -1,11 +1,35 @@
 {
   "permissions": {
     "allow": [
-      "Bash(./gradlew clean *)"
+      "Bash(./gradlew clean *)",
+      "PowerShell(Head -20)",
+      "PowerShell(Get-ChildItem \"C:\\\\Users\\\\subha\\\\Desktop\\\\DESKTOP\\\\sandeep\\\\Zipto\\\\android\\\\app\\\\src\" -Recurse -File | ForEach-Object { $_.FullName })",
+      "PowerShell(Get-ChildItem \"C:\\\\Users\\\\subha\\\\Desktop\\\\DESKTOP\\\\sandeep\\\\Zipto\\\\android\\\\.gradle\" -Force | ForEach-Object { $_.FullName + \" \\(dir: \" + $_.PSIsContainer + \"\\)\" })",
+      "PowerShell(Get-ChildItem \"C:\\\\Users\\\\subha\\\\Desktop\\\\DESKTOP\\\\sandeep\\\\Zipto\\\\node_modules\\\\@react-native\" -Force | ForEach-Object { $_.Name })",
+      "PowerShell(Get-ChildItem \"C:\\\\Users\\\\subha\\\\Desktop\\\\DESKTOP\\\\sandeep\\\\Zipto\\\\node_modules\\\\@react-native\\\\gradle-plugin\" -Force | ForEach-Object { $_.Name })",
+      "PowerShell(Get-ChildItem \"C:\\\\Users\\\\subha\\\\Desktop\\\\DESKTOP\\\\sandeep\\\\Zipto\\\\node_modules\\\\@react-native\\\\gradle-plugin\\\\react-native-gradle-plugin\" -Recurse -File | Where-Object { $_.Name -match \"autolinking|Application|EntryPoint\" } | Select-Object FullName)",
+      "PowerShell(Get-ChildItem \"C:\\\\Users\\\\subha\\\\Desktop\\\\DESKTOP\\\\sandeep\\\\Zipto\\\\node_modules\\\\@react-native\\\\gradle-plugin\\\\react-native-gradle-plugin\" -Force | ForEach-Object { $_.Name })",
+      "PowerShell(Get-ChildItem \"C:\\\\Users\\\\subha\\\\Desktop\\\\DESKTOP\\\\sandeep\\\\Zipto\\\\node_modules\\\\@react-native\\\\gradle-plugin\\\\react-native-gradle-plugin\\\\build\" -Force | ForEach-Object { $_.Name })",
+      "PowerShell(Get-ChildItem \"C:\\\\Users\\\\subha\\\\Desktop\\\\DESKTOP\\\\sandeep\\\\Zipto\\\\node_modules\\\\@react-native\\\\gradle-plugin\\\\react-native-gradle-plugin\\\\build\\\\resources\" -Recurse -File | ForEach-Object { $_.FullName })",
+      "PowerShell(Get-ChildItem \"C:\\\\Users\\\\subha\\\\Desktop\\\\DESKTOP\\\\sandeep\\\\Zipto\\\\node_modules\\\\@react-native\\\\gradle-plugin\\\\react-native-gradle-plugin\\\\build\\\\classes\" -Recurse -File | Where-Object { $_.Name -match \"GenerateApplication|Autolinking|EntryPoint|PackageList|GenerateCodegen\" } | Select-Object Name, FullName)",
+      "PowerShell(Get-ChildItem \"C:\\\\Users\\\\subha\\\\Desktop\\\\DESKTOP\\\\sandeep\\\\Zipto\\\\node_modules\\\\@react-native\\\\gradle-plugin\\\\react-native-gradle-plugin\\\\build\\\\classes\" -Force | ForEach-Object { $_.Name })",
+      "PowerShell(Get-ChildItem \"C:\\\\Users\\\\subha\\\\Desktop\\\\DESKTOP\\\\sandeep\\\\Zipto\\\\node_modules\\\\@react-native\\\\gradle-plugin\\\\react-native-gradle-plugin\\\\build\\\\classes\\\\kotlin\" -Recurse | Where-Object { !$_.PSIsContainer } | ForEach-Object { $_.Name } | Select-Object -First 30)",
+      "PowerShell(Get-ChildItem \"C:\\\\Users\\\\subha\\\\Desktop\\\\DESKTOP\\\\sandeep\\\\Zipto\\\\node_modules\\\\@react-native\\\\gradle-plugin\\\\react-native-gradle-plugin\\\\src\" -Force -Recurse | Where-Object { !$_.PSIsContainer } | Select-Object FullName | Select-Object -First 30)",
+      "PowerShell(Get-ChildItem \"C:\\\\Users\\\\subha\\\\Desktop\\\\DESKTOP\\\\sandeep\\\\Zipto\\\\node_modules\\\\@react-native\\\\gradle-plugin\\\\.kotlin\" -Force -Recurse | Where-Object { !$_.PSIsContainer } | Select-Object FullName | Select-Object -First 20)",
+      "PowerShell(Get-ChildItem \"C:\\\\Users\\\\subha\\\\Desktop\\\\DESKTOP\\\\sandeep\\\\Zipto\\\\node_modules\\\\@react-native\\\\gradle-plugin\\\\react-native-gradle-plugin\\\\build\" -Force | ForEach-Object { \"$\\($_.Name\\) \\(dir=$\\($_.PSIsContainer\\)\\)\" })",
+      "PowerShell(Get-ChildItem \"C:\\\\Users\\\\subha\\\\Desktop\\\\DESKTOP\\\\sandeep\\\\Zipto\\\\node_modules\\\\@react-native\\\\gradle-plugin\\\\react-native-gradle-plugin\\\\build\\\\libs\" -Force | ForEach-Object { $_.Name })",
+      "PowerShell(Get-ChildItem \"C:\\\\Users\\\\subha\\\\Desktop\\\\DESKTOP\\\\sandeep\\\\Zipto\\\\android\\\\app\\\\build\\\\generated\" -Recurse -Force | Where-Object { !$_.PSIsContainer } | ForEach-Object { $_.FullName })",
+      "PowerShell(Get-ChildItem \"C:\\\\Users\\\\subha\\\\Desktop\\\\DESKTOP\\\\sandeep\\\\Zipto\\\\android\\\\app\\\\build\\\\tmp\" -Recurse -Force | Where-Object { !$_.PSIsContainer } | ForEach-Object { $_.FullName })",
+      "PowerShell(Get-ChildItem \"C:\\\\Users\\\\subha\\\\Desktop\\\\DESKTOP\\\\sandeep\\\\Zipto\\\\android\\\\build\" -Recurse -Force | Where-Object { !$_.PSIsContainer } | ForEach-Object { $_.FullName })",
+      "PowerShell(Get-ChildItem \"C:\\\\Users\\\\subha\\\\Desktop\\\\DESKTOP\\\\sandeep\\\\Zipto\\\\android\\\\app\\\\build\\\\outputs\" -Recurse -Force | Where-Object { !$_.PSIsContainer } | Select-Object FullName | Select-Object -First 20)",
+      "PowerShell(Get-ChildItem \"C:\\\\Users\\\\subha\\\\Desktop\\\\DESKTOP\\\\sandeep\\\\Zipto\\\\android\\\\app\\\\build\\\\outputs\" -Force | ForEach-Object { $_.Name })",
+      "PowerShell(Get-ChildItem \"C:\\\\Users\\\\subha\\\\Desktop\\\\DESKTOP\\\\sandeep\\\\Zipto\\\\android\\\\app\\\\build\\\\outputs\\\\apk\" -Recurse -Force | ForEach-Object { \"$\\($_.FullName\\) \\(dir=$\\($_.PSIsContainer\\)\\)\" })"
     ],
     "additionalDirectories": [
       "C:\\Users\\subha\\Desktop\\DESKTOP\\sandeep\\Zipto\\android\\app",
-      "C:\\Users\\subha\\Desktop\\DESKTOP\\sandeep\\Zipto\\src\\store"
+      "C:\\Users\\subha\\Desktop\\DESKTOP\\sandeep\\Zipto\\src\\store",
+      "C:\\Users\\subha\\Desktop\\DESKTOP\\sandeep\\Zipto\\android\\.gradle",
+      "C:\\Users\\subha\\Desktop\\DESKTOP\\sandeep\\Zipto\\android\\build\\generated\\autolinking"
     ]
   }
 }
