@@ -29,7 +29,7 @@ import {
   generateRandomUsername,
 } from '../../common/utils/helpers.util';
 import { SmsService } from '../../services/sms.service';
-import { DriverProfile, AvailabilityStatus } from '../driver/entities/driver-profile.entity';
+import { DriverProfile, AvailabilityStatus, VerificationStatus } from '../driver/entities/driver-profile.entity';
 
 @Injectable()
 export class AuthService {
@@ -439,6 +439,14 @@ export class AuthService {
     });
 
     await this.userRepository.save(user);
+
+    // Create a pending driver profile so the driver appears in the admin panel
+    const driverProfile = this.driverProfileRepository.create({
+      user_id: user.id,
+      verification_status: VerificationStatus.PENDING,
+      availability_status: AvailabilityStatus.OFFLINE,
+    });
+    await this.driverProfileRepository.save(driverProfile);
 
     const tokens = await this.generateTokens(user);
 
