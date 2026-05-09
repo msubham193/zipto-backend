@@ -23,6 +23,7 @@ import { AdminModule } from './modules/admin/admin.module';
 import { NotificationModule } from './modules/notification/notification.module';
 import { CoinModule } from './modules/coin/coin.module';
 import { FraudModule } from './modules/fraud/fraud.module';
+import { DriverFraudModule } from './modules/driver-fraud/driver-fraud.module';
 import { SupportModule } from './modules/support/support.module';
 import { SettingsModule } from './modules/settings/settings.module';
 import { BullModule } from '@nestjs/bull';
@@ -98,6 +99,7 @@ import { RolesGuard } from './common/guards/roles.guard';
     NotificationModule,
     CoinModule,
     FraudModule,
+    DriverFraudModule,
     SupportModule,
     SettingsModule,
     ServeStaticModule.forRoot({

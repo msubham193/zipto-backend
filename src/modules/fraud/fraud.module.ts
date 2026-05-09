@@ -6,10 +6,12 @@ import { CustomerReport } from './entities/customer-report.entity';
 import { UserBlock } from './entities/user-block.entity';
 import { User } from '../auth/entities/user.entity';
 import { Booking } from '../booking/entities/booking.entity';
+import { DriverFraudModule } from '../driver-fraud/driver-fraud.module';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([CustomerReport, UserBlock, User, Booking]),
+    DriverFraudModule,
   ],
   controllers: [FraudController],
   providers: [FraudService],

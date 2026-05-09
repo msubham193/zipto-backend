@@ -61,6 +61,16 @@ export class Booking {
   driver: User;
 
   @Column({ type: 'uuid', nullable: true })
+  original_driver_id: string;
+
+  @ManyToOne(() => User, { onDelete: 'SET NULL', nullable: true })
+  @JoinColumn({ name: 'original_driver_id' })
+  original_driver: User;
+
+  @Column({ type: 'integer', default: 0 })
+  handoff_count: number;
+
+  @Column({ type: 'uuid', nullable: true })
   vehicle_id: string;
 
   @ManyToOne(() => Vehicle)
@@ -235,6 +245,21 @@ export class Booking {
 
   @Column({ type: 'text', nullable: true })
   cancellation_reason: string;
+
+  // ─── Fraud / abandonment tracking ────────────────────────────────────────────
+
+  @Column({ type: 'timestamp', nullable: true })
+  pickup_verified_at: Date;
+
+  @Column({ type: 'boolean', default: false })
+  @Index()
+  is_flagged: boolean;
+
+  @Column({ type: 'varchar', length: 50, nullable: true })
+  flag_reason: string;
+
+  @Column({ type: 'timestamp', nullable: true })
+  flagged_at: Date;
 
   @CreateDateColumn()
   created_at: Date;

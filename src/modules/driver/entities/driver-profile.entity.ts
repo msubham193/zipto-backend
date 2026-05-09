@@ -95,6 +95,12 @@ export class DriverProfile {
   @Column({ type: 'integer', default: 0 })
   total_trips: number;
 
+  @Column({ type: 'boolean', default: false })
+  wallet_frozen: boolean;
+
+  @Column({ type: 'varchar', nullable: true })
+  wallet_freeze_reason: string;
+
   @CreateDateColumn()
   created_at: Date;
 

@@ -13,6 +13,8 @@ import { BookingProcessor } from './booking.processor';
 import { Payment } from '../payment/entities/payment.entity';
 import { FraudModule } from '../fraud/fraud.module';
 import { SettingsModule } from '../settings/settings.module';
+import { DriverFraudModule } from '../driver-fraud/driver-fraud.module';
+import { NotificationModule } from '../notification/notification.module';
 
 @Module({
   imports: [
@@ -24,6 +26,8 @@ import { SettingsModule } from '../settings/settings.module';
     }),
     forwardRef(() => FraudModule),
     SettingsModule,
+    DriverFraudModule,
+    NotificationModule,
   ],
   controllers: [BookingController],
   providers: [BookingService, BookingGateway, BookingProcessor],

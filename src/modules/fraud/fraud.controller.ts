@@ -3,12 +3,17 @@ import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { FraudService } from './fraud.service';
 import { BlockCustomerDto, GetReportsQueryDto, GetUnblockRequestsQueryDto, ProcessUnblockDto, SubmitUnblockRequestDto } from './dto/fraud.dto';
 import { Roles } from '../../common/decorators/roles.decorator';
+import { DriverFraudService } from '../driver-fraud/driver-fraud.service';
+import { DriverFraudStatus } from '../driver-fraud/entities/driver-fraud-incident.entity';
 
 @ApiTags('Fraud')
 @ApiBearerAuth()
 @Controller('admin')
 export class FraudController {
-  constructor(private readonly fraudService: FraudService) {}
+  constructor(
+    private readonly fraudService: FraudService,
+    private readonly driverFraudService: DriverFraudService,
+  ) {}
 
   // ─── Admin: Reports ──────────────────────────────────────────────────────────
 
@@ -77,5 +82,71 @@ export class FraudController {
     @Request() req: any,
   ) {
     return this.fraudService.processUnblockRequest(blockId, req.user?.sub || req.user?.id, dto);
+  }
+
+  // ─── Admin: Intelligent Fraud Detection ──────────────────────────────────────
+
+  @Get('fraud/intelligence/overview')
+  @Roles('admin')
+  @ApiOperation({ summary: 'Fraud intelligence overview — aggregate stats + recent incidents' })
+  async getFraudIntelligenceOverview() {
+    return this.driverFraudService.getIntelligenceOverview();
+  }
+
+  @Get('fraud/intelligence/driver-risk')
+  @Roles('admin')
+  @ApiOperation({ summary: 'Driver risk scores — ranked by computed risk score 0–100' })
+  async getDriverRiskScores(@Query('limit') limit?: number) {
+    return this.driverFraudService.getDriverRiskScores(limit ? Number(limit) : 20);
+  }
+
+  @Get('fraud/intelligence/flagged-bookings')
+  @Roles('admin')
+  @ApiOperation({ summary: 'Active deliveries currently flagged by a fraud guard' })
+  async getFlaggedActiveBookings() {
+    return this.driverFraudService.getFlaggedActiveBookings();
+  }
+
+  // ─── Admin: Driver Fraud Incidents ───────────────────────────────────────────
+
+  @Get('fraud/driver-incidents')
+  @Roles('admin')
+  @ApiOperation({ summary: 'List driver fraud incidents (abandoned deliveries)' })
+  async listDriverIncidents(
+    @Query('status') status?: DriverFraudStatus,
+    @Query('driver_id') driver_id?: string,
+    @Query('limit') limit?: number,
+    @Query('offset') offset?: number,
+  ) {
+    return this.driverFraudService.listIncidents({ status, driver_id, limit, offset });
+  }
+
+  @Get('fraud/driver-incidents/:id')
+  @Roles('admin')
+  @ApiOperation({ summary: 'Get a single driver fraud incident' })
+  async getDriverIncident(@Param('id') id: string) {
+    return this.driverFraudService.getIncident(id);
+  }
+
+  @Post('fraud/driver-incidents/:id/confirm')
+  @Roles('admin')
+  @ApiOperation({ summary: 'Confirm driver fraud — bans driver and cancels booking' })
+  async confirmDriverFraud(
+    @Param('id') id: string,
+    @Body('notes') notes: string,
+    @Request() req: any,
+  ) {
+    return this.driverFraudService.confirmFraud(id, req.user?.sub || req.user?.id, notes);
+  }
+
+  @Post('fraud/driver-incidents/:id/clear')
+  @Roles('admin')
+  @ApiOperation({ summary: 'Clear driver fraud incident (false positive) — unfreezes wallet' })
+  async clearDriverIncident(
+    @Param('id') id: string,
+    @Body('notes') notes: string,
+    @Request() req: any,
+  ) {
+    return this.driverFraudService.clearIncident(id, req.user?.sub || req.user?.id, notes);
   }
 }

@@ -21,6 +21,11 @@ import { CreateBankAccountDto, UpdateBankAccountDto } from './dto/bank-account.d
 import { getPaginationMeta } from '../../common/utils/helpers.util';
 import { S3Service } from '../../services/s3.service';
 import { NotificationService } from '../notification/notification.service';
+import { RedisService } from '../../services/redis.service';
+
+/** GPS ping TTL: if a driver stops sending location for 20 min during an active delivery,
+ *  the cron guard treats them as a ghost. */
+const GPS_PING_TTL_MS = 20 * 60 * 1000;
 
 @Injectable()
 export class DriverService {
@@ -39,6 +44,7 @@ export class DriverService {
     private withdrawalRepository: Repository<WithdrawalRequest>,
     private readonly s3Service: S3Service,
     private readonly notificationService: NotificationService,
+    private readonly cacheManager: RedisService,
   ) {}
 
   /**
@@ -124,7 +130,6 @@ export class DriverService {
   async updateLocation(userId: string, updateLocationDto: UpdateLocationDto) {
     const { latitude, longitude } = updateLocationDto;
 
-    // Create PostGIS Point using ST_MakePoint and ST_SetSRID
     await this.driverProfileRepository
       .createQueryBuilder()
       .update(DriverProfile)
@@ -133,6 +138,10 @@ export class DriverService {
       })
       .where('user_id = :userId', { userId })
       .execute();
+
+    // Heartbeat for ghost-driver detection: key expires in 20 min
+    // If the cron finds an ongoing booking without this key, the driver has gone dark.
+    await this.cacheManager.set(`driver:last_ping:${userId}`, Date.now(), GPS_PING_TTL_MS);
 
     return { message: 'Location updated successfully' };
   }
@@ -791,9 +800,15 @@ export class DriverService {
 
     const profile = await this.driverProfileRepository.findOne({
       where: { user_id: userId },
-      select: ['id', 'wallet_balance'],
+      select: ['id', 'wallet_balance', 'wallet_frozen', 'wallet_freeze_reason'],
     });
     if (!profile) throw new NotFoundException('Driver profile not found');
+
+    if (profile.wallet_frozen) {
+      throw new BadRequestException(
+        `Your wallet is temporarily frozen pending an account review. Reason: ${profile.wallet_freeze_reason || 'policy violation'}. Please contact support.`,
+      );
+    }
 
     const balance = Number(profile.wallet_balance || 0);
     if (amount > balance) {

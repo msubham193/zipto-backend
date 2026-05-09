@@ -8,6 +8,7 @@ import {
 import { randomUUID } from 'crypto';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
+import { Cron } from '@nestjs/schedule';
 import { Booking, BookingStatus, BookingType } from './entities/booking.entity';
 import { PricingRule } from './entities/pricing-rule.entity';
 import { Payment, PaymentMethod, PaymentStatus } from '../payment/entities/payment.entity';
@@ -36,6 +37,8 @@ import {
 } from './constants/default-pricing-rules';
 import { FraudService } from '../fraud/fraud.service';
 import { SystemSettingsService } from '../settings/system-settings.service';
+import { DriverFraudService } from '../driver-fraud/driver-fraud.service';
+import { NotificationService } from '../notification/notification.service';
 
 @Injectable()
 export class BookingService {
@@ -61,6 +64,8 @@ export class BookingService {
     private cacheManager: RedisService,
     private fraudService: FraudService,
     private systemSettings: SystemSettingsService,
+    private driverFraudService: DriverFraudService,
+    private notificationService: NotificationService,
   ) {}
 
   private async ensureDefaultPricingRules() {
@@ -894,12 +899,33 @@ export class BookingService {
       return saved;
     }
 
-    // Race-condition guard: mark as being accepted
-    const alreadyAccepting = await this.cacheManager.get(`offer:${offerId}:accepting`);
-    if (alreadyAccepting) {
+    // Atomic race-condition guard: SET NX returns false if another driver already holds the lock
+    const lockAcquired = await this.cacheManager.setnx(`offer:${offerId}:accepting`, driverId, 30000);
+    if (!lockAcquired) {
       throw new BadRequestException('Booking is being accepted by another driver');
     }
-    await this.cacheManager.set(`offer:${offerId}:accepting`, driverId, 10000); // 10s lock
+
+    // Verify driver is approved before allowing booking acceptance
+    const [driverProfile] = await this.bookingRepository.manager.query(
+      `SELECT verification_status FROM driver_profiles WHERE user_id = $1 LIMIT 1`,
+      [driverId],
+    );
+    if (!driverProfile || driverProfile.verification_status !== 'approved') {
+      await this.cacheManager.del(`offer:${offerId}:accepting`);
+      throw new ForbiddenException('Your account is not approved to accept bookings');
+    }
+
+    // Verify vehicle belongs to this driver and is approved
+    const [vehicle] = await this.bookingRepository.manager.query(
+      `SELECT v.id FROM vehicles v
+       JOIN driver_profiles dp ON dp.id = v.driver_id
+       WHERE v.id = $1 AND dp.user_id = $2 AND v.verification_status = 'approved' LIMIT 1`,
+      [vehicleId, driverId],
+    );
+    if (!vehicle) {
+      await this.cacheManager.del(`offer:${offerId}:accepting`);
+      throw new ForbiddenException('Vehicle not found, not yours, or not approved');
+    }
 
     // Block driver from accepting if they already have an active order
     const existingActive = await this.bookingRepository.findOne({
@@ -1135,8 +1161,19 @@ export class BookingService {
     booking.status = BookingStatus.ONGOING;
     booking.start_time = new Date();
     booking.pickup_otp_verified = true;
+    booking.pickup_verified_at = new Date();
 
     await this.bookingRepository.save(booking);
+
+    // SLA guard: schedule a Bull job that fires if delivery isn't completed within
+    // max(4 h, estimated_duration × 3). Processor will call flagBookingAbandoned().
+    const estimatedMs = (booking.duration || 60) * 3 * 60 * 1000;
+    const slaDelayMs = Math.max(4 * 60 * 60 * 1000, estimatedMs);
+    await this.bookingQueue.add(
+      'delivery_sla_breach',
+      { bookingId: booking.id, driverId: booking.driver_id },
+      { delay: slaDelayMs },
+    );
 
     // Send delivery OTP to receiver (or sender if no receiver) now that package is picked up
     if (booking.delivery_otp) {
@@ -1559,5 +1596,400 @@ export class BookingService {
 
     await this.pricingRuleRepository.remove(pricingRule);
     return { message: 'Pricing rule deleted successfully' };
+  }
+
+  // ─── Driver Handoff ────────────────────────────────────────────────────────
+
+  private static readonly HANDOFF_TTL_MS = 3 * 60 * 1000; // 3 minutes
+  private static readonly HANDOFF_RADIUS_KM = 5;
+
+  /**
+   * Current driver requests a handoff (vehicle breakdown mid-delivery).
+   * Stores the offer in Redis and broadcasts to nearby available drivers.
+   */
+  // ─── Rogue-driver / abandonment pipeline ─────────────────────────────────────
+
+  /**
+   * Central response pipeline — called by all three guards (SLA, socket, GPS cron).
+   * Idempotent: skips silently if booking is already flagged.
+   */
+  async flagBookingAbandoned(
+    bookingId: string,
+    driverId: string,
+    detectedBy: 'socket_disconnect' | 'sla_deadline' | 'gps_cron',
+  ): Promise<void> {
+    const booking = await this.bookingRepository.findOne({ where: { id: bookingId } });
+    if (!booking) return;
+    if (booking.status !== BookingStatus.ONGOING) return;
+    if (booking.is_flagged) return; // Already handled
+
+    // 1. Flag the booking
+    booking.is_flagged = true;
+    booking.flag_reason = detectedBy;
+    booking.flagged_at = new Date();
+    await this.bookingRepository.save(booking);
+
+    // 2. Create fraud incident + freeze driver wallet (idempotent inside service)
+    await this.driverFraudService.createIncidentAndFreezeWallet(bookingId, driverId, detectedBy);
+
+    // 3. Notify customer via socket
+    this.bookingGateway.notifyUser(booking.customer_id, 'delivery_investigation', {
+      bookingId,
+      message: "We're investigating your delivery. Our team is looking into this urgently.",
+    });
+
+    // 4. Push FCM to customer
+    this.notificationService
+      .push(booking.customer_id, 'general', 'Delivery Update',
+        "We're investigating your delivery. We'll keep you updated.",
+        { type: 'delivery_investigation', bookingId })
+      .catch(() => {});
+
+    this.logger.warn(
+      `[flagBookingAbandoned] booking=${bookingId} driver=${driverId} detected_by=${detectedBy}`,
+    );
+  }
+
+  /**
+   * Guard C: GPS heartbeat cron — runs every 5 minutes.
+   * Finds ongoing bookings where the driver hasn't sent a GPS ping in 20+ minutes.
+   */
+  @Cron('*/5 * * * *')
+  async checkGhostDrivers(): Promise<void> {
+    const twentyMinAgo = new Date(Date.now() - 20 * 60 * 1000);
+
+    const suspectedBookings = await this.bookingRepository
+      .createQueryBuilder('b')
+      .select(['b.id', 'b.driver_id', 'b.pickup_verified_at', 'b.is_flagged'])
+      .where('b.status = :status', { status: BookingStatus.ONGOING })
+      .andWhere('b.is_flagged = false')
+      .andWhere('b.driver_id IS NOT NULL')
+      .andWhere('b.pickup_verified_at IS NOT NULL')
+      .andWhere('b.pickup_verified_at < :cutoff', { cutoff: twentyMinAgo })
+      .getMany();
+
+    for (const booking of suspectedBookings) {
+      const lastPing = await this.cacheManager.get(`driver:last_ping:${booking.driver_id}`);
+      if (lastPing !== null) continue; // Driver is actively pinging — all good
+
+      this.logger.warn(
+        `[GhostCron] No GPS ping for driver=${booking.driver_id} on booking=${booking.id} — flagging`,
+      );
+      await this.flagBookingAbandoned(booking.id, booking.driver_id, 'gps_cron');
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  async requestHandoff(bookingId: string, driverId: string, reason: string) {
+    const booking = await this.bookingRepository.findOne({ where: { id: bookingId } });
+    if (!booking) throw new NotFoundException('Booking not found');
+
+    if (booking.driver_id !== driverId) {
+      throw new ForbiddenException('You are not the assigned driver for this booking');
+    }
+
+    const handoffableStatuses = [
+      BookingStatus.ACCEPTED,
+      BookingStatus.DRIVER_ASSIGNED,
+      BookingStatus.ONGOING,
+    ];
+    if (!handoffableStatuses.includes(booking.status)) {
+      throw new BadRequestException(
+        `Cannot request handoff for a booking in status: ${booking.status}`,
+      );
+    }
+
+    if (booking.handoff_count >= 1) {
+      throw new BadRequestException('This booking has already been handed off once and cannot be handed off again');
+    }
+
+    const existingHandoff = await this.cacheManager.get(`handoff:${bookingId}`);
+    if (existingHandoff) {
+      throw new BadRequestException('A handoff request is already active for this booking');
+    }
+
+    // Get the current driver's GPS position to find nearby drivers
+    const [driverLoc] = await this.bookingRepository.manager.query(
+      `SELECT ST_X(current_location::geometry) AS lng,
+              ST_Y(current_location::geometry) AS lat
+       FROM driver_profiles WHERE user_id = $1 LIMIT 1`,
+      [driverId],
+    );
+
+    const lat: number | null = driverLoc?.lat ?? null;
+    const lng: number | null = driverLoc?.lng ?? null;
+
+    const handoffData = {
+      bookingId,
+      originalDriverId: driverId,
+      reason,
+      pickup_address: booking.pickup_address,
+      drop_address:   booking.drop_address,
+      estimated_fare: Number(booking.estimated_fare),
+      distance:       Number(booking.distance),
+      vehicle_type:   booking.vehicle_type,
+      customer_id:    booking.customer_id,
+      booking_status: booking.status,
+      lat,
+      lng,
+      created_at: Date.now(),
+    };
+
+    await this.cacheManager.set(
+      `handoff:${bookingId}`,
+      handoffData,
+      BookingService.HANDOFF_TTL_MS,
+    );
+
+    // Find and notify nearby available drivers (excluding the requesting driver)
+    if (lat !== null && lng !== null) {
+      const nearbyAll = await this.findNearbyDrivers(
+        lat,
+        lng,
+        BookingService.HANDOFF_RADIUS_KM,
+        booking.vehicle_type,
+      );
+      const eligible = nearbyAll.filter((d: any) => d.user_id !== driverId);
+
+      for (const d of eligible) {
+        this.bookingGateway.notifyUser(d.user_id, 'handoff_offer', {
+          bookingId,
+          pickup_address: booking.pickup_address,
+          drop_address:   booking.drop_address,
+          estimated_fare: Number(booking.estimated_fare),
+          distance:       Number(booking.distance),
+          vehicle_type:   booking.vehicle_type,
+          reason,
+          booking_status: booking.status,
+          time_left_seconds: BookingService.HANDOFF_TTL_MS / 1000,
+        });
+      }
+
+      this.logger.log(
+        `[requestHandoff] booking=${bookingId} driver=${driverId} notified ${eligible.length} nearby drivers`,
+      );
+    } else {
+      this.logger.warn(
+        `[requestHandoff] Driver ${driverId} has no location — handoff stored but no drivers notified`,
+      );
+    }
+
+    // Queue expiry job to notify original driver if no one accepts in time
+    await this.bookingQueue.add(
+      'handoff_expiry',
+      { bookingId, originalDriverId: driverId },
+      { delay: BookingService.HANDOFF_TTL_MS },
+    );
+
+    return {
+      message: 'Handoff request sent. Nearby drivers have been notified.',
+      expires_in_seconds: BookingService.HANDOFF_TTL_MS / 1000,
+    };
+  }
+
+  /**
+   * A nearby driver accepts the handoff.
+   * Atomically transfers the booking to the new driver.
+   */
+  async acceptHandoff(bookingId: string, newDriverId: string, vehicleId: string) {
+    const handoffData = await this.cacheManager.get<any>(`handoff:${bookingId}`);
+    if (!handoffData) {
+      throw new NotFoundException('No active handoff request found for this booking');
+    }
+
+    if (handoffData.originalDriverId === newDriverId) {
+      throw new ForbiddenException('You cannot accept your own handoff request');
+    }
+
+    // Atomic lock — prevents two drivers accepting simultaneously
+    const lockAcquired = await this.cacheManager.setnx(
+      `handoff:${bookingId}:accepting`,
+      newDriverId,
+      30000,
+    );
+    if (!lockAcquired) {
+      throw new BadRequestException('Handoff is being accepted by another driver');
+    }
+
+    try {
+      // Re-fetch booking inside lock to guard against stale state
+      const booking = await this.bookingRepository.findOne({ where: { id: bookingId } });
+      if (!booking) {
+        throw new NotFoundException('Booking not found');
+      }
+
+      const handoffableStatuses = [
+        BookingStatus.ACCEPTED,
+        BookingStatus.DRIVER_ASSIGNED,
+        BookingStatus.ONGOING,
+      ];
+      if (!handoffableStatuses.includes(booking.status)) {
+        throw new BadRequestException('Booking is no longer in a transferable state');
+      }
+
+      // Guard: handoff_count must still be 0 (no double-handoff)
+      if (booking.handoff_count >= 1) {
+        throw new BadRequestException('This booking has already been handed off');
+      }
+
+      // Verify new driver is approved
+      const [driverProfile] = await this.bookingRepository.manager.query(
+        `SELECT verification_status FROM driver_profiles WHERE user_id = $1 LIMIT 1`,
+        [newDriverId],
+      );
+      if (!driverProfile || driverProfile.verification_status !== 'approved') {
+        throw new ForbiddenException('Your account is not approved to accept bookings');
+      }
+
+      // Verify vehicle belongs to the new driver, is approved, and matches required vehicle type
+      const [vehicle] = await this.bookingRepository.manager.query(
+        `SELECT v.id FROM vehicles v
+         JOIN driver_profiles dp ON dp.id = v.driver_id
+         WHERE v.id = $1
+           AND dp.user_id = $2
+           AND v.verification_status = 'approved'
+           AND v.vehicle_type = $3
+         LIMIT 1`,
+        [vehicleId, newDriverId, booking.vehicle_type],
+      );
+      if (!vehicle) {
+        throw new ForbiddenException(
+          `Vehicle not found, not yours, not approved, or does not match required type (${booking.vehicle_type})`,
+        );
+      }
+
+      // New driver must not already have an active booking
+      const existingActive = await this.bookingRepository.findOne({
+        where: [
+          { driver_id: newDriverId, status: BookingStatus.ACCEPTED },
+          { driver_id: newDriverId, status: BookingStatus.DRIVER_ASSIGNED },
+          { driver_id: newDriverId, status: BookingStatus.ONGOING },
+        ],
+      });
+      if (existingActive) {
+        throw new BadRequestException(
+          'You already have an active delivery. Complete it before accepting a handoff.',
+        );
+      }
+
+      // Transfer booking
+      const originalDriverId = booking.driver_id;
+      booking.original_driver_id = originalDriverId;
+      booking.driver_id   = newDriverId;
+      booking.vehicle_id  = vehicleId;
+      booking.handoff_count = 1;
+      await this.bookingRepository.save(booking);
+
+      // Clean up Redis
+      await this.cacheManager.del(`handoff:${bookingId}`);
+
+      // Notify original driver
+      this.bookingGateway.notifyUser(originalDriverId, 'handoff_accepted', {
+        bookingId,
+        message: 'A nearby driver has taken over your delivery. You are now free.',
+      });
+
+      // Notify customer
+      this.bookingGateway.notifyUser(booking.customer_id, 'driver_changed', {
+        bookingId,
+        message: 'Your delivery driver has changed due to a vehicle issue. Your package is on the way.',
+      });
+
+      this.logger.log(
+        `[acceptHandoff] booking=${bookingId} transferred from ${originalDriverId} to ${newDriverId}`,
+      );
+
+      return {
+        message: 'Handoff accepted. You are now responsible for this delivery.',
+        booking_id: bookingId,
+        booking_status: booking.status,
+        pickup_otp_already_verified: booking.pickup_otp_verified,
+        delivery_otp_required: !booking.otp_verified,
+      };
+    } finally {
+      // Always release lock regardless of success or failure
+      await this.cacheManager.del(`handoff:${bookingId}:accepting`);
+    }
+  }
+
+  /**
+   * Original driver cancels their own handoff request (changed mind / vehicle fixed).
+   */
+  async cancelHandoff(bookingId: string, driverId: string) {
+    const booking = await this.bookingRepository.findOne({ where: { id: bookingId } });
+    if (!booking) throw new NotFoundException('Booking not found');
+
+    if (booking.driver_id !== driverId) {
+      throw new ForbiddenException('You are not the assigned driver for this booking');
+    }
+
+    const handoffData = await this.cacheManager.get(`handoff:${bookingId}`);
+    if (!handoffData) {
+      throw new BadRequestException('No active handoff request exists for this booking');
+    }
+
+    await this.cacheManager.del(`handoff:${bookingId}`);
+
+    this.logger.log(`[cancelHandoff] booking=${bookingId} driver=${driverId} cancelled handoff`);
+
+    return { message: 'Handoff request cancelled. You remain responsible for this delivery.' };
+  }
+
+  /**
+   * Poll the status of an active handoff request.
+   * Accessible by the current driver or the original driver (after handoff).
+   */
+  async getHandoffStatus(bookingId: string, driverId: string) {
+    const booking = await this.bookingRepository.findOne({ where: { id: bookingId } });
+    if (!booking) throw new NotFoundException('Booking not found');
+
+    const isCurrentDriver  = booking.driver_id === driverId;
+    const isOriginalDriver = booking.original_driver_id === driverId;
+    if (!isCurrentDriver && !isOriginalDriver) {
+      throw new ForbiddenException('You are not associated with this booking');
+    }
+
+    const handoffData = await this.cacheManager.get<any>(`handoff:${bookingId}`);
+    const hasActiveHandoff = !!handoffData;
+
+    let expiresInSeconds: number | null = null;
+    if (hasActiveHandoff && handoffData.created_at) {
+      const elapsed = Date.now() - handoffData.created_at;
+      expiresInSeconds = Math.max(0, Math.round((BookingService.HANDOFF_TTL_MS - elapsed) / 1000));
+    }
+
+    return {
+      has_active_handoff: hasActiveHandoff,
+      handoff_count: booking.handoff_count,
+      original_driver_id: booking.original_driver_id ?? null,
+      active_handoff: hasActiveHandoff
+        ? {
+            reason: handoffData.reason,
+            created_at: new Date(handoffData.created_at).toISOString(),
+            expires_in_seconds: expiresInSeconds,
+          }
+        : null,
+    };
+  }
+
+  /**
+   * Called by Bull queue when handoff expires with no taker.
+   */
+  async expireHandoff(bookingId: string, originalDriverId: string) {
+    const handoffData = await this.cacheManager.get(`handoff:${bookingId}`);
+    if (!handoffData) return; // Already accepted or cancelled — nothing to do
+
+    await this.cacheManager.del(`handoff:${bookingId}`);
+
+    this.bookingGateway.notifyUser(originalDriverId, 'handoff_expired', {
+      bookingId,
+      message:
+        'No nearby driver accepted the handoff within 3 minutes. Please contact support or continue the delivery.',
+    });
+
+    this.logger.warn(
+      `[expireHandoff] booking=${bookingId} handoff expired — no driver accepted`,
+    );
   }
 }

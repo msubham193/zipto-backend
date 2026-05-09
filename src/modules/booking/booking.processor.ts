@@ -88,4 +88,45 @@ export class BookingProcessor {
       );
     }
   }
+
+  @Process('handoff_expiry')
+  async handleHandoffExpiry(
+    job: Job<{ bookingId: string; originalDriverId: string }>,
+  ) {
+    const { bookingId, originalDriverId } = job.data;
+    this.logger.log(`Processing handoff_expiry for booking ${bookingId}`);
+    try {
+      await this.bookingService.expireHandoff(bookingId, originalDriverId);
+    } catch (error) {
+      this.logger.error(
+        `Error processing handoff_expiry for booking ${bookingId}: ${error.message}`,
+      );
+    }
+  }
+
+  @Process('delivery_sla_breach')
+  async handleDeliverySLABreach(job: Job<{ bookingId: string; driverId: string }>) {
+    const { bookingId, driverId } = job.data;
+    this.logger.warn(`Processing delivery_sla_breach for booking ${bookingId}`);
+    try {
+      await this.bookingService.flagBookingAbandoned(bookingId, driverId, 'sla_deadline');
+    } catch (error) {
+      this.logger.error(
+        `Error processing delivery_sla_breach for booking ${bookingId}: ${error.message}`,
+      );
+    }
+  }
+
+  @Process('driver_ghost_check')
+  async handleDriverGhostCheck(job: Job<{ bookingId: string; driverId: string }>) {
+    const { bookingId, driverId } = job.data;
+    this.logger.warn(`Processing driver_ghost_check for booking ${bookingId}`);
+    try {
+      await this.bookingService.flagBookingAbandoned(bookingId, driverId, 'socket_disconnect');
+    } catch (error) {
+      this.logger.error(
+        `Error processing driver_ghost_check for booking ${bookingId}: ${error.message}`,
+      );
+    }
+  }
 }
