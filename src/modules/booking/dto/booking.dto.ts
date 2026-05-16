@@ -13,6 +13,8 @@ import {
   Min,
   IsBoolean,
   IsArray,
+  MaxLength,
+  IsUUID,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
@@ -31,6 +33,7 @@ export class LocationDto {
   @ApiProperty({ example: 'Nayapalli, Bhubaneswar, Odisha' })
   @IsString()
   @IsNotEmpty()
+  @MaxLength(300)
   address: string;
 }
 
@@ -64,6 +67,7 @@ export class CreateBookingDto {
   @ApiProperty({ example: 'John Doe' })
   @IsString()
   @IsNotEmpty()
+  @MaxLength(100)
   name: string;
 
   @ApiProperty({ example: '9876543210' })
@@ -75,21 +79,25 @@ export class CreateBookingDto {
   @ApiPropertyOptional({ example: 'Jane Doe', description: 'Receiver name' })
   @IsOptional()
   @IsString()
+  @MaxLength(100)
   receiver_name?: string;
 
   @ApiPropertyOptional({ example: '9876543211', description: 'Receiver phone number' })
   @IsOptional()
   @IsString()
+  @MaxLength(20)
   receiver_phone?: string;
 
   @ApiPropertyOptional({ example: '9876543212', description: 'Alternative phone number' })
   @IsOptional()
   @IsString()
+  @MaxLength(20)
   alternative_phone?: string;
 
   @ApiProperty({ example: 'Bhubaneswar' })
   @IsString()
   @IsNotEmpty()
+  @MaxLength(100)
   city: string;
 
   @ApiProperty({
@@ -164,6 +172,7 @@ export class CancelBookingDto {
   @ApiProperty({ example: 'Changed my mind' })
   @IsString()
   @IsNotEmpty()
+  @MaxLength(500)
   reason: string;
 }
 
@@ -201,4 +210,19 @@ export class UpdateFinalFareDto {
   @ApiProperty({ example: 250.0 })
   @IsOptional()
   final_fare?: number;
+}
+
+export class HandoffRequestDto {
+  @ApiProperty({ example: 'Vehicle breakdown — tyre puncture on highway' })
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(500)
+  reason: string;
+}
+
+export class HandoffAcceptDto {
+  @ApiProperty({ example: 'uuid-of-vehicle' })
+  @IsUUID()
+  @IsNotEmpty()
+  vehicle_id: string;
 }

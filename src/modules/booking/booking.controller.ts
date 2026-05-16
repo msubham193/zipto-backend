@@ -3,6 +3,7 @@ import {
   Get,
   Post,
   Put,
+  Delete,
   Body,
   Param,
   Query,
@@ -10,6 +11,7 @@ import {
   ParseFloatPipe,
   DefaultValuePipe,
   BadRequestException,
+  ForbiddenException,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiQuery, ApiBearerAuth } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
@@ -21,6 +23,8 @@ import {
   CancelBookingDto,
   StartTripDto,
   CompleteTripDto,
+  HandoffRequestDto,
+  HandoffAcceptDto,
 } from './dto/booking.dto';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { GetUser } from '../../common/decorators/get-user.decorator';
@@ -255,6 +259,72 @@ export class BookingController {
     return this.bookingService.completeTrip(id, user.id, completeTripDto);
   }
 
+  // ─── Handoff Endpoints ───────────────────────────────────────────────────────
+
+  @Post(':id/handoff/request')
+  @Roles('driver')
+  @ApiOperation({
+    summary: '[Driver] Request handoff due to vehicle breakdown',
+    description:
+      'Current driver signals that their vehicle is broken down mid-delivery. ' +
+      'The system stores a 3-minute handoff offer in Redis and broadcasts it to nearby available drivers. ' +
+      'Only allowed once per booking. Booking must be ACCEPTED, DRIVER_ASSIGNED, or ONGOING.',
+  })
+  @ApiResponse({ status: 201, description: 'Handoff request broadcast to nearby drivers' })
+  @ApiResponse({ status: 400, description: 'Already handed off or active handoff pending' })
+  @ApiResponse({ status: 403, description: 'Not the assigned driver' })
+  async requestHandoff(
+    @Param('id') id: string,
+    @GetUser() user: User,
+    @Body() dto: HandoffRequestDto,
+  ) {
+    return this.bookingService.requestHandoff(id, user.id, dto.reason);
+  }
+
+  @Put(':id/handoff/accept')
+  @Roles('driver')
+  @ApiOperation({
+    summary: '[Driver] Accept a handoff offer',
+    description:
+      'A nearby driver takes over the booking from the stranded driver. ' +
+      'Atomically transfers driver_id to the accepting driver. ' +
+      'The new driver must have an approved vehicle matching the required vehicle type and no active booking.',
+  })
+  @ApiResponse({ status: 200, description: 'Handoff accepted — new driver now owns the booking' })
+  @ApiResponse({ status: 400, description: 'Offer expired, already accepted, or driver has active booking' })
+  @ApiResponse({ status: 403, description: 'Self-accept attempted or driver/vehicle not approved' })
+  async acceptHandoff(
+    @Param('id') id: string,
+    @GetUser() user: User,
+    @Body() dto: HandoffAcceptDto,
+  ) {
+    return this.bookingService.acceptHandoff(id, user.id, dto.vehicle_id);
+  }
+
+  @Delete(':id/handoff/cancel')
+  @Roles('driver')
+  @ApiOperation({
+    summary: '[Driver] Cancel own handoff request',
+    description: 'Original driver cancels the pending handoff (e.g., vehicle issue resolved). ' +
+      'Removes the Redis offer so no further drivers are notified.',
+  })
+  @ApiResponse({ status: 200, description: 'Handoff request cancelled' })
+  @ApiResponse({ status: 400, description: 'No active handoff to cancel' })
+  async cancelHandoff(@Param('id') id: string, @GetUser() user: User) {
+    return this.bookingService.cancelHandoff(id, user.id);
+  }
+
+  @Get(':id/handoff/status')
+  @Roles('driver')
+  @ApiOperation({
+    summary: '[Driver] Poll handoff status',
+    description: 'Returns whether a handoff request is active, time remaining, and handoff history for the booking.',
+  })
+  @ApiResponse({ status: 200, description: 'Handoff status returned' })
+  async getHandoffStatus(@Param('id') id: string, @GetUser() user: User) {
+    return this.bookingService.getHandoffStatus(id, user.id);
+  }
+
   @Get('driver/history')
   @Roles('driver')
   @ApiOperation({ summary: 'Get driver booking history' })
@@ -287,6 +357,10 @@ export class BookingController {
       timeLeft?: number;
     },
   ) {
+    if (process.env.NODE_ENV === 'production') {
+      throw new ForbiddenException('Not available in production');
+    }
+
     const offer = {
       bookingId: `test-${Date.now()}`,
       pickup: body.pickup ?? 'Nayapalli, Bhubaneswar',

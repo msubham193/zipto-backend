@@ -179,22 +179,27 @@ export class CoinService {
       throw new BadRequestException('Minimum 100 coins required to transfer to wallet');
     }
 
-    // Must be in multiples of 100
     const validCoins = Math.floor(coins / 100) * 100;
     if (validCoins === 0) {
       throw new BadRequestException('Minimum 100 coins required to transfer to wallet');
     }
 
-    const user = await this.userRepository.findOne({ where: { id: userId } });
-    if (!user) throw new NotFoundException('User not found');
-
-    if (user.coins < validCoins) {
-      throw new BadRequestException(`Insufficient coins. You have ${user.coins} coins`);
-    }
-
     const rupeesAdded = Math.round(validCoins * CoinService.COINS_TO_RUPEES_RATE * 100) / 100;
 
-    // Record the transaction
+    // Atomic check-and-update: deduct coins AND add wallet balance only if sufficient coins exist
+    const rows: { coins: number; wallet_balance: string }[] = await this.userRepository.manager.query(
+      `UPDATE users SET coins = coins - $1, wallet_balance = wallet_balance + $2
+       WHERE id = $3 AND coins >= $1
+       RETURNING coins, wallet_balance`,
+      [validCoins, rupeesAdded, userId],
+    );
+
+    if (!rows.length) {
+      const exists = await this.userRepository.count({ where: { id: userId } });
+      if (!exists) throw new NotFoundException('User not found');
+      throw new BadRequestException('Insufficient coins');
+    }
+
     const transaction = this.coinTransactionRepository.create({
       user_id: userId,
       coins: validCoins,
@@ -204,19 +209,13 @@ export class CoinService {
     });
     await this.coinTransactionRepository.save(transaction);
 
-    // Deduct coins and add rupees to wallet
-    await this.userRepository.decrement({ id: userId }, 'coins', validCoins);
-    await this.userRepository.increment({ id: userId }, 'wallet_balance', rupeesAdded);
-
-    const updated = await this.userRepository.findOne({ where: { id: userId }, select: ['coins', 'wallet_balance'] });
-
     this.logger.log(`User ${userId} transferred ${validCoins} coins → ₹${rupeesAdded} wallet`);
 
     return {
       coins_deducted: validCoins,
       rupees_added: rupeesAdded,
-      new_coin_balance: updated!.coins,
-      new_wallet_balance: Number(updated!.wallet_balance),
+      new_coin_balance: rows[0].coins,
+      new_wallet_balance: Number(rows[0].wallet_balance),
     };
   }
 
@@ -224,16 +223,16 @@ export class CoinService {
    * Redeem coins (deduct from balance)
    */
   async redeemCoins(userId: string, coins: number, description: string): Promise<CoinTransaction> {
-    const user = await this.userRepository.findOne({
-      where: { id: userId },
-    });
+    // Atomic check-and-deduct to prevent race conditions
+    const rows: { id: string }[] = await this.userRepository.manager.query(
+      `UPDATE users SET coins = coins - $1 WHERE id = $2 AND coins >= $1 RETURNING id`,
+      [coins, userId],
+    );
 
-    if (!user) {
-      throw new NotFoundException('User not found');
-    }
-
-    if (user.coins < coins) {
-      throw new NotFoundException('Insufficient coins');
+    if (!rows.length) {
+      const exists = await this.userRepository.count({ where: { id: userId } });
+      if (!exists) throw new NotFoundException('User not found');
+      throw new BadRequestException('Insufficient coins');
     }
 
     const transaction = this.coinTransactionRepository.create({
@@ -245,9 +244,6 @@ export class CoinService {
     });
 
     await this.coinTransactionRepository.save(transaction);
-
-    // Deduct coins
-    await this.userRepository.decrement({ id: userId }, 'coins', coins);
 
     this.logger.log(`Redeemed ${coins} coins for user ${userId}`);
 

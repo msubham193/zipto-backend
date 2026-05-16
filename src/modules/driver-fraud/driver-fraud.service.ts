@@ -36,7 +36,7 @@ const TYPE_MAP: Record<DetectedBy, DriverFraudType> = {
 @Injectable()
 export class DriverFraudService implements OnModuleInit {
   private readonly logger = new Logger(DriverFraudService.name);
-  private notificationService: NotificationService;
+  private notificationService!: NotificationService;
 
   constructor(
     @InjectRepository(DriverFraudIncident)
@@ -152,21 +152,17 @@ export class DriverFraudService implements OnModuleInit {
       throw new BadRequestException(`Incident is already ${incident.status}`);
     }
 
-    // Unfreeze driver wallet
-    await this.driverProfileRepository
-      .createQueryBuilder()
-      .update()
-      .set({ wallet_frozen: false, wallet_freeze_reason: () => 'NULL' })
-      .where('user_id = :uid', { uid: incident.driver_id })
-      .execute();
+    // Unfreeze driver wallet — use raw update to set nullable columns to NULL
+    await this.driverProfileRepository.manager.query(
+      `UPDATE driver_profiles SET wallet_frozen = false, wallet_freeze_reason = NULL WHERE user_id = $1`,
+      [incident.driver_id],
+    );
 
     // Unflag booking
-    await this.bookingRepository
-      .createQueryBuilder()
-      .update()
-      .set({ is_flagged: false, flag_reason: () => 'NULL', flagged_at: () => 'NULL' })
-      .where('id = :id', { id: incident.booking_id })
-      .execute();
+    await this.bookingRepository.manager.query(
+      `UPDATE bookings SET is_flagged = false, flag_reason = NULL, flagged_at = NULL WHERE id = $1`,
+      [incident.booking_id],
+    );
 
     // Resolve incident
     incident.status = DriverFraudStatus.CLEARED;

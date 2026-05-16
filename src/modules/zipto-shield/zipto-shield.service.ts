@@ -79,7 +79,7 @@ export class ZiptoShieldService {
   async withdraw(adminId: string, amount: number, notes?: string): Promise<{ balance: number }> {
     if (amount <= 0) throw new BadRequestException('Withdrawal amount must be greater than 0');
 
-    let newBalance: number;
+    let newBalance = 0;
 
     await this.dataSource.transaction(async (manager) => {
       const ledgerRepo = manager.getRepository(ZiptoShieldLedger);
@@ -104,7 +104,7 @@ export class ZiptoShieldService {
         amount,
         balance_after: ledger.balance,
         withdrawn_by: adminId,
-        notes: notes ?? null,
+        notes: notes ?? undefined,
       }));
 
       newBalance = ledger.balance;

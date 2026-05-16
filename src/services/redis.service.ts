@@ -46,4 +46,16 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
   async del(...keys: string[]): Promise<void> {
     if (keys.length > 0) await this.client.del(...keys);
   }
+
+  /** Atomic SET NX PX — returns true if lock was acquired, false if already held. */
+  async setnx(key: string, value: unknown, ttlMs: number): Promise<boolean> {
+    const result = await this.client.set(
+      key,
+      JSON.stringify(value),
+      'PX',
+      ttlMs,
+      'NX',
+    );
+    return result === 'OK';
+  }
 }

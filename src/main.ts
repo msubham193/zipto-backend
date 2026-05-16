@@ -3,6 +3,7 @@ import { ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import helmet from 'helmet';
+import * as express from 'express';
 import { AppModule } from './app.module';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 import { TransformInterceptor } from './common/interceptors/transform.interceptor';
@@ -18,17 +19,27 @@ async function bootstrap() {
   const appName = configService.get<string>('app.name') || 'SkiDO';
   const corsOrigins = configService.get<string[]>('app.corsOrigins') || [];
 
-  // Security - Configure Helmet to allow Swagger docs
+  const nodeEnv = configService.get<string>('app.nodeEnv') || 'development';
+  const isProduction = nodeEnv === 'production';
+
+  // Body size limit — prevent oversized payload attacks
+  app.use(express.json({ limit: '1mb' }));
+  app.use(express.urlencoded({ extended: true, limit: '1mb' }));
+
+  // Security headers
   app.use(
     helmet({
-      contentSecurityPolicy: {
-        directives: {
-          defaultSrc: [`'self'`],
-          styleSrc: [`'self'`, `'unsafe-inline'`],
-          scriptSrc: [`'self'`, `'unsafe-inline'`, `'unsafe-eval'`],
-          imgSrc: [`'self'`, 'data:', 'validator.swagger.io'],
-        },
-      },
+      hsts: { maxAge: 31536000, includeSubDomains: true, preload: true },
+      contentSecurityPolicy: isProduction
+        ? true
+        : {
+            directives: {
+              defaultSrc: [`'self'`],
+              styleSrc: [`'self'`, `'unsafe-inline'`],
+              scriptSrc: [`'self'`, `'unsafe-inline'`, `'unsafe-eval'`],
+              imgSrc: [`'self'`, 'data:', 'validator.swagger.io'],
+            },
+          },
     }),
   );
 
@@ -72,28 +83,30 @@ async function bootstrap() {
   const reflector = app.get(Reflector);
   app.useGlobalGuards(new RolesGuard(reflector));
 
-  // Swagger Documentation
-  const config = new DocumentBuilder()
-    .setTitle(`${appName} API`)
-    .setDescription('Smart Kinetics Delivery Odisha - Comprehensive Logistics API')
-    .setVersion('1.0')
-    .addBearerAuth()
-    .addTag('Authentication', 'User authentication and authorization')
-    .addTag('Customer', 'Customer profile and management')
-    .addTag('Driver', 'Driver profile and management')
-    .addTag('Vehicle', 'Vehicle management')
-    .addTag('Booking', 'Booking and trip management')
-    .addTag('Payment', 'Payment processing')
-    .addTag('Rating', 'Rating and feedback')
-    .addTag('Admin', 'Admin operations')
-    .build();
+  // Swagger — only exposed in non-production environments
+  if (!isProduction) {
+    const config = new DocumentBuilder()
+      .setTitle(`${appName} API`)
+      .setDescription('Smart Kinetics Delivery Odisha - Comprehensive Logistics API')
+      .setVersion('1.0')
+      .addBearerAuth()
+      .addTag('Authentication', 'User authentication and authorization')
+      .addTag('Customer', 'Customer profile and management')
+      .addTag('Driver', 'Driver profile and management')
+      .addTag('Vehicle', 'Vehicle management')
+      .addTag('Booking', 'Booking and trip management')
+      .addTag('Payment', 'Payment processing')
+      .addTag('Rating', 'Rating and feedback')
+      .addTag('Admin', 'Admin operations')
+      .build();
 
-  const document = SwaggerModule.createDocument(app, config);
-  SwaggerModule.setup(`${apiPrefix}/docs`, app, document, {
-    swaggerOptions: {
-      persistAuthorization: true,
-    },
-  });
+    const document = SwaggerModule.createDocument(app, config);
+    SwaggerModule.setup(`${apiPrefix}/docs`, app, document, {
+      swaggerOptions: {
+        persistAuthorization: true,
+      },
+    });
+  }
 
   await app.listen(port);
 

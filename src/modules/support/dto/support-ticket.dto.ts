@@ -12,6 +12,7 @@ export class CreateTicketDto {
   @ApiProperty()
   @IsString()
   @IsNotEmpty()
+  @MaxLength(5000)
   description: string;
 
   @ApiPropertyOptional({ enum: TicketCategory })
@@ -34,6 +35,7 @@ export class ReplyTicketDto {
   @ApiProperty()
   @IsString()
   @IsNotEmpty()
+  @MaxLength(5000)
   content: string;
 }
 

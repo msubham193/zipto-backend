@@ -1,4 +1,4 @@
-import { IsNumber, IsString, IsOptional, IsUUID, Min, Max } from 'class-validator';
+import { IsNumber, IsString, IsOptional, IsUUID, Min, Max, MaxLength } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class SubmitRatingDto {
@@ -15,5 +15,6 @@ export class SubmitRatingDto {
   @ApiPropertyOptional({ example: 'Great service! Very professional driver.' })
   @IsString()
   @IsOptional()
+  @MaxLength(1000)
   comment?: string;
 }

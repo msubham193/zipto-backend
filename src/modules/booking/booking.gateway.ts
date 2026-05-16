@@ -1,3 +1,4 @@
+import { Logger } from '@nestjs/common';
 import {
   WebSocketGateway,
   WebSocketServer,
@@ -35,8 +36,9 @@ const DISCONNECT_GRACE_MS = 15 * 60 * 1000; // 15 minutes
 })
 export class BookingGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer()
-  server: Server;
+  server!: Server;
 
+  private readonly logger = new Logger(BookingGateway.name);
   private pendingOffers = new Map<string, any>();
 
   constructor(
@@ -58,31 +60,38 @@ export class BookingGateway implements OnGatewayConnection, OnGatewayDisconnect 
       client.data.user = payload;
 
       await client.join(`user_${payload.sub}`);
-      console.log(`Client connected: ${client.id}, User: ${payload.sub}`);
+      this.logger.log(`Client connected: ${client.id}, User: ${payload.sub}`);
 
       // Guard A (reconnect): driver came back within the grace window — cancel the ghost check
       const graceKey = `driver:disconnect_grace:${payload.sub}`;
-      const gracePending = await this.cacheManager.get(graceKey);
+      const gracePending = await this.cacheManager.get<string>(graceKey);
       if (gracePending) {
         await this.cacheManager.del(graceKey);
-        console.log(`[BookingGateway] Driver ${payload.sub} reconnected within grace — ghost check cancelled`);
+        // Set a cancel marker so the Bull job knows the driver reconnected.
+        // TTL = 25 min (grace 15 + 10 buffer) to outlive the job's delay.
+        await this.cacheManager.set(
+          `driver:ghost_check_cancel:${gracePending}`,
+          '1',
+          25 * 60 * 1000,
+        );
+        this.logger.log(`[Gateway] Driver ${payload.sub} reconnected within grace — ghost check cancelled for booking ${gracePending}`);
       }
 
       const pendingOffer = this.pendingOffers.get(payload.sub);
       if (pendingOffer) {
-        console.log(`[BookingGateway] Delivering pending offer to reconnected user ${payload.sub}`);
+        this.logger.log(`[Gateway] Delivering pending offer to reconnected user ${payload.sub}`);
         client.emit('booking_offer', pendingOffer);
         this.pendingOffers.delete(payload.sub);
       }
-    } catch (error) {
-      console.error('Connection error:', error.message);
+    } catch (error: any) {
+      this.logger.error(`Connection error: ${error?.message}`);
       client.disconnect();
     }
   }
 
   async handleDisconnect(client: Socket) {
     const userId: string | undefined = client.data?.user?.sub;
-    console.log(`Client disconnected: ${client.id}${userId ? ` (user: ${userId})` : ''}`);
+    this.logger.log(`Client disconnected: ${client.id}${userId ? ` (user: ${userId})` : ''}`);
 
     if (!userId) return;
 
@@ -109,29 +118,29 @@ export class BookingGateway implements OnGatewayConnection, OnGatewayDisconnect 
         { delay: DISCONNECT_GRACE_MS },
       );
 
-      console.log(
-        `[BookingGateway] Driver ${userId} disconnected mid-delivery (booking=${activeBooking.id}) — ghost check scheduled in 15 min`,
+      this.logger.warn(
+        `[Gateway] Driver ${userId} disconnected mid-delivery (booking=${activeBooking.id}) — ghost check in 15 min`,
       );
     } catch (err: any) {
-      console.error('[BookingGateway] Error scheduling ghost check:', err?.message);
+      this.logger.error(`[Gateway] Error scheduling ghost check: ${err?.message}`);
     }
   }
 
   async emitBookingOffer(driverId: string, bookingData: any) {
     const room = `user_${driverId}`;
     const sockets = await this.server.in(room).fetchSockets();
-    console.log(`[BookingGateway] emitBookingOffer to room=${room}, connected sockets: ${sockets.length}`);
+    this.logger.log(`[Gateway] emitBookingOffer to room=${room}, sockets=${sockets.length}`);
 
     if (sockets.length > 0) {
       this.server.to(room).emit('booking_offer', bookingData);
     } else {
-      console.log(`[BookingGateway] Driver ${driverId} offline, storing pending offer`);
+      this.logger.log(`[Gateway] Driver ${driverId} offline, storing pending offer`);
       this.pendingOffers.set(driverId, bookingData);
 
       setTimeout(() => {
         if (this.pendingOffers.get(driverId) === bookingData) {
           this.pendingOffers.delete(driverId);
-          console.log(`[BookingGateway] Pending offer expired for driver ${driverId}`);
+          this.logger.log(`[Gateway] Pending offer expired for driver ${driverId}`);
         }
       }, 30000);
     }

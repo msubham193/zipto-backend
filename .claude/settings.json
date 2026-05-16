@@ -23,13 +23,32 @@
       "PowerShell(Get-ChildItem \"C:\\\\Users\\\\subha\\\\Desktop\\\\DESKTOP\\\\sandeep\\\\Zipto\\\\android\\\\build\" -Recurse -Force | Where-Object { !$_.PSIsContainer } | ForEach-Object { $_.FullName })",
       "PowerShell(Get-ChildItem \"C:\\\\Users\\\\subha\\\\Desktop\\\\DESKTOP\\\\sandeep\\\\Zipto\\\\android\\\\app\\\\build\\\\outputs\" -Recurse -Force | Where-Object { !$_.PSIsContainer } | Select-Object FullName | Select-Object -First 20)",
       "PowerShell(Get-ChildItem \"C:\\\\Users\\\\subha\\\\Desktop\\\\DESKTOP\\\\sandeep\\\\Zipto\\\\android\\\\app\\\\build\\\\outputs\" -Force | ForEach-Object { $_.Name })",
-      "PowerShell(Get-ChildItem \"C:\\\\Users\\\\subha\\\\Desktop\\\\DESKTOP\\\\sandeep\\\\Zipto\\\\android\\\\app\\\\build\\\\outputs\\\\apk\" -Recurse -Force | ForEach-Object { \"$\\($_.FullName\\) \\(dir=$\\($_.PSIsContainer\\)\\)\" })"
+      "PowerShell(Get-ChildItem \"C:\\\\Users\\\\subha\\\\Desktop\\\\DESKTOP\\\\sandeep\\\\Zipto\\\\android\\\\app\\\\build\\\\outputs\\\\apk\" -Recurse -Force | ForEach-Object { \"$\\($_.FullName\\) \\(dir=$\\($_.PSIsContainer\\)\\)\" })",
+      "PowerShell(Get-ChildItem \"C:\\\\Users\\\\subha\\\\Desktop\\\\DESKTOP\\\\zipto-freelancing\\\\zipto_rider\\\\android\\\\app\\\\src\" -Recurse -File | Where-Object { $_.Extension -in '.kt','.java' } | Select-Object FullName)",
+      "PowerShell(Get-ChildItem \"C:\\\\Users\\\\subha\\\\Desktop\\\\DESKTOP\\\\zipto-freelancing\\\\zipto_rider\\\\android\\\\app\\\\src\" -Recurse -Force | Where-Object { !$_.PSIsContainer } | Select-Object FullName)",
+      "PowerShell(Get-ChildItem \"C:\\\\Users\\\\subha\\\\Desktop\\\\DESKTOP\\\\zipto-freelancing\\\\zipto_rider\\\\android\\\\app\\\\src\\\\main\\\\java\" -Recurse -Force | ForEach-Object { \"$\\($_.FullName\\) \\(dir=$\\($_.PSIsContainer\\)\\)\" })",
+      "PowerShell(Get-Content \"C:\\\\tmp\\\\rider-bundle.txt\" | Select-String -Pattern \"FAILED|error:|Error\" | Where-Object { $_ -notmatch \"warning|Warning\" } | Select-Object -Last 20)",
+      "Bash(Get-ChildItem -Path \"c:\\\\Users\\\\subha\\\\Desktop\\\\DESKTOP\\\\zipto-freelancing\\\\skido-backend\\\\src\" -Recurse -Name -Type f)",
+      "PowerShell(head -50)",
+      "PowerShell(cd \"C:\\\\Users\\\\subha\\\\Desktop\\\\DESKTOP\\\\zipto-freelancing\\\\zipto_rider\"; $result = npx tsc --noEmit 2>&1; $result | Where-Object { $_ -match \"HomeScreen\" } | Select-Object -First 20; Write-Host \"---\"; $result | Where-Object { $_ -match \"NavigationScreen\" } | Select-Object -First 10)",
+      "PowerShell(cd \"C:\\\\Users\\\\subha\\\\Desktop\\\\DESKTOP\\\\zipto-freelancing\\\\zipto_rider\"; npx tsc --noEmit 2>&1 | Out-String | Select-String -Pattern \"HomeScreen|NavigationScreen\" -AllMatches | ForEach-Object { $_.Matches } | ForEach-Object { $_.Value })",
+      "PowerShell(cd \"C:\\\\Users\\\\subha\\\\Desktop\\\\DESKTOP\\\\zipto-freelancing\\\\zipto_rider\"; $output = npx tsc --noEmit 2>&1; $output -join \"`n\" | Out-File -FilePath \"C:\\\\tmp\\\\tsc_output.txt\" -Encoding utf8; Write-Host \"Done. Lines: $\\($output.Count\\)\")",
+      "PowerShell(cd \"C:\\\\Users\\\\subha\\\\Desktop\\\\DESKTOP\\\\zipto-freelancing\\\\skido-backend\"; $out = npx tsc --noEmit 2>&1; $out | Where-Object { $_ -match \"error TS\" } | Select-Object -First 40)",
+      "PowerShell(cd \"C:\\\\Users\\\\subha\\\\Desktop\\\\DESKTOP\\\\zipto-freelancing\\\\skido-backend\"; $out = npx tsc --noEmit 2>&1; $out | Where-Object { $_ -match \"error TS\" } | Select-Object -First 30)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)"
     ],
     "additionalDirectories": [
       "C:\\Users\\subha\\Desktop\\DESKTOP\\sandeep\\Zipto\\android\\app",
       "C:\\Users\\subha\\Desktop\\DESKTOP\\sandeep\\Zipto\\src\\store",
       "C:\\Users\\subha\\Desktop\\DESKTOP\\sandeep\\Zipto\\android\\.gradle",
-      "C:\\Users\\subha\\Desktop\\DESKTOP\\sandeep\\Zipto\\android\\build\\generated\\autolinking"
+      "C:\\Users\\subha\\Desktop\\DESKTOP\\sandeep\\Zipto\\android\\build\\generated\\autolinking",
+      "C:\\Users\\subha\\Desktop\\DESKTOP\\zipto-freelancing\\zipto_rider\\android\\app\\src\\main\\java\\com\\ridezipto",
+      "C:\\Users\\subha\\Desktop\\DESKTOP\\zipto-freelancing\\zipto_rider\\android\\app\\src\\main\\java\\com\\skidorider",
+      "C:\\Users\\subha\\Desktop\\DESKTOP\\zipto-freelancing\\zipto_rider\\android\\app",
+      "C:\\Users\\subha\\Desktop\\DESKTOP\\zipto-freelancing\\zipto_rider\\android",
+      "C:\\Users\\subha\\Desktop\\DESKTOP\\zipto-freelancing\\zipto_rider\\src\\config",
+      "C:\\Users\\subha\\Desktop\\DESKTOP\\zipto-freelancing\\zipto_rider\\src\\services"
     ]
   }
 }

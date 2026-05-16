@@ -281,8 +281,13 @@ export class BookingService {
       if (!scheduled_time) {
         throw new BadRequestException('Scheduled time is required for scheduled bookings');
       }
-      if (new Date(scheduled_time) <= new Date()) {
+      const scheduledDate = new Date(scheduled_time);
+      if (scheduledDate <= new Date()) {
         throw new BadRequestException('Scheduled time must be in the future');
+      }
+      const maxScheduleDate = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+      if (scheduledDate > maxScheduleDate) {
+        throw new BadRequestException('Scheduled time cannot be more than 30 days in the future');
       }
     }
 
@@ -1146,19 +1151,26 @@ export class BookingService {
     const otpInput = (pickupOtp || '').trim();
     const storedOtp = (booking.pickup_otp || '').trim();
 
-    this.logger.log(
-      `[startTrip] booking=${bookingId} storedOTP="${storedOtp}" receivedOTP="${otpInput}"`,
-    );
+    this.logger.log(`[startTrip] booking=${bookingId} OTP verification attempt`);
 
     if (!otpInput || otpInput.length < 4) {
       throw new BadRequestException('Pickup OTP is required to start the trip');
     }
 
-    if (storedOtp && storedOtp !== otpInput) {
-      throw new BadRequestException(
-        `Invalid pickup OTP. Expected: ${storedOtp} | Got: ${otpInput}`,
-      );
+    // Rate-limit OTP attempts: max 5 per booking, 10-minute lockout
+    const otpAttemptsKey = `otp:attempts:pickup:${bookingId}`;
+    const attempts = await this.cacheManager.get<number>(otpAttemptsKey) ?? 0;
+    if (attempts >= 5) {
+      throw new BadRequestException('Too many incorrect OTP attempts. Please wait before trying again.');
     }
+
+    if (storedOtp && storedOtp !== otpInput) {
+      await this.cacheManager.set(otpAttemptsKey, attempts + 1, 10 * 60 * 1000);
+      throw new BadRequestException('Invalid pickup OTP. Please check the OTP with the sender.');
+    }
+
+    // Clear attempt counter on success
+    await this.cacheManager.del(otpAttemptsKey);
 
     booking.status = BookingStatus.ONGOING;
     booking.start_time = new Date();
@@ -1661,26 +1673,34 @@ export class BookingService {
    */
   @Cron('*/5 * * * *')
   async checkGhostDrivers(): Promise<void> {
-    const twentyMinAgo = new Date(Date.now() - 20 * 60 * 1000);
+    try {
+      const twentyMinAgo = new Date(Date.now() - 20 * 60 * 1000);
 
-    const suspectedBookings = await this.bookingRepository
-      .createQueryBuilder('b')
-      .select(['b.id', 'b.driver_id', 'b.pickup_verified_at', 'b.is_flagged'])
-      .where('b.status = :status', { status: BookingStatus.ONGOING })
-      .andWhere('b.is_flagged = false')
-      .andWhere('b.driver_id IS NOT NULL')
-      .andWhere('b.pickup_verified_at IS NOT NULL')
-      .andWhere('b.pickup_verified_at < :cutoff', { cutoff: twentyMinAgo })
-      .getMany();
+      const suspectedBookings = await this.bookingRepository
+        .createQueryBuilder('b')
+        .select(['b.id', 'b.driver_id', 'b.pickup_verified_at', 'b.is_flagged'])
+        .where('b.status = :status', { status: BookingStatus.ONGOING })
+        .andWhere('b.is_flagged = false')
+        .andWhere('b.driver_id IS NOT NULL')
+        .andWhere('b.pickup_verified_at IS NOT NULL')
+        .andWhere('b.pickup_verified_at < :cutoff', { cutoff: twentyMinAgo })
+        .getMany();
 
-    for (const booking of suspectedBookings) {
-      const lastPing = await this.cacheManager.get(`driver:last_ping:${booking.driver_id}`);
-      if (lastPing !== null) continue; // Driver is actively pinging — all good
+      for (const booking of suspectedBookings) {
+        try {
+          const lastPing = await this.cacheManager.get(`driver:last_ping:${booking.driver_id}`);
+          if (lastPing !== null) continue; // Driver is actively pinging — all good
 
-      this.logger.warn(
-        `[GhostCron] No GPS ping for driver=${booking.driver_id} on booking=${booking.id} — flagging`,
-      );
-      await this.flagBookingAbandoned(booking.id, booking.driver_id, 'gps_cron');
+          this.logger.warn(
+            `[GhostCron] No GPS ping for driver=${booking.driver_id} on booking=${booking.id} — flagging`,
+          );
+          await this.flagBookingAbandoned(booking.id, booking.driver_id, 'gps_cron');
+        } catch (innerErr: any) {
+          this.logger.error(`[GhostCron] Failed processing booking=${booking.id}: ${innerErr?.message}`);
+        }
+      }
+    } catch (err: any) {
+      this.logger.error(`[GhostCron] Cron job failed: ${err?.message}`);
     }
   }
 

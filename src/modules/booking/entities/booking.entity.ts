@@ -9,6 +9,7 @@ import {
   JoinColumn,
   Index,
 } from 'typeorm';
+
 import { User } from '../../auth/entities/user.entity';
 import { Vehicle, VehicleType } from '../../vehicle/entities/vehicle.entity';
 import { Payment } from '../../payment/entities/payment.entity';
@@ -40,6 +41,10 @@ export enum PaidBy {
 }
 
 @Entity('bookings')
+@Index('idx_booking_driver_status', ['driver_id', 'status'])
+@Index('idx_booking_customer_status', ['customer_id', 'status'])
+@Index('idx_booking_status_created', ['status', 'booking_time'])
+@Index('idx_booking_ongoing_flagged', ['status', 'is_flagged'])
 export class Booking {
   @PrimaryGeneratedColumn('uuid')
   id: string;
