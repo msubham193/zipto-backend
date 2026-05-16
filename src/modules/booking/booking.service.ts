@@ -39,6 +39,7 @@ import { FraudService } from '../fraud/fraud.service';
 import { SystemSettingsService } from '../settings/system-settings.service';
 import { DriverFraudService } from '../driver-fraud/driver-fraud.service';
 import { NotificationService } from '../notification/notification.service';
+import { ZiptoShieldService } from '../zipto-shield/zipto-shield.service';
 
 @Injectable()
 export class BookingService {
@@ -66,6 +67,7 @@ export class BookingService {
     private systemSettings: SystemSettingsService,
     private driverFraudService: DriverFraudService,
     private notificationService: NotificationService,
+    private ziptoShieldService: ZiptoShieldService,
   ) {}
 
   private async ensureDefaultPricingRules() {
@@ -1365,6 +1367,9 @@ export class BookingService {
       });
       await this.paymentRepository.save(cashPayment);
     }
+
+    // Zipto Shield: ₹1 contributed per completed booking (fire-and-forget)
+    this.ziptoShieldService.contribute(savedBooking.id).catch(() => {});
 
     // Award coins to customer for successful delivery
     const coinReward = await this.coinService.awardCoins(
