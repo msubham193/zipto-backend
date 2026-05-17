@@ -1,6 +1,7 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, In } from 'typeorm';
+import { ModuleRef } from '@nestjs/core';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { RedisService } from '../../services/redis.service';
 import { FcmService } from '../../services/fcm.service';
@@ -50,18 +51,23 @@ const MAX_NOTIFICATIONS = 50;
 const NOTIFICATION_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 
 @Injectable()
-export class NotificationService {
+export class NotificationService implements OnModuleInit {
   private readonly logger = new Logger(NotificationService.name);
+  private bookingGateway!: BookingGateway;
 
   constructor(
     private cacheManager: RedisService,
     private fcmService: FcmService,
-    private bookingGateway: BookingGateway,
+    private moduleRef: ModuleRef,
     @InjectRepository(Booking) private bookingRepository: Repository<Booking>,
     @InjectRepository(DriverProfile)
     private driverProfileRepository: Repository<DriverProfile>,
     @InjectRepository(User) private userRepository: Repository<User>,
   ) {}
+
+  onModuleInit() {
+    this.bookingGateway = this.moduleRef.get(BookingGateway, { strict: false });
+  }
 
   // ─────────────────────────────────────────────────────────────────────────
   // FCM Token Registration
