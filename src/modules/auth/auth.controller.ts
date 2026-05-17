@@ -8,10 +8,6 @@ import {
   AdminLoginDto,
   RefreshTokenDto,
   ResendOTPDto,
-  CustomerEmailLoginDto,
-  CustomerEmailRegisterDto,
-  DriverEmailLoginDto,
-  DriverEmailRegisterDto,
   DeleteAccountDto,
 } from './dto/auth.dto';
 import { Public } from '../../common/decorators/public.decorator';
@@ -81,46 +77,6 @@ export class AuthController {
   @ApiResponse({ status: 401, description: 'Invalid credentials' })
   async adminLogin(@Body() adminLoginDto: AdminLoginDto) {
     return this.authService.adminLogin(adminLoginDto);
-  }
-
-  @Public()
-  @Post('customer/email-login')
-  @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Customer login with email and password (temporary)' })
-  @ApiResponse({ status: 200, description: 'Login successful' })
-  @ApiResponse({ status: 401, description: 'Invalid credentials' })
-  async customerEmailLogin(@Body() dto: CustomerEmailLoginDto) {
-    return this.authService.customerEmailLogin(dto);
-  }
-
-  @Public()
-  @Post('customer/email-register')
-  @HttpCode(HttpStatus.CREATED)
-  @ApiOperation({ summary: 'Customer registration with email and password (temporary)' })
-  @ApiResponse({ status: 201, description: 'Account created successfully' })
-  @ApiResponse({ status: 409, description: 'Email already exists' })
-  async customerEmailRegister(@Body() dto: CustomerEmailRegisterDto) {
-    return this.authService.customerEmailRegister(dto);
-  }
-
-  @Public()
-  @Post('driver/email-login')
-  @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Driver login with email and password (temporary)' })
-  @ApiResponse({ status: 200, description: 'Login successful' })
-  @ApiResponse({ status: 401, description: 'Invalid credentials' })
-  async driverEmailLogin(@Body() dto: DriverEmailLoginDto) {
-    return this.authService.driverEmailLogin(dto);
-  }
-
-  @Public()
-  @Post('driver/email-register')
-  @HttpCode(HttpStatus.CREATED)
-  @ApiOperation({ summary: 'Driver registration with email and password (temporary)' })
-  @ApiResponse({ status: 201, description: 'Account created successfully' })
-  @ApiResponse({ status: 409, description: 'Email already exists' })
-  async driverEmailRegister(@Body() dto: DriverEmailRegisterDto) {
-    return this.authService.driverEmailRegister(dto);
   }
 
   @Public()
