@@ -26,10 +26,28 @@ async function bootstrap() {
   app.use(express.json({ limit: '1mb' }));
   app.use(express.urlencoded({ extended: true, limit: '1mb' }));
 
+  // CORS — must be registered before Helmet so headers are not stripped
+  app.enableCors({
+    origin: (origin, callback) => {
+      if (!origin || corsOrigins.includes(origin)) {
+        callback(null, true);
+      } else {
+        callback(null, false);
+      }
+    },
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
+    credentials: true,
+    preflightContinue: false,
+    optionsSuccessStatus: 204,
+  });
+
   // Security headers
   app.use(
     helmet({
       hsts: { maxAge: 31536000, includeSubDomains: true, preload: true },
+      // Allow cross-origin requests from whitelisted origins
+      crossOriginResourcePolicy: { policy: 'cross-origin' },
       contentSecurityPolicy: isProduction
         ? true
         : {
@@ -42,21 +60,6 @@ async function bootstrap() {
           },
     }),
   );
-
-  // CORS
-  app.enableCors({
-    origin: (origin, callback) => {
-      if (!origin || corsOrigins.includes(origin)) {
-        callback(null, true);
-        return;
-      }
-
-      callback(new Error(`CORS blocked for origin: ${origin}`), false);
-    },
-    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
-    credentials: true,
-  });
 
   // Global prefix
   app.setGlobalPrefix(apiPrefix);
