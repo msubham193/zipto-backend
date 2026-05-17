@@ -298,7 +298,10 @@ export class DriverFraudService implements OnModuleInit {
     limit?: number;
     offset?: number;
   }) {
-    const { status, driver_id, limit = 20, offset = 0 } = filters;
+    const status = filters.status;
+    const driver_id = filters.driver_id;
+    const limit = Number(filters.limit ?? 20) || 20;
+    const offset = Number(filters.offset ?? 0) || 0;
 
     const qb = this.incidentRepository
       .createQueryBuilder('i')
