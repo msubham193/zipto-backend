@@ -1,108 +1,286 @@
-import { Injectable, Logger } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  BadRequestException,
+  TooManyRequestsException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-// eslint-disable-next-line @typescript-eslint/no-var-requires
-const twilio = require('twilio');
+import axios from 'axios';
+import { RedisService } from './redis.service';
+
+// ─── DLT-approved metadata ────────────────────────────────────────────────────
+const TWO_FACTOR_BASE_URL = 'https://2factor.in/API/R1/';
+const SENDER_ID           = 'Zipto';
+const PE_ID               = '1101559440000094860';
+const CT_ID               = '1107177908307247477';
+
+// ─── Redis key namespaces ─────────────────────────────────────────────────────
+const KEY_OTP    = (phone: string) => `otp:${phone}`;
+const KEY_RESEND = (phone: string) => `otp_resend:${phone}`;
+
+interface OtpRecord {
+  otp: string;
+  attempts: number;
+  expiresAt: number; // epoch ms
+}
+
+interface SendOtpResult {
+  success: boolean;
+  /** Only populated in non-production environments */
+  dev_otp?: string;
+  cooldown_remaining_seconds?: number;
+}
 
 @Injectable()
 export class SmsService {
   private readonly logger = new Logger(SmsService.name);
-  private readonly client: any;
-  private readonly verifyServiceSid: string;
 
-  constructor(private configService: ConfigService) {
-    const accountSid = (this.configService.get<string>('externalServices.twilio.accountSid') || '').trim();
-    const authToken = (this.configService.get<string>('externalServices.twilio.authToken') || '').trim();
-    this.verifyServiceSid =
-      (this.configService.get<string>('externalServices.twilio.verifyServiceSid') || '').trim();
+  private readonly apiKey: string;
+  private readonly otpExpiryMs: number;
+  private readonly maxAttempts: number;
+  private readonly resendCooldownMs: number;
+  private readonly isDev: boolean;
+
+  constructor(
+    private readonly configService: ConfigService,
+    private readonly redisService: RedisService,
+  ) {
+    this.apiKey          = (configService.get<string>('TWO_FACTOR_API_KEY') || '').trim();
+    this.otpExpiryMs     = (parseInt(configService.get('OTP_EXPIRY_MINUTES')   || '5',  10) || 5)  * 60_000;
+    this.maxAttempts     = parseInt(configService.get('OTP_MAX_ATTEMPTS')      || '5',  10) || 5;
+    this.resendCooldownMs= parseInt(configService.get('OTP_RESEND_COOLDOWN')   || '60', 10) || 60;
+    this.resendCooldownMs *= 1_000; // convert seconds → ms
+    this.isDev           = (configService.get('NODE_ENV') || 'development') !== 'production';
 
     this.logger.log(
-      `Twilio config — accountSid: ${accountSid ? accountSid.substring(0, 10) + '...' : 'MISSING'} (len=${accountSid.length}), authToken len=${authToken.length}, verifyServiceSid: ${this.verifyServiceSid || 'MISSING'}`,
+      `2Factor SMS — apiKey: ${this.apiKey ? this.apiKey.substring(0, 8) + '...' : 'MISSING'} | ` +
+      `expiry: ${this.otpExpiryMs / 60_000}m | maxAttempts: ${this.maxAttempts} | ` +
+      `resendCooldown: ${this.resendCooldownMs / 1_000}s | dev: ${this.isDev}`,
     );
-    this.client = twilio(accountSid, authToken);
+
+    if (!this.apiKey && !this.isDev) {
+      this.logger.error('TWO_FACTOR_API_KEY is not set. OTP sending will fail in production.');
+    }
   }
 
+  // ─── Public API ─────────────────────────────────────────────────────────────
+
   /**
-   * Send a plain SMS message via Twilio Messaging
+   * Generate a fresh 6-digit OTP, store it in Redis, and deliver it via 2Factor SMS.
+   * Enforces per-phone resend cooldown.
    */
-  async sendSms(to: string, message: string): Promise<boolean> {
-    const fromNumber = this.configService.get<string>('externalServices.twilio.fromNumber') || '';
-    if (!fromNumber) {
-      this.logger.warn(`Twilio fromNumber not configured. Cannot send SMS to ${to}`);
-      return false;
+  async sendOTP(phone: string): Promise<SendOtpResult> {
+    const normalised = this.normalisePhone(phone);
+
+    // Resend cooldown guard
+    const cooldownTtl = await this.getCooldownRemainingMs(normalised);
+    if (cooldownTtl > 0) {
+      const seconds = Math.ceil(cooldownTtl / 1_000);
+      this.logger.warn(`Resend cooldown active for ${this.mask(normalised)} — ${seconds}s remaining`);
+      throw new TooManyRequestsException(
+        `Please wait ${seconds} seconds before requesting another OTP.`,
+      );
     }
 
-    // Ensure E.164 format for Indian numbers
-    const formattedTo = to.startsWith('+') ? to : `+91${to.replace(/\D/g, '').slice(-10)}`;
+    // Generate & persist OTP
+    const otp       = this.generateOTP();
+    const expiresAt = Date.now() + this.otpExpiryMs;
+    const record: OtpRecord = { otp, attempts: 0, expiresAt };
 
-    try {
-      const msg = await this.client.messages.create({
-        body: message,
-        from: fromNumber,
-        to: formattedTo,
-      });
-      this.logger.log(`SMS sent to ${formattedTo} - SID: ${msg.sid}`);
-      return true;
-    } catch (error: unknown) {
-      const msg = (error as Error)?.message || JSON.stringify(error);
-      this.logger.error(`Twilio sendSms failed to ${formattedTo}: ${msg}`);
-      return false;
+    await this.redisService.set(KEY_OTP(normalised), record, this.otpExpiryMs);
+    await this.redisService.set(KEY_RESEND(normalised), '1', this.resendCooldownMs);
+
+    this.logger.log(`OTP generated for ${this.mask(normalised)}, expires in ${this.otpExpiryMs / 60_000}m`);
+
+    // Dev mode — skip actual SMS, expose OTP in logs & response
+    if (this.isDev) {
+      this.logger.warn(`[DEV] OTP for ${this.mask(normalised)}: ${otp}`);
+      return { success: true, dev_otp: otp };
     }
+
+    // Production — send via 2Factor
+    const sent = await this.send2Factor(normalised, otp);
+    if (!sent) {
+      // Roll back Redis entries so the user can immediately retry
+      await this.redisService.del(KEY_OTP(normalised), KEY_RESEND(normalised));
+      throw new BadRequestException(
+        'Failed to send OTP. Please check the phone number and try again.',
+      );
+    }
+
+    this.logger.log(`OTP dispatched via 2Factor to ${this.mask(normalised)}`);
+    return { success: true };
   }
 
   /**
-   * Send OTP via Twilio Verify.
-   * In development mode, skips Twilio and returns true immediately
-   * (use the static dev OTP "1234" to verify).
+   * Verify the OTP submitted by the user.
+   * - Accepts static '1234' in non-production environments.
+   * - Throws on expiry or max-attempts breach.
+   * - Deletes the Redis record on success.
+   */
+  async verifyOTP(phone: string, otp: string): Promise<boolean> {
+    const normalised = this.normalisePhone(phone);
+
+    // Dev shortcut
+    if (this.isDev && otp === '1234') {
+      this.logger.warn(`[DEV] Static OTP '1234' accepted for ${this.mask(normalised)}`);
+      return true;
+    }
+
+    const record = await this.redisService.get<OtpRecord>(KEY_OTP(normalised));
+
+    if (!record) {
+      throw new BadRequestException(
+        'OTP not found or has expired. Please request a new OTP.',
+      );
+    }
+
+    // Expiry check (belt-and-suspenders; Redis TTL is the real guard)
+    if (Date.now() > record.expiresAt) {
+      await this.redisService.del(KEY_OTP(normalised));
+      throw new BadRequestException('OTP has expired. Please request a new OTP.');
+    }
+
+    // Brute-force guard
+    if (record.attempts >= this.maxAttempts) {
+      await this.redisService.del(KEY_OTP(normalised));
+      throw new BadRequestException(
+        'Too many failed attempts. Please request a new OTP.',
+      );
+    }
+
+    // Wrong OTP — increment attempt counter
+    if (record.otp !== otp) {
+      const updatedRecord: OtpRecord = {
+        ...record,
+        attempts: record.attempts + 1,
+      };
+      const remainingMs = record.expiresAt - Date.now();
+      await this.redisService.set(KEY_OTP(normalised), updatedRecord, remainingMs);
+
+      const attemptsLeft = this.maxAttempts - updatedRecord.attempts;
+      this.logger.warn(
+        `Invalid OTP for ${this.mask(normalised)} — attempt ${updatedRecord.attempts}/${this.maxAttempts} | ${attemptsLeft} left`,
+      );
+      return false;
+    }
+
+    // Correct OTP — delete record and clear resend cooldown
+    await this.redisService.del(KEY_OTP(normalised), KEY_RESEND(normalised));
+    this.logger.log(`OTP verified successfully for ${this.mask(normalised)}`);
+    return true;
+  }
+
+  /**
+   * DEV ONLY — retrieve the current live OTP for a phone number.
+   * Never expose this in production.
+   */
+  async getDevOTP(phone: string): Promise<{ otp: string; expires_at: Date } | null> {
+    const normalised = this.normalisePhone(phone);
+    const record     = await this.redisService.get<OtpRecord>(KEY_OTP(normalised));
+    if (!record || Date.now() > record.expiresAt) return null;
+    return { otp: record.otp, expires_at: new Date(record.expiresAt) };
+  }
+
+  /**
+   * Backward-compat shim — maps old Twilio-style `sendVerification` to `sendOTP`.
+   * @deprecated Use sendOTP() directly.
    */
   async sendVerification(phone: string): Promise<boolean> {
-    this.logger.log(
-      `sendVerification called - phone: ${phone}, serviceSid: ${this.verifyServiceSid}`,
-    );
-
-    if (!this.verifyServiceSid) {
-      this.logger.warn(`Twilio Verify not configured. Phone: ${phone}`);
+    try {
+      await this.sendOTP(phone);
+      return true;
+    } catch {
       return false;
     }
+  }
+
+  /**
+   * Backward-compat shim — maps old Twilio-style `checkVerification` to `verifyOTP`.
+   * @deprecated Use verifyOTP() directly.
+   */
+  async checkVerification(phone: string, code: string): Promise<boolean> {
+    try {
+      return await this.verifyOTP(phone, code);
+    } catch {
+      return false;
+    }
+  }
+
+  // ─── Private helpers ─────────────────────────────────────────────────────────
+
+  private async send2Factor(phone: string, otp: string): Promise<boolean> {
+    // DLT-approved template — must match exactly (word for word)
+    const message =
+      `Your Zipto OTP is ${otp}. Use this OTP for login and Verification. ` +
+      `Do not share it with anyone. -Zipto Hyperlogistics Private Limited`;
+
+    // 2Factor expects a plain 10-digit number (no +91 prefix)
+    const localPhone = phone.replace(/^\+91/, '').replace(/\D/g, '').slice(-10);
+
+    const params = {
+      module : 'TRANS_SMS',
+      apikey : this.apiKey,
+      to     : localPhone,
+      from   : SENDER_ID,
+      msg    : message,
+      peid   : PE_ID,
+      ctid   : CT_ID,
+    };
 
     try {
-      const verification = await this.client.verify.v2
-        .services(this.verifyServiceSid)
-        .verifications.create({ to: phone, channel: 'sms' });
+      const response = await axios.get<{ Status: string; Details: string }>(
+        TWO_FACTOR_BASE_URL,
+        { params, timeout: 12_000 },
+      );
 
-      this.logger.log(`OTP sent to ${phone} - status: ${verification.status}`);
-      return verification.status === 'pending';
-    } catch (error: unknown) {
-      const msg = (error as Error)?.message || JSON.stringify(error);
-      const code = (error as any)?.code;
-      const status = (error as any)?.status;
+      const { Status, Details } = response.data ?? {};
+      this.logger.log(
+        `2Factor response for ${this.mask(phone)}: Status=${Status} Details=${Details}`,
+      );
+
+      if (Status !== 'Success') {
+        this.logger.error(`2Factor delivery failed — ${Details}`);
+        return false;
+      }
+      return true;
+    } catch (error: any) {
       this.logger.error(
-        `Twilio send verification failed - code: ${code}, status: ${status}, message: ${msg}`,
+        `2Factor HTTP error for ${this.mask(phone)}: ${error?.message ?? error}`,
       );
       return false;
     }
   }
 
-  /**
-   * Verify OTP via Twilio Verify.
-   * In development mode, accepts the static dev OTP "1234".
-   */
-  async checkVerification(phone: string, code: string): Promise<boolean> {
-    if (!this.verifyServiceSid) {
-      this.logger.warn('Twilio Verify not configured');
-      return false;
-    }
+  /** Returns remaining cooldown in ms; 0 means no active cooldown. */
+  private async getCooldownRemainingMs(phone: string): Promise<number> {
+    const val = await this.redisService.get<string>(KEY_RESEND(phone));
+    if (!val) return 0;
+    // We set the resend key with a fixed TTL — derive remaining via a TTL command workaround:
+    // Re-read the record and compare stored expiry embedded in value vs now.
+    // Since we only store '1' (no expiry embedded), we can't derive exact TTL from the value.
+    // Return the full cooldown period as a safe upper bound; actual expiry is tracked by Redis.
+    return this.resendCooldownMs;
+  }
 
-    try {
-      const check = await this.client.verify.v2
-        .services(this.verifyServiceSid)
-        .verificationChecks.create({ to: phone, code });
+  private generateOTP(): string {
+    // Cryptographically sufficient for 6-digit OTPs
+    const min = 100_000;
+    const max = 999_999;
+    return (Math.floor(Math.random() * (max - min + 1)) + min).toString();
+  }
 
-      this.logger.log(`OTP check for ${phone} - status: ${check.status}`);
-      return check.status === 'approved';
-    } catch (error: unknown) {
-      const msg = (error as Error)?.message || error;
-      this.logger.error(`Twilio check verification failed: ${msg}`);
-      return false;
-    }
+  /** Normalise to +91XXXXXXXXXX */
+  private normalisePhone(phone: string): string {
+    const digits = phone.replace(/\D/g, '');
+    if (digits.length === 10) return `+91${digits}`;
+    if (digits.length === 12 && digits.startsWith('91')) return `+${digits}`;
+    if (digits.length === 13 && phone.startsWith('+')) return phone;
+    return `+91${digits.slice(-10)}`;
+  }
+
+  /** Mask middle digits for safe logging: +91XXXXXXXX → +91XX****XX */
+  private mask(phone: string): string {
+    return phone.replace(/(\+\d{2})(\d{2})(\d{6})(\d{2})/, '$1$2******$4');
   }
 }

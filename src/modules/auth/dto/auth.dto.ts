@@ -1,12 +1,24 @@
-import { IsString, IsNotEmpty, IsEnum, IsEmail, MinLength, MaxLength, IsOptional } from 'class-validator';
+import {
+  IsString,
+  IsNotEmpty,
+  IsEnum,
+  IsEmail,
+  MinLength,
+  MaxLength,
+  IsOptional,
+  Matches,
+} from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 import { UserRole } from '../entities/user.entity';
 
+/** Indian mobile number — 10 digits, optionally prefixed with +91 or 91 */
+const INDIAN_PHONE_REGEX = /^(\+91|91)?[6-9]\d{9}$/;
+
 export class RegisterDto {
-  @ApiProperty({ example: '+919876543210' })
+  @ApiProperty({ example: '9876543210', description: 'Indian mobile number (10 digits or +91 prefix)' })
   @IsString()
   @IsNotEmpty()
-  @MaxLength(20)
+  @Matches(INDIAN_PHONE_REGEX, { message: 'Phone must be a valid 10-digit Indian mobile number' })
   phone: string;
 
   @ApiProperty({ enum: UserRole, example: UserRole.CUSTOMER })
@@ -15,17 +27,17 @@ export class RegisterDto {
 }
 
 export class VerifyOtpDto {
-  @ApiProperty({ example: '+919876543210' })
+  @ApiProperty({ example: '9876543210', description: 'Indian mobile number (10 digits or +91 prefix)' })
   @IsString()
   @IsNotEmpty()
-  @MaxLength(20)
+  @Matches(INDIAN_PHONE_REGEX, { message: 'Phone must be a valid 10-digit Indian mobile number' })
   phone: string;
 
-  @ApiProperty({ example: '1234', description: 'Demo OTP: 1234' })
+  @ApiProperty({ example: '482916', description: '6-digit OTP received via SMS (use 1234 in dev)' })
   @IsString()
   @IsNotEmpty()
-  @MinLength(4)
-  @MaxLength(8)
+  @MinLength(4, { message: 'OTP must be at least 4 characters' })
+  @MaxLength(6, { message: 'OTP must be at most 6 characters' })
   otp: string;
 
   @ApiProperty({ enum: UserRole, required: false, example: UserRole.DRIVER })
@@ -35,15 +47,15 @@ export class VerifyOtpDto {
 }
 
 export class LoginDto {
-  @ApiProperty({ example: '+919876543210' })
+  @ApiProperty({ example: '9876543210', description: 'Indian mobile number (10 digits or +91 prefix)' })
   @IsString()
   @IsNotEmpty()
-  @MaxLength(20)
+  @Matches(INDIAN_PHONE_REGEX, { message: 'Phone must be a valid 10-digit Indian mobile number' })
   phone: string;
 }
 
 export class AdminLoginDto {
-  @ApiProperty({ example: 'admin@skido.com' })
+  @ApiProperty({ example: 'admin@zipto.in' })
   @IsEmail()
   @IsNotEmpty()
   @MaxLength(254)
@@ -65,9 +77,10 @@ export class RefreshTokenDto {
 }
 
 export class ResendOTPDto {
-  @ApiProperty({ example: '+919876543210' })
+  @ApiProperty({ example: '9876543210', description: 'Indian mobile number (10 digits or +91 prefix)' })
   @IsString()
   @IsNotEmpty()
+  @Matches(INDIAN_PHONE_REGEX, { message: 'Phone must be a valid 10-digit Indian mobile number' })
   phone: string;
 }
 

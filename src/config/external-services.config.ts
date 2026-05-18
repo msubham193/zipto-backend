@@ -8,11 +8,11 @@ export default registerAs('externalServices', () => ({
     keyId: process.env.RAZORPAY_KEY_ID || '',
     keySecret: process.env.RAZORPAY_KEY_SECRET || '',
   },
-  twilio: {
-    accountSid: process.env.TWILIO_ACCOUNT_SID || '',
-    authToken: process.env.TWILIO_AUTH_TOKEN || '',
-    verifyServiceSid: process.env.TWILIO_VERIFY_SERVICE_SID || '',
-    fromNumber: process.env.TWILIO_FROM_NUMBER || '',
+  twoFactor: {
+    apiKey       : process.env.TWO_FACTOR_API_KEY || '',
+    senderId     : 'Zipto',
+    peId         : '1101559440000094860',
+    ctId         : '1107177908307247477',
   },
   exotel: {
     sid:      process.env.EXOTEL_SID || '',
@@ -24,8 +24,9 @@ export default registerAs('externalServices', () => ({
     serverKey: process.env.FCM_SERVER_KEY || '',
   },
   otp: {
-    length: parseInt(process.env.OTP_LENGTH || '6', 10),
-    expiryMinutes: parseInt(process.env.OTP_EXPIRY_MINUTES || '10', 10),
+    expiryMinutes  : parseInt(process.env.OTP_EXPIRY_MINUTES   || '5',  10),
+    maxAttempts    : parseInt(process.env.OTP_MAX_ATTEMPTS      || '5',  10),
+    resendCooldown : parseInt(process.env.OTP_RESEND_COOLDOWN   || '60', 10), // seconds
   },
   rateLimit: {
     ttl: parseInt(process.env.THROTTLE_TTL || '60', 10),
