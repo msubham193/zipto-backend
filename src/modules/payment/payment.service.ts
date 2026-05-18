@@ -153,7 +153,7 @@ export class PaymentService {
     } else {
       // Pre-payment flow: no payment record exists yet — create one
       payment = this.paymentRepository.create({
-        booking_id: booking_id ?? null,
+        booking_id: booking_id ?? undefined,
         amount: 0,
         payment_method: PaymentMethod.UPI,
         payment_status: PaymentStatus.COMPLETED,
