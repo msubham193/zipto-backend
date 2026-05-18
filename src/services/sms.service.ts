@@ -2,7 +2,8 @@ import {
   Injectable,
   Logger,
   BadRequestException,
-  TooManyRequestsException,
+  HttpException,
+  HttpStatus,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import axios from 'axios';
@@ -77,8 +78,9 @@ export class SmsService {
     if (cooldownTtl > 0) {
       const seconds = Math.ceil(cooldownTtl / 1_000);
       this.logger.warn(`Resend cooldown active for ${this.mask(normalised)} — ${seconds}s remaining`);
-      throw new TooManyRequestsException(
+      throw new HttpException(
         `Please wait ${seconds} seconds before requesting another OTP.`,
+        HttpStatus.TOO_MANY_REQUESTS,
       );
     }
 
@@ -180,6 +182,22 @@ export class SmsService {
     const record     = await this.redisService.get<OtpRecord>(KEY_OTP(normalised));
     if (!record || Date.now() > record.expiresAt) return null;
     return { otp: record.otp, expires_at: new Date(record.expiresAt) };
+  }
+
+  /**
+   * Send a plain transactional SMS (non-OTP) via 2Factor TRANS_SMS.
+   * Used for booking notifications (pickup/delivery OTP dispatch).
+   * NOTE: message content must match a DLT-approved template on your 2Factor account.
+   */
+  async sendSms(to: string, message: string): Promise<boolean> {
+    const normalised = this.normalisePhone(to);
+
+    if (this.isDev) {
+      this.logger.warn(`[DEV] SMS to ${this.mask(normalised)}: ${message}`);
+      return true;
+    }
+
+    return this.send2Factor(normalised, message);
   }
 
   /**
