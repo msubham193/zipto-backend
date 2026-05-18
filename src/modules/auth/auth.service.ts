@@ -73,7 +73,7 @@ export class AuthService {
       message: 'OTP sent successfully',
       phone: formattedPhone,
       isNewUser: true,
-      expiresIn: `${this.configService.get('externalServices.otp.expiryMinutes') ?? 5} minutes`,
+      expiresIn: `${process.env.OTP_EXPIRY_MINUTES ?? 5} minutes`,
     };
   }
 
@@ -98,7 +98,7 @@ export class AuthService {
       message: 'OTP sent successfully',
       phone: formattedPhone,
       isNewUser: !existingUser,
-      expiresIn: `${this.configService.get('externalServices.otp.expiryMinutes') ?? 5} minutes`,
+      expiresIn: `${process.env.OTP_EXPIRY_MINUTES ?? 5} minutes`,
     };
   }
 
@@ -123,7 +123,7 @@ export class AuthService {
       message: 'OTP sent successfully',
       phone: formattedPhone,
       isNewUser: !existingUser,
-      expiresIn: `${this.configService.get('externalServices.otp.expiryMinutes') ?? 5} minutes`,
+      expiresIn: `${process.env.OTP_EXPIRY_MINUTES ?? 5} minutes`,
     };
   }
 
@@ -211,7 +211,7 @@ export class AuthService {
     return {
       message: 'OTP resent successfully',
       phone: formattedPhone,
-      expiresIn: `${this.configService.get('externalServices.otp.expiryMinutes') ?? 5} minutes`,
+      expiresIn: `${process.env.OTP_EXPIRY_MINUTES ?? 5} minutes`,
     };
   }
 

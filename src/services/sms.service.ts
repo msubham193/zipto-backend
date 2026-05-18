@@ -46,12 +46,14 @@ export class SmsService {
     private readonly configService: ConfigService,
     private readonly redisService: RedisService,
   ) {
-    this.apiKey          = (configService.get<string>('TWO_FACTOR_API_KEY') || '').trim();
-    this.otpExpiryMs     = (parseInt(configService.get('OTP_EXPIRY_MINUTES')   || '5',  10) || 5)  * 60_000;
-    this.maxAttempts     = parseInt(configService.get('OTP_MAX_ATTEMPTS')      || '5',  10) || 5;
-    this.resendCooldownMs= parseInt(configService.get('OTP_RESEND_COOLDOWN')   || '60', 10) || 60;
+    this.apiKey          = (process.env.TWO_FACTOR_API_KEY || configService.get<string>('TWO_FACTOR_API_KEY') || '').trim();
+    this.otpExpiryMs     = (parseInt(process.env.OTP_EXPIRY_MINUTES   || configService.get('OTP_EXPIRY_MINUTES')   || '5',  10) || 5)  * 60_000;
+    this.maxAttempts     = parseInt(process.env.OTP_MAX_ATTEMPTS      || configService.get('OTP_MAX_ATTEMPTS')      || '5',  10) || 5;
+    this.resendCooldownMs= parseInt(process.env.OTP_RESEND_COOLDOWN   || configService.get('OTP_RESEND_COOLDOWN')   || '60', 10) || 60;
     this.resendCooldownMs *= 1_000; // convert seconds → ms
-    this.isDev           = (configService.get('NODE_ENV') || 'development') !== 'production';
+    // Use process.env directly — configService.get('NODE_ENV') is undefined when NODE_ENV
+    // is not declared in any registered config file, which would make isDev always true.
+    this.isDev           = process.env.NODE_ENV !== 'production';
 
     this.logger.log(
       `2Factor SMS — apiKey: ${this.apiKey ? this.apiKey.substring(0, 8) + '...' : 'MISSING'} | ` +
