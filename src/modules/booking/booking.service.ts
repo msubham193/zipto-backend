@@ -399,13 +399,12 @@ export class BookingService {
 
       if (offerData.timed_out) {
         const retryCount = offerData.retry_count || 0;
-        const canRetry = retryCount < 3;
         return {
           status: 'timed_out',
           current_fare: offerData.estimated_fare,
-          suggested_fare: canRetry ? Math.round(offerData.estimated_fare + 10) : null,
+          suggested_fare: Math.round(offerData.estimated_fare + 10),
           retry_count: retryCount,
-          can_retry: canRetry,
+          can_retry: true,
         };
       }
 
@@ -424,7 +423,6 @@ export class BookingService {
     if (offerData.customer_id !== customerId) throw new ForbiddenException('Not authorized');
 
     const retryCount = (offerData.retry_count || 0) + 1;
-    if (retryCount > 3) throw new BadRequestException('Maximum retries reached');
 
     const TTL_MS = 160_000; // 60s search + 10s buffer + 90s grace for next timeout
 
@@ -647,32 +645,21 @@ export class BookingService {
     this.logger.log(`[SearchTimeout] 60s expired for offer ${offerId}`);
 
     const retryCount = offerData.retry_count || 0;
-    const canRetry = retryCount < 3;
 
-    if (canRetry) {
-      // Mark timed_out, keep alive 90s for the customer to decide
-      await this.cacheManager.set(`offer:${offerId}`, {
-        ...offerData,
-        timed_out: true,
-      }, 90_000);
+    // Keep offer alive 90s so customer can decide to increase fare or cancel
+    await this.cacheManager.set(`offer:${offerId}`, {
+      ...offerData,
+      timed_out: true,
+    }, 90_000);
 
-      this.bookingGateway.notifyUser(offerData.customer_id, 'search_timeout', {
-        bookingId: offerId,
-        message: `No drivers found. Increase fare by ₹10 to attract more drivers?`,
-        current_fare: offerData.estimated_fare,
-        suggested_fare: Math.round(offerData.estimated_fare + 10),
-        retry_count: retryCount,
-        can_retry: true,
-      });
-    } else {
-      this.bookingGateway.notifyUser(offerData.customer_id, 'search_timeout', {
-        bookingId: offerId,
-        message: 'No drivers available in your area right now. Please try again later.',
-        retry_count: retryCount,
-        can_retry: false,
-      });
-      await this.cleanupOffer(offerId);
-    }
+    this.bookingGateway.notifyUser(offerData.customer_id, 'search_timeout', {
+      bookingId: offerId,
+      message: 'No drivers found. Increase fare to attract more drivers?',
+      current_fare: offerData.estimated_fare,
+      suggested_fare: Math.round(offerData.estimated_fare + 10),
+      retry_count: retryCount,
+      can_retry: true,
+    });
   }
 
   /**
