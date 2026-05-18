@@ -385,10 +385,9 @@ export class BookingService {
 
   /**
    * Get offer/booking status — used by customer to poll while searching for a driver.
-   * Returns searching | accepted (with real booking_id) | expired
+   * Returns searching | accepted | timed_out | expired
    */
   async getOfferStatus(offerId: string, userId: string) {
-    // Check if offer was accepted → real booking ID stored in Redis
     const realBookingId = await this.cacheManager.get<string>(`offer:accepted:${offerId}`);
     if (realBookingId) {
       return { status: 'accepted', booking_id: realBookingId };
@@ -396,13 +395,67 @@ export class BookingService {
 
     const offerData = await this.cacheManager.get<any>(`offer:${offerId}`);
     if (offerData) {
-      if (offerData.customer_id !== userId) {
-        throw new ForbiddenException('Not authorized');
+      if (offerData.customer_id !== userId) throw new ForbiddenException('Not authorized');
+
+      if (offerData.timed_out) {
+        const retryCount = offerData.retry_count || 0;
+        const canRetry = retryCount < 3;
+        return {
+          status: 'timed_out',
+          current_fare: offerData.estimated_fare,
+          suggested_fare: canRetry ? Math.round(offerData.estimated_fare + 10) : null,
+          retry_count: retryCount,
+          can_retry: canRetry,
+        };
       }
+
       return { status: 'searching' };
     }
 
     return { status: 'expired' };
+  }
+
+  /**
+   * Retry driver search with an increased fare (up to 3 retries).
+   */
+  async retrySearch(offerId: string, customerId: string, newFare: number) {
+    const offerData = await this.cacheManager.get<any>(`offer:${offerId}`);
+    if (!offerData) throw new NotFoundException('Offer not found or expired');
+    if (offerData.customer_id !== customerId) throw new ForbiddenException('Not authorized');
+
+    const retryCount = (offerData.retry_count || 0) + 1;
+    if (retryCount > 3) throw new BadRequestException('Maximum retries reached');
+
+    const TTL_MS = 160_000; // 60s search + 10s buffer + 90s grace for next timeout
+
+    await this.cacheManager.set(`offer:${offerId}`, {
+      ...offerData,
+      estimated_fare: newFare,
+      retry_count: retryCount,
+      timed_out: false,
+    }, TTL_MS);
+
+    await this.cacheManager.set(`customer:active_offer:${customerId}`, offerId, TTL_MS);
+
+    // Clear previous search state so all drivers get a fresh chance at the higher fare
+    await this.cacheManager.del(`offer:${offerId}:excluded`);
+    await this.cacheManager.del(`offer:${offerId}:broadcast`);
+    await this.cacheManager.del(`offer:${offerId}:broadcast_drivers`);
+
+    this.bookingGateway.notifyUser(customerId, 'searching_for_driver', {
+      bookingId: offerId,
+      message: `Searching with increased fare ₹${newFare}...`,
+      searchTimeoutSeconds: 60,
+      retryCount,
+    });
+
+    await this.bookingQueue.add('search_timeout', { bookingId: offerId }, { delay: 60_000 });
+
+    this.processDriverSearch(offerId, [], offerData.vehicle_type, 1).catch(err =>
+      this.logger.error(`[RetrySearch] Driver search failed: ${err.message}`),
+    );
+
+    return { success: true, new_fare: newFare, retry_count: retryCount };
   }
 
   /**
@@ -583,7 +636,9 @@ export class BookingService {
   }
 
   /**
-   * Hard 60-second search timeout — offer expires, no DB record to delete.
+   * Hard 60-second search timeout.
+   * If retries remain, keep the offer alive (90s grace) and let the customer increase the fare.
+   * On final timeout, clean up completely.
    */
   async handleSearchTimeout(offerId: string) {
     const offerData = await this.cacheManager.get<any>(`offer:${offerId}`);
@@ -591,12 +646,33 @@ export class BookingService {
 
     this.logger.log(`[SearchTimeout] 60s expired for offer ${offerId}`);
 
-    this.bookingGateway.notifyUser(offerData.customer_id, 'search_timeout', {
-      bookingId: offerId,
-      message: 'No drivers found within 60 seconds. Please try again.',
-    });
+    const retryCount = offerData.retry_count || 0;
+    const canRetry = retryCount < 3;
 
-    await this.cleanupOffer(offerId);
+    if (canRetry) {
+      // Mark timed_out, keep alive 90s for the customer to decide
+      await this.cacheManager.set(`offer:${offerId}`, {
+        ...offerData,
+        timed_out: true,
+      }, 90_000);
+
+      this.bookingGateway.notifyUser(offerData.customer_id, 'search_timeout', {
+        bookingId: offerId,
+        message: `No drivers found. Increase fare by ₹10 to attract more drivers?`,
+        current_fare: offerData.estimated_fare,
+        suggested_fare: Math.round(offerData.estimated_fare + 10),
+        retry_count: retryCount,
+        can_retry: true,
+      });
+    } else {
+      this.bookingGateway.notifyUser(offerData.customer_id, 'search_timeout', {
+        bookingId: offerId,
+        message: 'No drivers available in your area right now. Please try again later.',
+        retry_count: retryCount,
+        can_retry: false,
+      });
+      await this.cleanupOffer(offerId);
+    }
   }
 
   /**

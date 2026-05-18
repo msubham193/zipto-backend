@@ -76,6 +76,21 @@ export class BookingController {
     return this.bookingService.getOfferStatus(offerId, user.id);
   }
 
+  @Post('offer/:offerId/retry')
+  @Roles('customer')
+  @ApiOperation({ summary: 'Retry driver search with increased fare (max 3 retries)' })
+  @ApiResponse({ status: 201, description: 'Search restarted with new fare' })
+  async retrySearch(
+    @Param('offerId') offerId: string,
+    @Body('new_fare') newFare: number,
+    @GetUser() user: User,
+  ) {
+    if (!newFare || isNaN(Number(newFare)) || Number(newFare) <= 0) {
+      throw new BadRequestException('new_fare must be a positive number');
+    }
+    return this.bookingService.retrySearch(offerId, user.id, Number(newFare));
+  }
+
   @Put('offer/:offerId/cancel')
   @Roles('customer')
   @ApiOperation({ summary: 'Cancel an offer before any driver accepts' })
