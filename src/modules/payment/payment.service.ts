@@ -37,50 +37,28 @@ export class PaymentService {
     try {
       const { booking_id, amount, payment_method } = createOrderDto;
       this.logger.log(
-        `createOrder called - booking_id: ${booking_id}, amount: ${amount}, userId: ${userId}`,
+        `createOrder called - booking_id: ${booking_id ?? 'none'}, amount: ${amount}, userId: ${userId}`,
       );
 
-      const booking = await this.bookingRepository.findOne({
-        where: { id: booking_id },
-      });
+      // When booking_id is provided, validate the booking exists and belongs to user
+      if (booking_id) {
+        const booking = await this.bookingRepository.findOne({ where: { id: booking_id } });
+        if (!booking) throw new NotFoundException('Booking not found');
+        if (booking.customer_id !== userId) throw new BadRequestException('You do not have access to this booking');
+        if (booking.status === BookingStatus.CANCELLED) throw new BadRequestException('Cannot create payment for cancelled bookings');
 
-      if (!booking) {
-        throw new NotFoundException('Booking not found');
-      }
-
-      this.logger.log(
-        `Booking found - status: ${booking.status}, customer_id: ${booking.customer_id}`,
-      );
-
-      if (booking.customer_id !== userId) {
-        throw new BadRequestException('You do not have access to this booking');
-      }
-
-      if (booking.status === BookingStatus.CANCELLED) {
-        throw new BadRequestException('Cannot create payment for cancelled bookings');
-      }
-
-      // Check if payment already exists and is completed
-      const existingPayment = await this.paymentRepository.findOne({
-        where: { booking_id },
-      });
-
-      if (existingPayment && existingPayment.payment_status === PaymentStatus.COMPLETED) {
-        throw new BadRequestException('Payment already completed for this booking');
-      }
-
-      // If a pending payment order already exists, return it
-      if (
-        existingPayment &&
-        existingPayment.payment_status === PaymentStatus.PENDING &&
-        existingPayment.razorpay_order_id
-      ) {
-        return {
-          order_id: existingPayment.razorpay_order_id,
-          amount: existingPayment.amount,
-          currency: 'INR',
-          key: this.configService.get('externalServices.razorpay.keyId'),
-        };
+        const existingPayment = await this.paymentRepository.findOne({ where: { booking_id } });
+        if (existingPayment?.payment_status === PaymentStatus.COMPLETED) {
+          throw new BadRequestException('Payment already completed for this booking');
+        }
+        if (existingPayment?.payment_status === PaymentStatus.PENDING && existingPayment.razorpay_order_id) {
+          return {
+            order_id: existingPayment.razorpay_order_id,
+            amount: existingPayment.amount,
+            currency: 'INR',
+            key: this.configService.get('externalServices.razorpay.keyId'),
+          };
+        }
       }
 
       const keyId = this.configService.get<string>('externalServices.razorpay.keyId');
@@ -146,21 +124,7 @@ export class PaymentService {
     const { razorpay_order_id, razorpay_payment_id, razorpay_signature, booking_id } =
       verifyPaymentDto;
 
-    // Find payment record
-    const payment = await this.paymentRepository.findOne({
-      where: { booking_id, razorpay_order_id },
-      relations: ['booking'],
-    });
-
-    if (!payment) {
-      throw new NotFoundException('Payment not found');
-    }
-
-    if (payment.booking.customer_id !== userId) {
-      throw new BadRequestException('You do not have access to this payment');
-    }
-
-    // Verify Razorpay signature
+    // Verify Razorpay signature first (does not require a booking record)
     const razorpayKeySecret = this.configService.get<string>('externalServices.razorpay.keySecret');
     if (!razorpayKeySecret) {
       throw new BadRequestException('Razorpay key secret is not configured');
@@ -171,35 +135,39 @@ export class PaymentService {
       .digest('hex');
 
     if (generatedSignature !== razorpay_signature) {
-      payment.payment_status = PaymentStatus.FAILED;
-      await this.paymentRepository.save(payment);
       throw new BadRequestException('Invalid payment signature');
     }
 
-    // Update payment record
-    payment.payment_status = PaymentStatus.COMPLETED;
-    payment.razorpay_payment_id = razorpay_payment_id;
-    payment.razorpay_signature = razorpay_signature;
-    payment.transaction_id = razorpay_payment_id;
+    // Find or create payment record
+    let payment = await this.paymentRepository.findOne({
+      where: { razorpay_order_id },
+      relations: booking_id ? ['booking'] : [],
+    });
 
-    await this.paymentRepository.save(payment);
-
-    this.logger.log(`Payment completed for booking: ${booking_id}`);
-
-    // Notify the driver if one is assigned
-    if (payment.booking.driver_id) {
-      const amount = payment.amount;
-      this.notificationService.notifyPaymentReceived(
-        payment.booking.driver_id,
-        amount,
-        booking_id,
-      ).catch(() => {/* non-critical */});
+    if (payment) {
+      payment.payment_status = PaymentStatus.COMPLETED;
+      payment.razorpay_payment_id = razorpay_payment_id;
+      payment.razorpay_signature = razorpay_signature;
+      payment.transaction_id = razorpay_payment_id;
+      if (booking_id && !payment.booking_id) payment.booking_id = booking_id;
+    } else {
+      // Pre-payment flow: no payment record exists yet — create one
+      payment = this.paymentRepository.create({
+        booking_id: booking_id ?? null,
+        amount: 0,
+        payment_method: PaymentMethod.UPI,
+        payment_status: PaymentStatus.COMPLETED,
+        razorpay_order_id,
+        razorpay_payment_id,
+        razorpay_signature,
+        transaction_id: razorpay_payment_id,
+      });
     }
 
-    return {
-      payment,
-      booking: payment.booking,
-    };
+    await this.paymentRepository.save(payment);
+    this.logger.log(`Payment verified: ${razorpay_payment_id} booking: ${booking_id ?? 'pre-booking'}`);
+
+    return { payment };
   }
 
   /**

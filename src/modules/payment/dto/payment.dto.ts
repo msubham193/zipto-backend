@@ -3,9 +3,10 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { PaymentMethod } from '../entities/payment.entity';
 
 export class CreateOrderDto {
-  @ApiProperty({ example: 'uuid-of-booking' })
+  @ApiPropertyOptional({ example: 'uuid-of-booking' })
+  @IsOptional()
   @IsUUID()
-  booking_id: string;
+  booking_id?: string;
 
   @ApiProperty({ example: 250.5 })
   @IsNumber()
@@ -37,9 +38,10 @@ export class VerifyPaymentDto {
   @IsNotEmpty()
   razorpay_signature: string;
 
-  @ApiProperty()
+  @ApiPropertyOptional()
+  @IsOptional()
   @IsUUID()
-  booking_id: string;
+  booking_id?: string;
 }
 
 export class CashPaymentDto {

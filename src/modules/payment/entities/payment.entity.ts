@@ -29,11 +29,11 @@ export class Payment {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
-  @Column({ type: 'uuid' })
+  @Column({ type: 'uuid', nullable: true })
   @Index()
   booking_id: string;
 
-  @ManyToOne(() => Booking, { onDelete: 'CASCADE' })
+  @ManyToOne(() => Booking, { onDelete: 'SET NULL', nullable: true })
   @JoinColumn({ name: 'booking_id' })
   booking: Booking;
 
