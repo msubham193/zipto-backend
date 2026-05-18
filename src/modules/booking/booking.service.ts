@@ -415,6 +415,25 @@ export class BookingService {
   }
 
   /**
+   * Increase the fare of an active offer mid-search.
+   * Updates Redis immediately so the next driver who sees the offer gets the new fare.
+   */
+  async updateOfferFare(offerId: string, customerId: string, newFare: number) {
+    const offerData = await this.cacheManager.get<any>(`offer:${offerId}`);
+    if (!offerData) throw new NotFoundException('Offer not found or expired');
+    if (offerData.customer_id !== customerId) throw new ForbiddenException('Not authorized');
+    if (newFare <= offerData.estimated_fare) throw new BadRequestException('New fare must be higher than current fare');
+
+    await this.cacheManager.set(`offer:${offerId}`, {
+      ...offerData,
+      estimated_fare: newFare,
+    }, 100_000); // refresh TTL
+
+    this.logger.log(`[UpdateFare] offer=${offerId} fare ${offerData.estimated_fare} → ${newFare}`);
+    return { success: true, new_fare: newFare };
+  }
+
+  /**
    * Retry driver search with an increased fare (up to 3 retries).
    */
   async retrySearch(offerId: string, customerId: string, newFare: number) {

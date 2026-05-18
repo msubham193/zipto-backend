@@ -3,6 +3,7 @@ import {
   Get,
   Post,
   Put,
+  Patch,
   Delete,
   Body,
   Param,
@@ -74,6 +75,20 @@ export class BookingController {
   @ApiResponse({ status: 200, description: 'searching | accepted (with booking_id) | expired' })
   async getOfferStatus(@Param('offerId') offerId: string, @GetUser() user: User) {
     return this.bookingService.getOfferStatus(offerId, user.id);
+  }
+
+  @Patch('offer/:offerId/fare')
+  @Roles('customer')
+  @ApiOperation({ summary: 'Increase offer fare mid-search to attract more drivers' })
+  async updateOfferFare(
+    @Param('offerId') offerId: string,
+    @Body('new_fare') newFare: number,
+    @GetUser() user: User,
+  ) {
+    if (!newFare || isNaN(Number(newFare)) || Number(newFare) <= 0) {
+      throw new BadRequestException('new_fare must be a positive number');
+    }
+    return this.bookingService.updateOfferFare(offerId, user.id, Number(newFare));
   }
 
   @Post('offer/:offerId/retry')
