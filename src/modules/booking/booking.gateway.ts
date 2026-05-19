@@ -19,17 +19,7 @@ const DISCONNECT_GRACE_MS = 15 * 60 * 1000; // 15 minutes
 
 @WebSocketGateway({
   cors: {
-    origin: (origin: string | undefined, callback: (err: Error | null, allow: boolean) => void) => {
-      const allowed = [
-        process.env.ADMIN_URL,
-        process.env.WEB_URL,
-      ].filter(Boolean);
-      if (!origin || allowed.includes(origin)) {
-        callback(null, true);
-      } else {
-        callback(new Error('WebSocket origin not allowed'), false);
-      }
-    },
+    origin: true,
     credentials: true,
   },
   namespace: 'booking',
