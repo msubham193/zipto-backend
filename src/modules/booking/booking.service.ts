@@ -855,6 +855,12 @@ export class BookingService {
       }
     }
 
+    const normalizePhone = (phone: string | null | undefined) => {
+      if (!phone) return undefined;
+      const digits = phone.replace(/\D/g, '');
+      return digits.length >= 10 ? digits.slice(-10) : digits || undefined;
+    };
+
     return {
       ...booking,
       driver_stats: driverStats,
@@ -863,6 +869,8 @@ export class BookingService {
       pickup_otp_verified: booking.pickup_otp_verified,
       delivery_otp: booking.delivery_otp,
       delivery_otp_verified: booking.otp_verified,
+      sender_phone: normalizePhone(booking.mobile_number),
+      receiver_phone: normalizePhone(booking.receiver_phone) || normalizePhone(booking.alternative_phone) || undefined,
     };
   }
 
@@ -948,9 +956,9 @@ export class BookingService {
       // Sender details — fall back to customer relation if booking fields are empty
       sender_name: booking.name || booking.customer?.name || undefined,
       sender_phone: normalizePhone(booking.mobile_number) || normalizePhone(booking.customer?.phone),
-      // Receiver details
+      // Receiver details — do NOT fall back to sender's phone
       receiver_name: booking.receiver_name || undefined,
-      receiver_phone: normalizePhone(booking.receiver_phone) || normalizePhone(booking.alternative_phone) || normalizePhone(booking.mobile_number) || normalizePhone(booking.customer?.phone),
+      receiver_phone: normalizePhone(booking.receiver_phone) || normalizePhone(booking.alternative_phone) || undefined,
       alternative_phone: normalizePhone(booking.alternative_phone) || undefined,
       // OTPs
       pickup_otp: booking.pickup_otp,
