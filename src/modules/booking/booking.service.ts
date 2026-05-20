@@ -1454,6 +1454,12 @@ export class BookingService {
 
     const savedBooking = await this.bookingRepository.save(booking);
 
+    // Credit driver's wallet balance with their earnings for this trip
+    await this.bookingRepository.manager.query(
+      `UPDATE driver_profiles SET wallet_balance = COALESCE(wallet_balance, 0) + $1 WHERE user_id = $2`,
+      [driverEarnings, driverId],
+    );
+
     // Auto-record cash payment if driver chose cash at delivery
     const paymentMethod = completeTripDto?.payment_method;
     const alreadyPaid = await this.paymentRepository.findOne({
