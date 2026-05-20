@@ -260,7 +260,7 @@ export class PaymentService {
         amount: amountPaise,
         currency: 'INR',
         description: `Zipto Delivery Payment — Booking #${booking_id.slice(-6).toUpperCase()}`,
-        upi_link: true,
+        ...(isTestMode ? {} : {upi_link: true}),
         reminder_enable: false,
         notify: { sms: false, email: false },
         reference_id: booking_id,

@@ -635,6 +635,7 @@ export class BookingService {
       distance:  offerData.distance,
       vehicleType,
       paid_by:   offerData.paid_by || 'sender',
+      timeLeft:  60, // broadcast offers give drivers 60s to accept
     };
 
     for (const driverId of driverIds) {
