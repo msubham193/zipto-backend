@@ -36,6 +36,7 @@ export class PaymentService {
   async createOrder(userId: string, createOrderDto: CreateOrderDto) {
     try {
       const { booking_id, amount, payment_method } = createOrderDto;
+      if (!amount || amount <= 0) throw new BadRequestException('Invalid payment amount');
       this.logger.log(
         `createOrder called - booking_id: ${booking_id ?? 'none'}, amount: ${amount}, userId: ${userId}`,
       );
@@ -234,12 +235,14 @@ export class PaymentService {
     });
     if (existingCompleted) throw new BadRequestException('Payment already completed for this booking');
 
-    // Return existing pending payment link if still valid
+    if (!amount || amount <= 0) throw new BadRequestException('Invalid payment amount');
+
+    // Return existing pending payment link if one was already created
     const existingPending = await this.paymentRepository.findOne({
       where: { booking_id, payment_status: PaymentStatus.PENDING },
     });
-    if (existingPending?.razorpay_order_id && (existingPending as any).payment_link_url) {
-      return { short_url: (existingPending as any).payment_link_url, amount };
+    if (existingPending?.payment_link_url) {
+      return { short_url: existingPending.payment_link_url, amount };
     }
 
     const keyId = this.configService.get<string>('externalServices.razorpay.keyId');
@@ -251,15 +254,21 @@ export class PaymentService {
     const isTestMode = keyId.startsWith('rzp_test');
     const amountPaise = isTestMode ? 100 : Math.round(amount * 100);
 
-    const link = await razorpay.paymentLink.create({
-      amount: amountPaise,
-      currency: 'INR',
-      description: `Zipto Delivery Payment — Booking #${booking_id.slice(-6).toUpperCase()}`,
-      upi_link: true,
-      reminder_enable: false,
-      notify: { sms: false, email: false },
-      reference_id: booking_id,
-    });
+    let link: any;
+    try {
+      link = await razorpay.paymentLink.create({
+        amount: amountPaise,
+        currency: 'INR',
+        description: `Zipto Delivery Payment — Booking #${booking_id.slice(-6).toUpperCase()}`,
+        upi_link: true,
+        reminder_enable: false,
+        notify: { sms: false, email: false },
+        reference_id: booking_id,
+      });
+    } catch (err: any) {
+      this.logger.error(`Razorpay paymentLink.create failed: ${JSON.stringify(err)}`);
+      throw new BadRequestException(err?.error?.description || 'Failed to create payment link. Please try again.');
+    }
 
     const payment = this.paymentRepository.create({
       booking_id,
@@ -267,6 +276,7 @@ export class PaymentService {
       payment_method: PaymentMethod.UPI,
       payment_status: PaymentStatus.PENDING,
       razorpay_order_id: link.id,
+      payment_link_url: link.short_url,
     });
     await this.paymentRepository.save(payment);
 
@@ -279,16 +289,15 @@ export class PaymentService {
    */
   async handleWebhook(rawBody: Buffer, signature: string) {
     const webhookSecret = this.configService.get<string>('externalServices.razorpay.webhookSecret');
-    if (!webhookSecret) {
-      this.logger.warn('Razorpay webhook secret not configured — skipping signature verification');
-    } else {
+    if (webhookSecret) {
       const expected = crypto
         .createHmac('sha256', webhookSecret)
         .update(rawBody)
         .digest('hex');
       if (expected !== signature) {
-        this.logger.warn('Razorpay webhook: invalid signature');
-        throw new BadRequestException('Invalid webhook signature');
+        // Log and return 200 — do not throw, otherwise Razorpay retries indefinitely
+        this.logger.warn('Razorpay webhook: invalid signature — ignoring');
+        return { received: false };
       }
     }
 
@@ -296,33 +305,41 @@ export class PaymentService {
     try {
       event = JSON.parse(rawBody.toString('utf8'));
     } catch {
-      throw new BadRequestException('Invalid webhook payload');
+      this.logger.warn('Razorpay webhook: invalid JSON payload');
+      return { received: false };
     }
 
     this.logger.log(`Razorpay webhook received: ${event.event}`);
-
     const eventName: string = event.event ?? '';
 
-    // payment.captured — from createOrder flow (customer app)
-    if (eventName === 'payment.captured') {
-      const paymentEntity = event.payload?.payment?.entity;
-      const orderId: string = paymentEntity?.order_id ?? '';
-      const paymentId: string = paymentEntity?.id ?? '';
-      if (orderId) {
-        await this.markPaymentComplete(orderId, paymentId, paymentEntity?.amount / 100);
+    try {
+      // payment.captured — from createOrder flow (customer app)
+      if (eventName === 'payment.captured') {
+        const paymentEntity = event.payload?.payment?.entity;
+        const orderId: string = paymentEntity?.order_id ?? '';
+        const paymentId: string = paymentEntity?.id ?? '';
+        const amountRupees = typeof paymentEntity?.amount === 'number' ? paymentEntity.amount / 100 : undefined;
+        if (orderId) {
+          await this.markPaymentComplete(orderId, paymentId, amountRupees);
+        }
       }
-    }
 
-    // payment_link.paid — from createPaymentLink flow (rider QR)
-    if (eventName === 'payment_link.paid') {
-      const linkEntity = event.payload?.payment_link?.entity;
-      const paymentEntity = event.payload?.payment?.entity;
-      const linkId: string = linkEntity?.id ?? '';
-      const paymentId: string = paymentEntity?.id ?? '';
-      const bookingId: string = linkEntity?.reference_id ?? '';
-      if (linkId) {
-        await this.markPaymentComplete(linkId, paymentId, linkEntity?.amount / 100, bookingId);
+      // payment_link.paid — from createPaymentLink flow (rider QR)
+      if (eventName === 'payment_link.paid') {
+        const linkEntity = event.payload?.payment_link?.entity;
+        const paymentEntity = event.payload?.payment?.entity;
+        const linkId: string = linkEntity?.id ?? '';
+        const paymentId: string = paymentEntity?.id ?? '';
+        const bookingId: string = linkEntity?.reference_id ?? '';
+        const amountRupees = typeof linkEntity?.amount === 'number' ? linkEntity.amount / 100 : undefined;
+        if (linkId) {
+          await this.markPaymentComplete(linkId, paymentId, amountRupees, bookingId);
+        }
       }
+    } catch (err) {
+      // Log but still return 200 — Razorpay retries on non-2xx, which can cause duplicates
+      // The idempotency check in markPaymentComplete prevents double-recording
+      this.logger.error(`Webhook processing error for event ${eventName}: ${err}`);
     }
 
     return { received: true };

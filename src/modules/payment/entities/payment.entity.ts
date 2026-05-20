@@ -70,6 +70,9 @@ export class Payment {
   @Column({ type: 'varchar', length: 255, nullable: true })
   razorpay_signature: string;
 
+  @Column({ type: 'varchar', length: 512, nullable: true })
+  payment_link_url: string;
+
   @CreateDateColumn()
   created_at: Date;
 
