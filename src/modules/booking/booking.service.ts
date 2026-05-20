@@ -120,7 +120,7 @@ export class BookingService {
    * Round to 2 decimal places
    */
   private round(value: number): number {
-    return Math.round(value * 100) / 100;
+    return Math.round(value);
   }
 
   /**
@@ -305,7 +305,7 @@ export class BookingService {
       if (!user || user.coins < validatedCoins) {
         throw new BadRequestException(`Insufficient coins. You have ${user?.coins ?? 0} coins`);
       }
-      coinDiscount = Math.round(validatedCoins * CoinService.COINS_TO_RUPEES_RATE * 100) / 100;
+      coinDiscount = Math.round(validatedCoins * CoinService.COINS_TO_RUPEES_RATE);
     }
 
     const fareEstimate = await this.estimateFare({
@@ -323,7 +323,7 @@ export class BookingService {
     const OFFER_TTL_MS = 6 * 60 * 1000; // 6 minutes
 
     // Apply coin discount to estimated fare (floor at 0)
-    const discountedFare = Math.max(0, Math.round((fareEstimate.estimated_fare - coinDiscount) * 100) / 100);
+    const discountedFare = Math.max(0, Math.round(fareEstimate.estimated_fare - coinDiscount));
 
     // Store entire offer data in Redis — NO DB write yet
     await this.cacheManager.set(`offer:${offerId}`, {
@@ -820,7 +820,7 @@ export class BookingService {
 
     const booking = await this.bookingRepository.findOne({
       where: { id: bookingId },
-      relations: ['customer', 'driver', 'vehicle'],
+      relations: ['customer', 'driver', 'vehicle', 'payments'],
     });
 
     if (!booking) {

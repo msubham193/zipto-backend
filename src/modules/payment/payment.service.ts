@@ -249,10 +249,26 @@ export class PaymentService {
     const keySecret = this.configService.get<string>('externalServices.razorpay.keySecret');
     if (!keyId || !keySecret) throw new BadRequestException('Payment gateway is not configured');
 
-    const razorpay = new Razorpay({ key_id: keyId, key_secret: keySecret });
-
     const isTestMode = keyId.startsWith('rzp_test');
-    const amountPaise = isTestMode ? 100 : Math.round(amount * 100);
+
+    if (isTestMode) {
+      // Razorpay test-mode payment links produce unusable QR codes and invalid UPI IDs.
+      // Auto-complete the payment so the driver can proceed to OTP-based delivery completion.
+      const payment = this.paymentRepository.create({
+        booking_id,
+        amount,
+        payment_method: PaymentMethod.UPI,
+        payment_status: PaymentStatus.COMPLETED,
+        razorpay_order_id: `test_mock_${Date.now()}`,
+        transaction_id: `test_mock_${Date.now()}`,
+      });
+      await this.paymentRepository.save(payment);
+      this.logger.log(`[TEST MODE] Mock payment auto-completed for booking: ${booking_id}`);
+      return { short_url: null, is_test_mode: true, amount };
+    }
+
+    const razorpay = new Razorpay({ key_id: keyId, key_secret: keySecret });
+    const amountPaise = Math.round(amount * 100);
 
     let link: any;
     try {
@@ -260,7 +276,7 @@ export class PaymentService {
         amount: amountPaise,
         currency: 'INR',
         description: `Zipto Delivery Payment — Booking #${booking_id.slice(-6).toUpperCase()}`,
-        ...(isTestMode ? {} : {upi_link: true}),
+        upi_link: true,
         reminder_enable: false,
         notify: { sms: false, email: false },
         reference_id: booking_id,
