@@ -298,10 +298,8 @@ export class NotificationService implements OnModuleInit {
     return this.push(
       userId,
       'payment',
-      '💸 Payment Received',
-      `₹${amount} has been credited to your account for trip #${bookingId
-        .slice(-6)
-        .toUpperCase()}.`,
+      'Payment Received',
+      `₹${Math.round(amount)} has been paid for Trip #${bookingId.slice(-6).toUpperCase()}.`,
       { bookingId, amount },
     );
   }
