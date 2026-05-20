@@ -13,6 +13,7 @@ import { Booking, BookingStatus } from '../booking/entities/booking.entity';
 import { CreateOrderDto, VerifyPaymentDto, CashPaymentDto, CreatePaymentLinkDto } from './dto/payment.dto';
 import { getPaginationMeta } from '../../common/utils/helpers.util';
 import { NotificationService } from '../notification/notification.service';
+import { BookingGateway } from '../booking/booking.gateway';
 import * as crypto from 'crypto';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const Razorpay = require('razorpay');
@@ -28,6 +29,7 @@ export class PaymentService {
     private bookingRepository: Repository<Booking>,
     private configService: ConfigService,
     private notificationService: NotificationService,
+    private bookingGateway: BookingGateway,
   ) {}
 
   /**
@@ -388,6 +390,11 @@ export class PaymentService {
             Number(payment.amount),
             payment.booking_id,
           ).catch(() => {});
+          // Real-time socket update so the driver's active screen reflects payment immediately
+          this.bookingGateway.notifyUser(booking.driver_id, 'payment_received', {
+            bookingId: payment.booking_id,
+            amount: Number(payment.amount),
+          });
         }
       }
     } else if (bookingId) {
@@ -403,6 +410,19 @@ export class PaymentService {
       });
       await this.paymentRepository.save(payment);
       this.logger.log(`Payment record created via webhook for booking: ${bookingId}`);
+
+      const booking = await this.bookingRepository.findOne({ where: { id: bookingId } });
+      if (booking?.driver_id) {
+        this.notificationService.notifyPaymentReceived(
+          booking.driver_id,
+          amount ?? 0,
+          bookingId,
+        ).catch(() => {});
+        this.bookingGateway.notifyUser(booking.driver_id, 'payment_received', {
+          bookingId,
+          amount: amount ?? 0,
+        });
+      }
     }
   }
 
