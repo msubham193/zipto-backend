@@ -79,9 +79,9 @@ export class PaymentService {
         key_secret: keySecret,
       });
 
-      // Use 1 rupee (100 paise) for test mode, store actual amount in DB
-      const isTestMode = keyId.startsWith('rzp_test');
-      const razorpayAmount = isTestMode ? 100 : Math.round(amount * 100);
+      // Charge ₹1 when RAZORPAY_FORCE_ONE_RUPEE=true (testing with live keys)
+      const forceOneRupee = this.configService.get<string>('RAZORPAY_FORCE_ONE_RUPEE') === 'true';
+      const razorpayAmount = forceOneRupee ? 100 : Math.round(amount * 100);
 
       const order = await razorpay.orders.create({
         amount: razorpayAmount,
@@ -270,7 +270,8 @@ export class PaymentService {
     }
 
     const razorpay = new Razorpay({ key_id: keyId, key_secret: keySecret });
-    const amountPaise = Math.round(amount * 100);
+    const forceOneRupee = this.configService.get<string>('RAZORPAY_FORCE_ONE_RUPEE') === 'true';
+    const amountPaise = forceOneRupee ? 100 : Math.round(amount * 100);
 
     let link: any;
     try {
