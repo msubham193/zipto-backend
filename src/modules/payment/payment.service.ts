@@ -10,7 +10,7 @@ import { Repository } from 'typeorm';
 import { ConfigService } from '@nestjs/config';
 import { Payment, PaymentMethod, PaymentStatus } from './entities/payment.entity';
 import { Booking, BookingStatus } from '../booking/entities/booking.entity';
-import { CreateOrderDto, VerifyPaymentDto, CashPaymentDto } from './dto/payment.dto';
+import { CreateOrderDto, VerifyPaymentDto, CashPaymentDto, CreatePaymentLinkDto } from './dto/payment.dto';
 import { getPaginationMeta } from '../../common/utils/helpers.util';
 import { NotificationService } from '../notification/notification.service';
 import * as crypto from 'crypto';
@@ -215,6 +215,162 @@ export class PaymentService {
     }
 
     return payment;
+  }
+
+  /**
+   * Create Razorpay Payment Link — used by rider to generate a tracked QR for the customer/receiver
+   */
+  async createPaymentLink(userId: string, dto: CreatePaymentLinkDto) {
+    const { booking_id, amount } = dto;
+
+    const booking = await this.bookingRepository.findOne({ where: { id: booking_id } });
+    if (!booking) throw new NotFoundException('Booking not found');
+    if (booking.driver_id !== userId && booking.customer_id !== userId) {
+      throw new BadRequestException('You do not have access to this booking');
+    }
+
+    const existingCompleted = await this.paymentRepository.findOne({
+      where: { booking_id, payment_status: PaymentStatus.COMPLETED },
+    });
+    if (existingCompleted) throw new BadRequestException('Payment already completed for this booking');
+
+    // Return existing pending payment link if still valid
+    const existingPending = await this.paymentRepository.findOne({
+      where: { booking_id, payment_status: PaymentStatus.PENDING },
+    });
+    if (existingPending?.razorpay_order_id && (existingPending as any).payment_link_url) {
+      return { short_url: (existingPending as any).payment_link_url, amount };
+    }
+
+    const keyId = this.configService.get<string>('externalServices.razorpay.keyId');
+    const keySecret = this.configService.get<string>('externalServices.razorpay.keySecret');
+    if (!keyId || !keySecret) throw new BadRequestException('Payment gateway is not configured');
+
+    const razorpay = new Razorpay({ key_id: keyId, key_secret: keySecret });
+
+    const isTestMode = keyId.startsWith('rzp_test');
+    const amountPaise = isTestMode ? 100 : Math.round(amount * 100);
+
+    const link = await razorpay.paymentLink.create({
+      amount: amountPaise,
+      currency: 'INR',
+      description: `Zipto Delivery Payment — Booking #${booking_id.slice(-6).toUpperCase()}`,
+      upi_link: true,
+      reminder_enable: false,
+      notify: { sms: false, email: false },
+      reference_id: booking_id,
+    });
+
+    const payment = this.paymentRepository.create({
+      booking_id,
+      amount,
+      payment_method: PaymentMethod.UPI,
+      payment_status: PaymentStatus.PENDING,
+      razorpay_order_id: link.id,
+    });
+    await this.paymentRepository.save(payment);
+
+    this.logger.log(`Payment link created: ${link.id} for booking: ${booking_id}`);
+    return { short_url: link.short_url, amount };
+  }
+
+  /**
+   * Razorpay webhook — auto-confirms payment when receiver pays via Payment Link or Razorpay
+   */
+  async handleWebhook(rawBody: Buffer, signature: string) {
+    const webhookSecret = this.configService.get<string>('externalServices.razorpay.webhookSecret');
+    if (!webhookSecret) {
+      this.logger.warn('Razorpay webhook secret not configured — skipping signature verification');
+    } else {
+      const expected = crypto
+        .createHmac('sha256', webhookSecret)
+        .update(rawBody)
+        .digest('hex');
+      if (expected !== signature) {
+        this.logger.warn('Razorpay webhook: invalid signature');
+        throw new BadRequestException('Invalid webhook signature');
+      }
+    }
+
+    let event: any;
+    try {
+      event = JSON.parse(rawBody.toString('utf8'));
+    } catch {
+      throw new BadRequestException('Invalid webhook payload');
+    }
+
+    this.logger.log(`Razorpay webhook received: ${event.event}`);
+
+    const eventName: string = event.event ?? '';
+
+    // payment.captured — from createOrder flow (customer app)
+    if (eventName === 'payment.captured') {
+      const paymentEntity = event.payload?.payment?.entity;
+      const orderId: string = paymentEntity?.order_id ?? '';
+      const paymentId: string = paymentEntity?.id ?? '';
+      if (orderId) {
+        await this.markPaymentComplete(orderId, paymentId, paymentEntity?.amount / 100);
+      }
+    }
+
+    // payment_link.paid — from createPaymentLink flow (rider QR)
+    if (eventName === 'payment_link.paid') {
+      const linkEntity = event.payload?.payment_link?.entity;
+      const paymentEntity = event.payload?.payment?.entity;
+      const linkId: string = linkEntity?.id ?? '';
+      const paymentId: string = paymentEntity?.id ?? '';
+      const bookingId: string = linkEntity?.reference_id ?? '';
+      if (linkId) {
+        await this.markPaymentComplete(linkId, paymentId, linkEntity?.amount / 100, bookingId);
+      }
+    }
+
+    return { received: true };
+  }
+
+  private async markPaymentComplete(
+    razorpayOrderOrLinkId: string,
+    razorpayPaymentId: string,
+    amount?: number,
+    bookingId?: string,
+  ) {
+    let payment = await this.paymentRepository.findOne({
+      where: { razorpay_order_id: razorpayOrderOrLinkId },
+    });
+
+    if (payment) {
+      if (payment.payment_status === PaymentStatus.COMPLETED) return; // idempotent
+      payment.payment_status = PaymentStatus.COMPLETED;
+      payment.razorpay_payment_id = razorpayPaymentId;
+      payment.transaction_id = razorpayPaymentId;
+      if (amount && !payment.amount) payment.amount = amount;
+      await this.paymentRepository.save(payment);
+      this.logger.log(`Payment marked complete via webhook: ${razorpayPaymentId}`);
+
+      if (payment.booking_id) {
+        const booking = await this.bookingRepository.findOne({ where: { id: payment.booking_id } });
+        if (booking?.driver_id) {
+          this.notificationService.notifyPaymentReceived(
+            booking.driver_id,
+            Number(payment.amount),
+            payment.booking_id,
+          ).catch(() => {});
+        }
+      }
+    } else if (bookingId) {
+      // Payment link paid but no existing record — create one
+      payment = this.paymentRepository.create({
+        booking_id: bookingId,
+        amount: amount ?? 0,
+        payment_method: PaymentMethod.UPI,
+        payment_status: PaymentStatus.COMPLETED,
+        razorpay_order_id: razorpayOrderOrLinkId,
+        razorpay_payment_id: razorpayPaymentId,
+        transaction_id: razorpayPaymentId,
+      });
+      await this.paymentRepository.save(payment);
+      this.logger.log(`Payment record created via webhook for booking: ${bookingId}`);
+    }
   }
 
   /**

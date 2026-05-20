@@ -7,13 +7,18 @@ import {
   Query,
   ParseIntPipe,
   DefaultValuePipe,
+  Headers,
+  RawBodyRequest,
+  Req,
 } from '@nestjs/common';
+import { Request } from 'express';
 import { ApiTags, ApiOperation, ApiResponse, ApiQuery, ApiBearerAuth } from '@nestjs/swagger';
 import { PaymentService } from './payment.service';
-import { CreateOrderDto, VerifyPaymentDto, CashPaymentDto } from './dto/payment.dto';
+import { CreateOrderDto, VerifyPaymentDto, CashPaymentDto, CreatePaymentLinkDto } from './dto/payment.dto';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { GetUser } from '../../common/decorators/get-user.decorator';
 import { User } from '../auth/entities/user.entity';
+import { Public } from '../../common/decorators/public.decorator';
 
 @ApiTags('Payment')
 @Controller('payment')
@@ -21,8 +26,28 @@ import { User } from '../auth/entities/user.entity';
 export class PaymentController {
   constructor(private readonly paymentService: PaymentService) {}
 
+  @Post('webhook')
+  @Public()
+  @ApiOperation({ summary: 'Razorpay webhook — auto-confirms payment' })
+  @ApiResponse({ status: 200, description: 'Webhook processed' })
+  async handleWebhook(
+    @Req() req: RawBodyRequest<Request>,
+    @Headers('x-razorpay-signature') signature: string,
+  ) {
+    const rawBody = req.rawBody ?? Buffer.from(JSON.stringify(req.body));
+    return this.paymentService.handleWebhook(rawBody, signature ?? '');
+  }
+
+  @Post('create-payment-link')
+  @Roles('customer', 'driver')
+  @ApiOperation({ summary: 'Create Razorpay Payment Link for QR-based collection' })
+  @ApiResponse({ status: 201, description: 'Payment link created' })
+  async createPaymentLink(@GetUser() user: User, @Body() dto: CreatePaymentLinkDto) {
+    return this.paymentService.createPaymentLink(user.id, dto);
+  }
+
   @Post('create-order')
-  @Roles('customer')
+  @Roles('customer', 'driver')
   @ApiOperation({ summary: 'Create Razorpay payment order' })
   @ApiResponse({ status: 201, description: 'Order created successfully' })
   async createOrder(@GetUser() user: User, @Body() createOrderDto: CreateOrderDto) {

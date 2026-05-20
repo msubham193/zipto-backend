@@ -53,3 +53,13 @@ export class CashPaymentDto {
   @IsNumber()
   amount: number;
 }
+
+export class CreatePaymentLinkDto {
+  @ApiProperty({ example: 'uuid-of-booking' })
+  @IsUUID()
+  booking_id: string;
+
+  @ApiProperty({ example: 250.0 })
+  @IsNumber()
+  amount: number;
+}

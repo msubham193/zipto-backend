@@ -7,6 +7,7 @@ export default registerAs('externalServices', () => ({
   razorpay: {
     keyId: process.env.RAZORPAY_KEY_ID || '',
     keySecret: process.env.RAZORPAY_KEY_SECRET || '',
+    webhookSecret: process.env.RAZORPAY_WEBHOOK_SECRET || '',
   },
   twoFactor: {
     apiKey       : process.env.TWO_FACTOR_API_KEY || '',

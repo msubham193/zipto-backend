@@ -10,7 +10,7 @@ import { TransformInterceptor } from './common/interceptors/transform.intercepto
 import { RolesGuard } from './common/guards/roles.guard';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create(AppModule, { rawBody: true });
 
   // Get configuration
   const configService = app.get(ConfigService);
