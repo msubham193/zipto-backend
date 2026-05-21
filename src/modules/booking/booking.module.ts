@@ -16,6 +16,7 @@ import { SettingsModule } from '../settings/settings.module';
 import { DriverFraudModule } from '../driver-fraud/driver-fraud.module';
 import { NotificationModule } from '../notification/notification.module';
 import { ZiptoShieldModule } from '../zipto-shield/zipto-shield.module';
+import { DriverModule } from '../driver/driver.module';
 
 @Module({
   imports: [
@@ -30,6 +31,7 @@ import { ZiptoShieldModule } from '../zipto-shield/zipto-shield.module';
     DriverFraudModule,
     NotificationModule,
     ZiptoShieldModule,
+    DriverModule,
   ],
   controllers: [BookingController],
   providers: [BookingService, BookingGateway, BookingProcessor],

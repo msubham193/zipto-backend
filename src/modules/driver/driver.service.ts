@@ -768,9 +768,12 @@ export class DriverService {
       select: ['id', 'wallet_balance'],
     });
 
+    const minWithdrawal = profile ? await this.getMinWithdrawal(profile.id) : 1000;
+
     return {
       period,
       wallet_balance: Number(profile?.wallet_balance || 0),
+      min_withdrawal_amount: minWithdrawal,
       total_earnings: parseFloat(totalEarnings.toFixed(2)),
       trip_count: inPeriod.length,
       breakdown: {
@@ -783,21 +786,24 @@ export class DriverService {
     };
   }
 
+  /** Returns the minimum withdrawal amount for a driver based on their vehicle type. */
+  private async getMinWithdrawal(driverProfileId: string): Promise<number> {
+    const vehicle = await this.vehicleRepository.findOne({
+      where: { driver_id: driverProfileId },
+    });
+    const type = (vehicle?.vehicle_type ?? '').toLowerCase();
+    return type === VehicleType.BIKE || type === VehicleType.SCOOTY ? 500 : 1000;
+  }
+
   /**
    * Request a withdrawal from wallet balance.
-   * Deducts from wallet_balance and records the request.
+   * Minimum: ₹500 for two-wheelers (bike/scooty), ₹1000 for all other vehicles.
    */
   async requestWithdrawal(
     userId: string,
     amount: number,
     bankAccountId?: string,
   ) {
-    const MIN_WITHDRAWAL = 100;
-
-    if (!amount || amount < MIN_WITHDRAWAL) {
-      throw new BadRequestException(`Minimum withdrawal amount is ₹${MIN_WITHDRAWAL}`);
-    }
-
     const profile = await this.driverProfileRepository.findOne({
       where: { user_id: userId },
       select: ['id', 'wallet_balance', 'wallet_frozen', 'wallet_freeze_reason'],
@@ -807,6 +813,14 @@ export class DriverService {
     if (profile.wallet_frozen) {
       throw new BadRequestException(
         `Your wallet is temporarily frozen pending an account review. Reason: ${profile.wallet_freeze_reason || 'policy violation'}. Please contact support.`,
+      );
+    }
+
+    // Minimum withdrawal depends on vehicle type
+    const minWithdrawal = await this.getMinWithdrawal(profile.id);
+    if (!amount || amount < minWithdrawal) {
+      throw new BadRequestException(
+        `Minimum withdrawal amount for your vehicle type is ₹${minWithdrawal}`,
       );
     }
 

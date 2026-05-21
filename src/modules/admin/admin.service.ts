@@ -1157,18 +1157,35 @@ export class AdminService {
   async approveWithdrawal(withdrawalId: string, remarks?: string) {
     const withdrawal = await this.withdrawalRepository.findOne({
       where: { id: withdrawalId },
+      relations: ['driver_profile', 'driver_profile.user', 'bank_account'],
     });
     if (!withdrawal) throw new NotFoundException('Withdrawal request not found');
 
     withdrawal.status = WithdrawalStatus.COMPLETED;
     if (remarks) withdrawal.remarks = remarks;
-    return this.withdrawalRepository.save(withdrawal);
+    const saved = await this.withdrawalRepository.save(withdrawal);
+
+    // Notify driver: money is on its way
+    const driverUserId = withdrawal.driver_profile?.user_id;
+    if (driverUserId) {
+      const amount = Number(withdrawal.amount);
+      const bankName = withdrawal.bank_account?.bank_name ?? 'your bank account';
+      const last4 = withdrawal.bank_account?.account_number?.slice(-4) ?? '';
+      this.notificationService.sendPushNotification({
+        user_id: driverUserId,
+        title: '💸 Withdrawal Approved!',
+        body: `₹${amount.toLocaleString('en-IN')} is being transferred to ${bankName}${last4 ? ` (••••${last4})` : ''}. Allow 1–2 business days.`,
+        data: { type: 'withdrawal_approved', amount: String(amount), withdrawal_id: withdrawalId },
+      }).catch(() => {});
+    }
+
+    return saved;
   }
 
   async rejectWithdrawal(withdrawalId: string, remarks?: string) {
     const withdrawal = await this.withdrawalRepository.findOne({
       where: { id: withdrawalId },
-      relations: ['driver_profile'],
+      relations: ['driver_profile', 'driver_profile.user'],
     });
     if (!withdrawal) throw new NotFoundException('Withdrawal request not found');
 
@@ -1181,6 +1198,20 @@ export class AdminService {
 
     withdrawal.status = WithdrawalStatus.REJECTED;
     if (remarks) withdrawal.remarks = remarks;
-    return this.withdrawalRepository.save(withdrawal);
+    const saved = await this.withdrawalRepository.save(withdrawal);
+
+    // Notify driver: amount refunded to wallet
+    const driverUserId = withdrawal.driver_profile?.user_id;
+    if (driverUserId) {
+      const amount = Number(withdrawal.amount);
+      this.notificationService.sendPushNotification({
+        user_id: driverUserId,
+        title: 'Withdrawal Rejected',
+        body: `Your ₹${amount.toLocaleString('en-IN')} withdrawal was rejected and has been refunded to your Zipto wallet.${remarks ? ` Reason: ${remarks}` : ''}`,
+        data: { type: 'withdrawal_rejected', amount: String(amount), withdrawal_id: withdrawalId },
+      }).catch(() => {});
+    }
+
+    return saved;
   }
 }

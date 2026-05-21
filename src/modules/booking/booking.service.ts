@@ -40,6 +40,7 @@ import { SystemSettingsService } from '../settings/system-settings.service';
 import { DriverFraudService } from '../driver-fraud/driver-fraud.service';
 import { NotificationService } from '../notification/notification.service';
 import { ZiptoShieldService } from '../zipto-shield/zipto-shield.service';
+import { DriverWalletService } from '../driver/driver-wallet.service';
 
 @Injectable()
 export class BookingService {
@@ -68,6 +69,7 @@ export class BookingService {
     private driverFraudService: DriverFraudService,
     private notificationService: NotificationService,
     private ziptoShieldService: ZiptoShieldService,
+    private driverWalletService: DriverWalletService,
   ) {}
 
   private async ensureDefaultPricingRules() {
@@ -973,6 +975,14 @@ export class BookingService {
    * Accept booking (driver) — reads offer from Redis, creates DB record for the first time.
    */
   async acceptBooking(offerId: string, driverId: string, vehicleId: string) {
+    // Wallet suspension guard: driver must clear dues before accepting rides
+    const walletSuspended = await this.driverWalletService.isWalletSuspended(driverId);
+    if (walletSuspended) {
+      throw new BadRequestException(
+        'Your Zipto wallet balance is too low. Please top up to continue accepting rides.',
+      );
+    }
+
     // Get offer from Redis
     const offerData = await this.cacheManager.get<any>(`offer:${offerId}`);
     if (!offerData) {
@@ -1455,18 +1465,26 @@ export class BookingService {
 
     const savedBooking = await this.bookingRepository.save(booking);
 
-    // Credit driver's wallet balance with their earnings for this trip
-    await this.bookingRepository.manager.query(
-      `UPDATE driver_profiles SET wallet_balance = COALESCE(wallet_balance, 0) + $1 WHERE user_id = $2`,
-      [driverEarnings, driverId],
-    );
-
-    // Auto-record cash payment if driver chose cash at delivery
+    // Handle wallet and payment recording based on payment method
     const paymentMethod = completeTripDto?.payment_method;
     const alreadyPaid = await this.paymentRepository.findOne({
       where: { booking_id: bookingId, payment_status: PaymentStatus.COMPLETED },
     });
+
+    const SHIELD_AMOUNT = 1; // ₹1 per completed booking
+
     if (!alreadyPaid && paymentMethod === 'cash') {
+      // ── CASH TRIP ───────────────────────────────────────────────────────────
+      // Driver physically collected the full fare from the customer.
+      // Zipto's cut (commission + shield) is recovered by debiting the driver's
+      // virtual wallet — same model as Rapido/Ola for cash rides.
+      await this.driverWalletService.deductCashCommission(
+        driverId,
+        skidoCommission,
+        SHIELD_AMOUNT,
+        bookingId,
+      );
+
       const cashPayment = this.paymentRepository.create({
         booking_id: bookingId,
         amount: finalFare,
@@ -1475,6 +1493,15 @@ export class BookingService {
         payment_status: PaymentStatus.COMPLETED,
       });
       await this.paymentRepository.save(cashPayment);
+    } else {
+      // ── ONLINE / QR TRIP ────────────────────────────────────────────────────
+      // Customer already paid Zipto via Razorpay.  Credit the driver's share
+      // into their virtual wallet so they can withdraw it later.
+      await this.driverWalletService.creditTripEarnings(
+        driverId,
+        driverEarnings,
+        bookingId,
+      );
     }
 
     // Zipto Shield: ₹1 contributed per completed booking (fire-and-forget)

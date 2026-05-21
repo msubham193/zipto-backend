@@ -12,6 +12,8 @@ import {
   UseInterceptors,
   UploadedFiles,
   ParseFloatPipe,
+  HttpCode,
+  HttpStatus,
 } from '@nestjs/common';
 import { FileFieldsInterceptor } from '@nestjs/platform-express';
 import {
@@ -24,6 +26,7 @@ import {
   ApiBody,
 } from '@nestjs/swagger';
 import { DriverService } from './driver.service';
+import { DriverWalletService } from './driver-wallet.service';
 import {
   UpdateDriverDto,
   UpdateAvailabilityDto,
@@ -41,7 +44,10 @@ import { VehicleType } from '../vehicle/entities/vehicle.entity';
 @Roles('driver')
 @ApiBearerAuth()
 export class DriverController {
-  constructor(private readonly driverService: DriverService) {}
+  constructor(
+    private readonly driverService: DriverService,
+    private readonly driverWalletService: DriverWalletService,
+  ) {}
 
   @Get('profile')
   @ApiOperation({ summary: 'Get driver profile' })
@@ -411,5 +417,39 @@ export class DriverController {
     },
   ) {
     return this.driverService.onboardDriver(user.id, onboardDriverDto, files);
+  }
+
+  // ─── Wallet ───────────────────────────────────────────────────────────────
+
+  @Get('wallet')
+  @ApiOperation({
+    summary: '[Driver] Get wallet balance + recent transactions',
+    description:
+      'Returns current wallet balance and paginated transaction history. ' +
+      'For cash trips, commission deductions will appear as negative entries. ' +
+      'Top up if balance is low to avoid ride suspension.',
+  })
+  @ApiQuery({ name: 'page', required: false, example: 1 })
+  @ApiQuery({ name: 'limit', required: false, example: 20 })
+  @ApiResponse({ status: 200, description: 'Wallet data' })
+  async getWallet(
+    @GetUser() user: User,
+    @Query('page', new DefaultValuePipe(1), ParseIntPipe) page: number,
+    @Query('limit', new DefaultValuePipe(20), ParseIntPipe) limit: number,
+  ) {
+    const { items, total, balance } =
+      await this.driverWalletService.getTransactions(user.id, page, limit);
+    return {
+      balance,
+      suspension_threshold: -300,
+      low_balance_threshold: 100,
+      is_suspended: balance < -500,
+      transactions: {
+        items,
+        total,
+        page,
+        pages: Math.ceil(total / limit),
+      },
+    };
   }
 }
