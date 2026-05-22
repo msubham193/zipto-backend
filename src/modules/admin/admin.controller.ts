@@ -361,6 +361,26 @@ export class AdminController {
     return { success: true, data: updated };
   }
 
+  // ─── UPI Topup Requests ───────────────────────────────────────────────────
+
+  @Get('topup-requests')
+  @ApiOperation({ summary: 'List driver UPI top-up requests' })
+  async getTopupRequests(@Query('status') status?: string) {
+    return this.adminService.getTopupRequests(status);
+  }
+
+  @Put('topup-requests/:id/approve')
+  @ApiOperation({ summary: 'Approve top-up request and credit driver wallet' })
+  async approveTopupRequest(@Param('id') id: string) {
+    return this.adminService.approveTopupRequest(id);
+  }
+
+  @Put('topup-requests/:id/reject')
+  @ApiOperation({ summary: 'Reject top-up request' })
+  async rejectTopupRequest(@Param('id') id: string, @Body('remarks') remarks?: string) {
+    return this.adminService.rejectTopupRequest(id, remarks);
+  }
+
   // ─── Driver Wallet Manual Credit ─────────────────────────────────────────
 
   @Put('drivers/:id/wallet/credit')

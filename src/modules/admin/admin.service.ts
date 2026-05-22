@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, Between, DataSource } from 'typeorm';
 import { User, UserRole } from '../auth/entities/user.entity';
@@ -1216,6 +1216,71 @@ export class AdminService {
     }
 
     return saved;
+  }
+
+  // ─── UPI Topup Requests ───────────────────────────────────────────────────
+
+  async getTopupRequests(status?: string) {
+    const where: any = status ? { status } : {};
+    const rows = await this.dataSource.query(
+      `SELECT r.*, u.name as driver_name, u.phone as driver_phone
+       FROM driver_topup_requests r
+       JOIN users u ON u.id = r.driver_user_id
+       ${status ? `WHERE r.status = '${status}'` : ''}
+       ORDER BY r.created_at DESC`,
+    );
+    return rows;
+  }
+
+  async approveTopupRequest(requestId: string) {
+    const rows = await this.dataSource.query(
+      `SELECT * FROM driver_topup_requests WHERE id = $1`, [requestId],
+    );
+    if (!rows.length) throw new NotFoundException('Topup request not found');
+    const req = rows[0];
+    if (req.status !== 'pending') throw new BadRequestException('Request is already ' + req.status);
+
+    await this.dataSource.query(
+      `UPDATE driver_topup_requests SET status = 'approved', updated_at = NOW() WHERE id = $1`, [requestId],
+    );
+
+    const newBalance = await this.driverWalletService.adminCredit(
+      req.driver_user_id,
+      Number(req.amount),
+      `UPI top-up approved — UTR ${req.utr_number}`,
+    );
+
+    this.notificationService.sendPushNotification({
+      user_id: req.driver_user_id,
+      title: 'Wallet Topped Up!',
+      body: `₹${Number(req.amount).toLocaleString('en-IN')} added to your Zipto wallet. New balance: ₹${newBalance.toLocaleString('en-IN')}.`,
+      data: { type: 'topup_approved', amount: String(req.amount) },
+    }).catch(() => {});
+
+    return { message: 'Approved and wallet credited', new_balance: newBalance };
+  }
+
+  async rejectTopupRequest(requestId: string, remarks?: string) {
+    const rows = await this.dataSource.query(
+      `SELECT * FROM driver_topup_requests WHERE id = $1`, [requestId],
+    );
+    if (!rows.length) throw new NotFoundException('Topup request not found');
+    const req = rows[0];
+    if (req.status !== 'pending') throw new BadRequestException('Request is already ' + req.status);
+
+    await this.dataSource.query(
+      `UPDATE driver_topup_requests SET status = 'rejected', remarks = $1, updated_at = NOW() WHERE id = $2`,
+      [remarks ?? null, requestId],
+    );
+
+    this.notificationService.sendPushNotification({
+      user_id: req.driver_user_id,
+      title: 'Top-up Rejected',
+      body: `Your ₹${Number(req.amount).toLocaleString('en-IN')} top-up request was rejected.${remarks ? ` Reason: ${remarks}` : ''} Contact support if you believe this is an error.`,
+      data: { type: 'topup_rejected' },
+    }).catch(() => {});
+
+    return { message: 'Topup request rejected' };
   }
 
   // ─── Driver Wallet ────────────────────────────────────────────────────────

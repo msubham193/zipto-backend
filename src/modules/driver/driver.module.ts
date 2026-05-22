@@ -9,6 +9,7 @@ import { DriverProfile } from './entities/driver-profile.entity';
 import { BankAccount } from './entities/bank-account.entity';
 import { WithdrawalRequest } from './entities/withdrawal-request.entity';
 import { DriverWalletTransaction } from './entities/driver-wallet-transaction.entity';
+import { DriverTopupRequest } from './entities/driver-topup-request.entity';
 import { Vehicle } from '../vehicle/entities/vehicle.entity';
 import { User } from '../auth/entities/user.entity';
 import { AuthModule } from '../auth/auth.module';
@@ -16,6 +17,7 @@ import { Booking } from '../booking/entities/booking.entity';
 import { Payment } from '../payment/entities/payment.entity';
 import { NotificationModule } from '../notification/notification.module';
 import { ServicesModule } from '../../services/services.module';
+import { SettingsModule } from '../settings/settings.module';
 
 @Module({
   imports: [
@@ -28,10 +30,12 @@ import { ServicesModule } from '../../services/services.module';
       Vehicle,
       Booking,
       Payment,
+      DriverTopupRequest,
     ]),
     AuthModule,
     NotificationModule,
     ServicesModule,
+    SettingsModule,
     MulterModule.register({
       storage: multer.memoryStorage(),
     }),

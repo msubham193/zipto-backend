@@ -15,6 +15,8 @@ const DEFAULTS: Array<{ key: string; value: string; description: string }> = [
   { key: 'broadcast_radius_km',    value: '10', description: 'Radius in km for broadcast after sequential search is exhausted' },
   { key: 'offer_timeout_seconds',  value: '15', description: 'Seconds each driver has to accept or reject an offer' },
   { key: 'max_search_attempts',    value: '10', description: 'Max sequential attempts before falling back to broadcast' },
+  { key: 'zipto_upi_id',           value: 'zipto@upi', description: 'Zipto UPI ID shown to drivers for wallet top-up payments' },
+  { key: 'zipto_upi_name',         value: 'Zipto',     description: 'Display name shown in UPI apps during top-up' },
 ];
 
 const CACHE_TTL_MS = 30_000; // re-read DB at most every 30 s
@@ -68,6 +70,17 @@ export class SystemSettingsService implements OnModuleInit {
       this.cache = { search_radius_km: 5, broadcast_radius_km: 10, offer_timeout_seconds: 15, max_search_attempts: 10 };
     }
     return this.cache!;
+  }
+
+  /** Returns UPI ID and display name for driver wallet top-up. */
+  async getUpiInfo(): Promise<{ upi_id: string; name: string }> {
+    const rows = await this.repo.find({ where: [{ key: 'zipto_upi_id' }, { key: 'zipto_upi_name' }] });
+    const map: Record<string, string> = {};
+    for (const r of rows) { map[r.key] = r.value; }
+    return {
+      upi_id: map.zipto_upi_id ?? 'zipto@upi',
+      name:   map.zipto_upi_name ?? 'Zipto',
+    };
   }
 
   /** Get all settings as raw rows (for admin list view). */

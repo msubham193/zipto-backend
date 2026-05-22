@@ -8,6 +8,7 @@ import {
 } from './entities/driver-profile.entity';
 import { BankAccount } from './entities/bank-account.entity';
 import { WithdrawalRequest, WithdrawalStatus } from './entities/withdrawal-request.entity';
+import { DriverTopupRequest, TopupRequestStatus } from './entities/driver-topup-request.entity';
 import { Vehicle, VehicleType } from '../vehicle/entities/vehicle.entity';
 import { User } from '../auth/entities/user.entity';
 import { Booking, BookingStatus } from '../booking/entities/booking.entity';
@@ -45,6 +46,8 @@ export class DriverService {
     private withdrawalRepository: Repository<WithdrawalRequest>,
     @InjectRepository(Payment)
     private paymentRepository: Repository<Payment>,
+    @InjectRepository(DriverTopupRequest)
+    private topupRequestRepository: Repository<DriverTopupRequest>,
     private readonly s3Service: S3Service,
     private readonly notificationService: NotificationService,
     private readonly cacheManager: RedisService,
@@ -942,5 +945,35 @@ export class DriverService {
             ? 'Your profile has been rejected. Please contact support.'
             : 'Your profile is pending admin verification.',
     };
+  }
+
+  // ─── UPI Top-up Requests ──────────────────────────────────────────────────
+
+  async submitTopupRequest(userId: string, amount: number, utrNumber: string) {
+    const profile = await this.driverProfileRepository.findOne({ where: { user_id: userId } });
+    if (!profile) throw new NotFoundException('Driver profile not found');
+
+    const duplicate = await this.topupRequestRepository.findOne({ where: { utr_number: utrNumber } });
+    if (duplicate) throw new BadRequestException('This UTR number has already been submitted');
+
+    const request = this.topupRequestRepository.create({
+      driver_user_id: userId,
+      driver_profile_id: profile.id,
+      amount,
+      utr_number: utrNumber,
+      status: TopupRequestStatus.PENDING,
+    });
+    await this.topupRequestRepository.save(request);
+    return {
+      message: 'Top-up request submitted. Your wallet will be credited once admin verifies the payment.',
+      request_id: request.id,
+    };
+  }
+
+  async getDriverTopupRequests(userId: string) {
+    return this.topupRequestRepository.find({
+      where: { driver_user_id: userId },
+      order: { created_at: 'DESC' },
+    });
   }
 }

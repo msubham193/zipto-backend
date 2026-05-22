@@ -28,7 +28,7 @@ import {
 } from '@nestjs/swagger';
 import { DriverService } from './driver.service';
 import { DriverWalletService } from './driver-wallet.service';
-import { RazorpayService } from '../../services/razorpay.service';
+import { SystemSettingsService } from '../settings/system-settings.service';
 import {
   UpdateDriverDto,
   UpdateAvailabilityDto,
@@ -49,7 +49,7 @@ export class DriverController {
   constructor(
     private readonly driverService: DriverService,
     private readonly driverWalletService: DriverWalletService,
-    private readonly razorpayService: RazorpayService,
+    private readonly systemSettings: SystemSettingsService,
   ) {}
 
   @Get('profile')
@@ -424,50 +424,31 @@ export class DriverController {
 
   // ─── Wallet ───────────────────────────────────────────────────────────────
 
-  // ─── Wallet Top-up ────────────────────────────────────────────────────────
+  // ─── Wallet Top-up (UPI) ──────────────────────────────────────────────────
 
-  @Post('wallet/topup/order')
-  @ApiOperation({ summary: 'Create Razorpay order for wallet top-up' })
-  @ApiResponse({ status: 201, description: 'Order created — pass order_id to Razorpay SDK' })
-  async createTopupOrder(
-    @GetUser() user: User,
-    @Body('amount') amount: number,
-  ) {
-    if (!amount || amount < 10) {
-      throw new BadRequestException('Minimum top-up amount is ₹10');
-    }
-    const order = await this.razorpayService.createOrder(
-      amount,
-      `tp_${user.id.slice(0, 8)}_${Date.now() % 1000000}`,  // max ~24 chars, well under Razorpay's 40-char limit
-    );
-    return {
-      order_id: order.id,
-      amount: order.amount,       // in paise
-      amount_inr: amount,
-      currency: 'INR',
-      key_id: this.razorpayService.getKeyId(),
-    };
+  @Get('wallet/topup/upi-info')
+  @ApiOperation({ summary: 'Get Zipto UPI ID for wallet top-up' })
+  async getTopupUpiInfo() {
+    return this.systemSettings.getUpiInfo();
   }
 
-  @Post('wallet/topup/verify')
-  @ApiOperation({ summary: 'Verify Razorpay payment and credit wallet' })
-  @ApiResponse({ status: 200, description: 'Payment verified, wallet credited' })
-  async verifyTopup(
+  @Post('wallet/topup/request')
+  @ApiOperation({ summary: 'Submit UPI top-up request with UTR number' })
+  @ApiResponse({ status: 201, description: 'Request submitted, pending admin approval' })
+  async submitTopupRequest(
     @GetUser() user: User,
-    @Body('razorpay_order_id') orderId: string,
-    @Body('razorpay_payment_id') paymentId: string,
-    @Body('razorpay_signature') signature: string,
     @Body('amount') amount: number,
+    @Body('utr_number') utrNumber: string,
   ) {
-    const valid = this.razorpayService.verifyPaymentSignature(orderId, paymentId, signature);
-    if (!valid) throw new BadRequestException('Payment verification failed');
+    if (!amount || amount < 10) throw new BadRequestException('Minimum top-up is ₹10');
+    if (!utrNumber?.trim()) throw new BadRequestException('UTR number is required');
+    return this.driverService.submitTopupRequest(user.id, amount, utrNumber.trim().toUpperCase());
+  }
 
-    const newBalance = await this.driverWalletService.topUp(user.id, amount, paymentId);
-    return {
-      success: true,
-      message: `₹${amount} added to your wallet`,
-      new_balance: newBalance,
-    };
+  @Get('wallet/topup/requests')
+  @ApiOperation({ summary: 'Get driver own topup request history' })
+  async getMyTopupRequests(@GetUser() user: User) {
+    return this.driverService.getDriverTopupRequests(user.id);
   }
 
   @Get('wallet')
