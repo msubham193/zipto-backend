@@ -9,10 +9,10 @@ import {
 import { BankAccount } from './entities/bank-account.entity';
 import { WithdrawalRequest, WithdrawalStatus } from './entities/withdrawal-request.entity';
 import { DriverTopupRequest, TopupRequestStatus } from './entities/driver-topup-request.entity';
+import { DriverWalletTransaction } from './entities/driver-wallet-transaction.entity';
 import { Vehicle, VehicleType } from '../vehicle/entities/vehicle.entity';
 import { User } from '../auth/entities/user.entity';
 import { Booking, BookingStatus } from '../booking/entities/booking.entity';
-import { Payment, PaymentMethod, PaymentStatus } from '../payment/entities/payment.entity';
 import {
   UpdateDriverDto,
   UpdateAvailabilityDto,
@@ -44,10 +44,10 @@ export class DriverService {
     private bankAccountRepository: Repository<BankAccount>,
     @InjectRepository(WithdrawalRequest)
     private withdrawalRepository: Repository<WithdrawalRequest>,
-    @InjectRepository(Payment)
-    private paymentRepository: Repository<Payment>,
     @InjectRepository(DriverTopupRequest)
     private topupRequestRepository: Repository<DriverTopupRequest>,
+    @InjectRepository(DriverWalletTransaction)
+    private walletTxnRepository: Repository<DriverWalletTransaction>,
     private readonly s3Service: S3Service,
     private readonly notificationService: NotificationService,
     private readonly cacheManager: RedisService,
@@ -747,17 +747,22 @@ export class DriverService {
 
     const bookingIds = inPeriod.map(b => b.id);
 
-    // Fetch completed payments for these bookings to determine payment method
-    const payments = bookingIds.length
-      ? await this.paymentRepository.find({
-          where: { payment_status: PaymentStatus.COMPLETED },
-          select: ['booking_id', 'payment_method', 'driver_earnings'],
-        }).then(rows => rows.filter(p => bookingIds.includes(p.booking_id)))
-      : [];
-
-    const paymentByBooking = new Map<string, Payment>();
-    for (const p of payments) {
-      paymentByBooking.set(p.booking_id, p);
+    // Use wallet transactions as source of truth for cash vs online classification.
+    // trip_earnings_credit = online (wallet was credited with driver earnings)
+    // cash_commission_deduction = cash (wallet was debited for commission)
+    // Any booking with no wallet txn defaults to cash (driver kept full fare, no record created yet).
+    const cashBookingIds = new Set<string>();
+    const onlineBookingIds = new Set<string>();
+    if (bookingIds.length) {
+      const txns = await this.walletTxnRepository.find({
+        where: bookingIds.map(id => ({ booking_id: id })),
+        select: ['booking_id', 'type'],
+      });
+      for (const t of txns) {
+        if (!t.booking_id) continue;
+        if (t.type === 'trip_earnings_credit') onlineBookingIds.add(t.booking_id);
+        if (t.type === 'cash_commission_deduction') cashBookingIds.add(t.booking_id);
+      }
     }
 
     let totalEarnings = 0;
@@ -775,7 +780,7 @@ export class DriverService {
       const commission = Number(b.skido_commission || 0);
       const gross = Number(b.final_fare || 0);
       const fb = b.fare_breakdown as any;
-      const method = paymentByBooking.get(b.id)?.payment_method ?? PaymentMethod.CASH;
+      const isOnline = onlineBookingIds.has(b.id);
 
       totalEarnings += driverEarnings;
       totalGrossFare += gross;
@@ -783,12 +788,12 @@ export class DriverService {
       totalPlatformFee += Number(fb?.platform_fee ?? 2);
       totalShieldFee += Number(fb?.shield_fee ?? 1);
 
-      if (method === PaymentMethod.CASH) {
-        cashEarnings += driverEarnings;
-        cashTripCount++;
-      } else {
+      if (isOnline) {
         onlineEarnings += driverEarnings;
         onlineTripCount++;
+      } else {
+        cashEarnings += driverEarnings;
+        cashTripCount++;
       }
     }
 
