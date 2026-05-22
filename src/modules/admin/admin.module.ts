@@ -11,6 +11,7 @@ import { WithdrawalRequest } from '../driver/entities/withdrawal-request.entity'
 import { Vehicle } from '../vehicle/entities/vehicle.entity';
 import { AuthModule } from '../auth/auth.module';
 import { BookingModule } from '../booking/booking.module';
+import { DriverModule } from '../driver/driver.module';
 import { NotificationModule } from '../notification/notification.module';
 import { FraudModule } from '../fraud/fraud.module';
 import { SettingsModule } from '../settings/settings.module';
@@ -20,6 +21,7 @@ import { SettingsModule } from '../settings/settings.module';
     TypeOrmModule.forFeature([User, Booking, PricingRule, Payment, DriverProfile, Vehicle, WithdrawalRequest]),
     AuthModule,
     BookingModule,
+    DriverModule,
     NotificationModule,
     FraudModule,
     SettingsModule,

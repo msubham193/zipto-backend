@@ -15,6 +15,7 @@ import { AuthModule } from '../auth/auth.module';
 import { Booking } from '../booking/entities/booking.entity';
 import { Payment } from '../payment/entities/payment.entity';
 import { NotificationModule } from '../notification/notification.module';
+import { ServicesModule } from '../../services/services.module';
 
 @Module({
   imports: [
@@ -30,6 +31,7 @@ import { NotificationModule } from '../notification/notification.module';
     ]),
     AuthModule,
     NotificationModule,
+    ServicesModule,
     MulterModule.register({
       storage: multer.memoryStorage(),
     }),

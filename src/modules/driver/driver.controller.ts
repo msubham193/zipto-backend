@@ -14,6 +14,7 @@ import {
   ParseFloatPipe,
   HttpCode,
   HttpStatus,
+  BadRequestException,
 } from '@nestjs/common';
 import { FileFieldsInterceptor } from '@nestjs/platform-express';
 import {
@@ -27,6 +28,7 @@ import {
 } from '@nestjs/swagger';
 import { DriverService } from './driver.service';
 import { DriverWalletService } from './driver-wallet.service';
+import { RazorpayService } from '../../services/razorpay.service';
 import {
   UpdateDriverDto,
   UpdateAvailabilityDto,
@@ -47,6 +49,7 @@ export class DriverController {
   constructor(
     private readonly driverService: DriverService,
     private readonly driverWalletService: DriverWalletService,
+    private readonly razorpayService: RazorpayService,
   ) {}
 
   @Get('profile')
@@ -420,6 +423,52 @@ export class DriverController {
   }
 
   // ─── Wallet ───────────────────────────────────────────────────────────────
+
+  // ─── Wallet Top-up ────────────────────────────────────────────────────────
+
+  @Post('wallet/topup/order')
+  @ApiOperation({ summary: 'Create Razorpay order for wallet top-up' })
+  @ApiResponse({ status: 201, description: 'Order created — pass order_id to Razorpay SDK' })
+  async createTopupOrder(
+    @GetUser() user: User,
+    @Body('amount') amount: number,
+  ) {
+    if (!amount || amount < 10) {
+      throw new BadRequestException('Minimum top-up amount is ₹10');
+    }
+    const order = await this.razorpayService.createOrder(
+      amount,
+      `topup_${user.id}_${Date.now()}`,
+    );
+    return {
+      order_id: order.id,
+      amount: order.amount,       // in paise
+      amount_inr: amount,
+      currency: 'INR',
+      key_id: process.env.RAZORPAY_KEY_ID ?? '',
+    };
+  }
+
+  @Post('wallet/topup/verify')
+  @ApiOperation({ summary: 'Verify Razorpay payment and credit wallet' })
+  @ApiResponse({ status: 200, description: 'Payment verified, wallet credited' })
+  async verifyTopup(
+    @GetUser() user: User,
+    @Body('razorpay_order_id') orderId: string,
+    @Body('razorpay_payment_id') paymentId: string,
+    @Body('razorpay_signature') signature: string,
+    @Body('amount') amount: number,
+  ) {
+    const valid = this.razorpayService.verifyPaymentSignature(orderId, paymentId, signature);
+    if (!valid) throw new BadRequestException('Payment verification failed');
+
+    const newBalance = await this.driverWalletService.topUp(user.id, amount, paymentId);
+    return {
+      success: true,
+      message: `₹${amount} added to your wallet`,
+      new_balance: newBalance,
+    };
+  }
 
   @Get('wallet')
   @ApiOperation({

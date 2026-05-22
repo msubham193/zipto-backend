@@ -361,6 +361,20 @@ export class AdminController {
     return { success: true, data: updated };
   }
 
+  // ─── Driver Wallet Manual Credit ─────────────────────────────────────────
+
+  @Put('drivers/:id/wallet/credit')
+  @ApiOperation({ summary: 'Manually credit a driver wallet (e.g. after cash top-up receipt)' })
+  @ApiResponse({ status: 200, description: 'Wallet credited' })
+  async creditDriverWallet(
+    @Param('id') driverId: string,
+    @Body('amount') amount: number,
+    @Body('note') note?: string,
+  ) {
+    if (!amount || amount <= 0) throw new BadRequestException('amount must be > 0');
+    return this.adminService.adminCreditDriverWallet(driverId, amount, note ?? 'Admin credit');
+  }
+
   // ─── Data Reset (dev/test only) ───────────────────────────────────────────
 
   @Delete('data/reset')

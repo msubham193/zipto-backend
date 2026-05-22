@@ -15,6 +15,7 @@ import {
   getDefaultPricingRules,
   LEGACY_VEHICLE_TYPES,
 } from '../booking/constants/default-pricing-rules';
+import { DriverWalletService } from '../driver/driver-wallet.service';
 
 @Injectable()
 export class AdminService {
@@ -35,6 +36,7 @@ export class AdminService {
     private withdrawalRepository: Repository<WithdrawalRequest>,
     private notificationService: NotificationService,
     private dataSource: DataSource,
+    private driverWalletService: DriverWalletService,
   ) {}
 
   /**
@@ -1214,6 +1216,32 @@ export class AdminService {
     }
 
     return saved;
+  }
+
+  // ─── Driver Wallet ────────────────────────────────────────────────────────
+
+  async adminCreditDriverWallet(driverProfileId: string, amount: number, note: string) {
+    const profile = await this.driverProfileRepository.findOne({
+      where: { id: driverProfileId },
+      relations: ['user'],
+    });
+    if (!profile) throw new NotFoundException('Driver not found');
+
+    const newBalance = await this.driverWalletService.adminCredit(
+      profile.user_id,
+      amount,
+      note,
+    );
+
+    // Push notification
+    this.notificationService.sendPushNotification({
+      user_id: profile.user_id,
+      title: 'Wallet Credited',
+      body: `₹${amount.toLocaleString('en-IN')} added to your Zipto wallet. New balance: ₹${newBalance.toLocaleString('en-IN')}.`,
+      data: { type: 'wallet_credit', amount: String(amount) },
+    }).catch(() => {});
+
+    return { message: 'Wallet credited', new_balance: newBalance };
   }
 
   // ─── Dev / Test Data Reset ────────────────────────────────────────────────
