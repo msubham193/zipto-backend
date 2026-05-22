@@ -195,6 +195,8 @@ export class Booking {
     subtotal: number;
     minimum_fare_applied: boolean;
     skido_commission: number;
+    platform_fee: number;
+    shield_fee: number;
     driver_earnings: number;
   };
 

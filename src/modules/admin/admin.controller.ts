@@ -360,4 +360,16 @@ export class AdminController {
     const updated = await this.systemSettings.update(key, String(value));
     return { success: true, data: updated };
   }
+
+  // ─── Data Reset (dev/test only) ───────────────────────────────────────────
+
+  @Delete('data/reset')
+  @ApiOperation({ summary: 'Delete all trips, earnings, wallet data and reset driver counters' })
+  @ApiResponse({ status: 200, description: 'All data cleared' })
+  async resetAllData(@Body('confirm') confirm: string) {
+    if (confirm !== 'RESET_ALL_DATA') {
+      throw new BadRequestException('Pass { "confirm": "RESET_ALL_DATA" } in body to proceed');
+    }
+    return this.adminService.resetAllData();
+  }
 }

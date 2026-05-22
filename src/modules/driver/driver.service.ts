@@ -741,10 +741,9 @@ export class DriverService {
 
     let totalEarnings = 0;
     let totalGrossFare = 0;
+    let totalAppCommission = 0;
     let totalPlatformFee = 0;
-    let totalBaseFare = 0;
-    let totalDistanceCharge = 0;
-    let totalOtherCharges = 0;
+    let totalShieldFee = 0;
 
     for (const b of inPeriod) {
       const driverEarnings = Number(b.driver_earnings || 0);
@@ -754,13 +753,10 @@ export class DriverService {
 
       totalEarnings += driverEarnings;
       totalGrossFare += gross;
-      totalPlatformFee += commission;
-      totalBaseFare += Number(fb?.base_fare || 0);
-      totalDistanceCharge += Number(fb?.distance_charge || 0);
+      totalAppCommission += commission;
+      totalPlatformFee += Number(fb?.platform_fee ?? 2);
+      totalShieldFee += Number(fb?.shield_fee ?? 1);
     }
-
-    // "Other charges" = anything beyond base + distance that the driver still got
-    totalOtherCharges = Math.max(0, totalEarnings - totalBaseFare - totalDistanceCharge);
 
     // Current wallet balance (accumulated, not period-specific)
     const profile = await this.driverProfileRepository.findOne({
@@ -777,11 +773,11 @@ export class DriverService {
       total_earnings: parseFloat(totalEarnings.toFixed(2)),
       trip_count: inPeriod.length,
       breakdown: {
-        base_fare: parseFloat(totalBaseFare.toFixed(2)),
-        distance_charge: parseFloat(totalDistanceCharge.toFixed(2)),
-        other_charges: parseFloat(totalOtherCharges.toFixed(2)),
-        platform_fee: parseFloat(totalPlatformFee.toFixed(2)),
         gross_fare: parseFloat(totalGrossFare.toFixed(2)),
+        app_commission: parseFloat(totalAppCommission.toFixed(2)),
+        platform_fee: parseFloat(totalPlatformFee.toFixed(2)),
+        shield_fee: parseFloat(totalShieldFee.toFixed(2)),
+        net_earnings: parseFloat(totalEarnings.toFixed(2)),
       },
     };
   }

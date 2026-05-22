@@ -1441,14 +1441,18 @@ export class BookingService {
 
     // Calculate platform commission and driver earnings
     const commissionPercent = pricingRule ? Number(pricingRule.commission_percent) : 25;
+    const PLATFORM_FEE = 2;  // ₹2 flat per order
+    const SHIELD_FEE = 1;    // ₹1 per order to Zipto Shield fund
     const skidoCommission = this.round(finalFare * (commissionPercent / 100));
-    const driverEarnings = this.round(finalFare - skidoCommission);
+    const driverEarnings = this.round(finalFare - skidoCommission - PLATFORM_FEE - SHIELD_FEE);
 
     // Update fare breakdown
     const fareBreakdown = booking.fare_breakdown || ({} as any);
     fareBreakdown.waiting_charge = waitingCharge;
     fareBreakdown.toll_amount = tollAmount;
     fareBreakdown.skido_commission = skidoCommission;
+    fareBreakdown.platform_fee = PLATFORM_FEE;
+    fareBreakdown.shield_fee = SHIELD_FEE;
     fareBreakdown.driver_earnings = driverEarnings;
 
     // Update booking
@@ -1471,17 +1475,15 @@ export class BookingService {
       where: { booking_id: bookingId, payment_status: PaymentStatus.COMPLETED },
     });
 
-    const SHIELD_AMOUNT = 1; // ₹1 per completed booking
-
     if (!alreadyPaid && paymentMethod === 'cash') {
       // ── CASH TRIP ───────────────────────────────────────────────────────────
       // Driver physically collected the full fare from the customer.
-      // Zipto's cut (commission + shield) is recovered by debiting the driver's
-      // virtual wallet — same model as Rapido/Ola for cash rides.
+      // Zipto's cut (commission + platform fee + shield) is recovered by debiting
+      // the driver's virtual wallet — same model as Rapido/Ola for cash rides.
       await this.driverWalletService.deductCashCommission(
         driverId,
         skidoCommission,
-        SHIELD_AMOUNT,
+        PLATFORM_FEE + SHIELD_FEE,
         bookingId,
       );
 
@@ -1526,6 +1528,8 @@ export class BookingService {
         toll_amount: tollAmount,
         final_fare: finalFare,
         skido_commission: skidoCommission,
+        platform_fee: PLATFORM_FEE,
+        shield_fee: SHIELD_FEE,
         driver_earnings: driverEarnings,
       },
     };

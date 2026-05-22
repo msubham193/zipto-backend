@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, Between } from 'typeorm';
+import { Repository, Between, DataSource } from 'typeorm';
 import { User, UserRole } from '../auth/entities/user.entity';
 import { Booking, BookingStatus } from '../booking/entities/booking.entity';
 import { Payment, PaymentStatus } from '../payment/entities/payment.entity';
@@ -34,6 +34,7 @@ export class AdminService {
     @InjectRepository(WithdrawalRequest)
     private withdrawalRepository: Repository<WithdrawalRequest>,
     private notificationService: NotificationService,
+    private dataSource: DataSource,
   ) {}
 
   /**
@@ -1213,5 +1214,45 @@ export class AdminService {
     }
 
     return saved;
+  }
+
+  // ─── Dev / Test Data Reset ────────────────────────────────────────────────
+
+  async resetAllData() {
+    const q = this.dataSource.query.bind(this.dataSource);
+
+    // Delete in FK-safe order (child tables first)
+    const tables = [
+      'ratings',
+      'driver_wallet_transactions',
+      'zipto_shield_transactions',
+      'zipto_shield_ledger',
+      'driver_fraud_incidents',
+      'customer_wallet_transactions',
+      'coin_transactions',
+      'withdrawal_requests',
+      'payments',
+      'bookings',
+    ];
+
+    const counts: Record<string, number> = {};
+    for (const table of tables) {
+      try {
+        const result = await q(`DELETE FROM "${table}"`);
+        counts[table] = result[1] ?? 0;
+      } catch {
+        counts[table] = -1; // table may not exist yet — skip
+      }
+    }
+
+    // Reset driver profile counters
+    await q(
+      `UPDATE driver_profiles SET wallet_balance = 0, total_trips = 0, average_rating = NULL, wallet_frozen = false, wallet_freeze_reason = NULL`,
+    );
+
+    return {
+      message: 'All trip, earnings, and wallet data has been cleared.',
+      cleared: counts,
+    };
   }
 }
