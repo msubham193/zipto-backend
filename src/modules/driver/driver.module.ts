@@ -13,6 +13,7 @@ import { Vehicle } from '../vehicle/entities/vehicle.entity';
 import { User } from '../auth/entities/user.entity';
 import { AuthModule } from '../auth/auth.module';
 import { Booking } from '../booking/entities/booking.entity';
+import { Payment } from '../payment/entities/payment.entity';
 import { NotificationModule } from '../notification/notification.module';
 
 @Module({
@@ -25,6 +26,7 @@ import { NotificationModule } from '../notification/notification.module';
       User,
       Vehicle,
       Booking,
+      Payment,
     ]),
     AuthModule,
     NotificationModule,

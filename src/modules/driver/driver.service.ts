@@ -11,6 +11,7 @@ import { WithdrawalRequest, WithdrawalStatus } from './entities/withdrawal-reque
 import { Vehicle, VehicleType } from '../vehicle/entities/vehicle.entity';
 import { User } from '../auth/entities/user.entity';
 import { Booking, BookingStatus } from '../booking/entities/booking.entity';
+import { Payment, PaymentMethod, PaymentStatus } from '../payment/entities/payment.entity';
 import {
   UpdateDriverDto,
   UpdateAvailabilityDto,
@@ -42,6 +43,8 @@ export class DriverService {
     private bankAccountRepository: Repository<BankAccount>,
     @InjectRepository(WithdrawalRequest)
     private withdrawalRepository: Repository<WithdrawalRequest>,
+    @InjectRepository(Payment)
+    private paymentRepository: Repository<Payment>,
     private readonly s3Service: S3Service,
     private readonly notificationService: NotificationService,
     private readonly cacheManager: RedisService,
@@ -739,23 +742,51 @@ export class DriverService {
       return t && t >= from && t <= to;
     });
 
+    const bookingIds = inPeriod.map(b => b.id);
+
+    // Fetch completed payments for these bookings to determine payment method
+    const payments = bookingIds.length
+      ? await this.paymentRepository.find({
+          where: { payment_status: PaymentStatus.COMPLETED },
+          select: ['booking_id', 'payment_method', 'driver_earnings'],
+        }).then(rows => rows.filter(p => bookingIds.includes(p.booking_id)))
+      : [];
+
+    const paymentByBooking = new Map<string, Payment>();
+    for (const p of payments) {
+      paymentByBooking.set(p.booking_id, p);
+    }
+
     let totalEarnings = 0;
     let totalGrossFare = 0;
     let totalAppCommission = 0;
     let totalPlatformFee = 0;
     let totalShieldFee = 0;
+    let cashEarnings = 0;
+    let onlineEarnings = 0;
+    let cashTripCount = 0;
+    let onlineTripCount = 0;
 
     for (const b of inPeriod) {
       const driverEarnings = Number(b.driver_earnings || 0);
       const commission = Number(b.skido_commission || 0);
       const gross = Number(b.final_fare || 0);
       const fb = b.fare_breakdown as any;
+      const method = paymentByBooking.get(b.id)?.payment_method ?? PaymentMethod.CASH;
 
       totalEarnings += driverEarnings;
       totalGrossFare += gross;
       totalAppCommission += commission;
       totalPlatformFee += Number(fb?.platform_fee ?? 2);
       totalShieldFee += Number(fb?.shield_fee ?? 1);
+
+      if (method === PaymentMethod.CASH) {
+        cashEarnings += driverEarnings;
+        cashTripCount++;
+      } else {
+        onlineEarnings += driverEarnings;
+        onlineTripCount++;
+      }
     }
 
     // Current wallet balance (accumulated, not period-specific)
@@ -772,6 +803,10 @@ export class DriverService {
       min_withdrawal_amount: minWithdrawal,
       total_earnings: parseFloat(totalEarnings.toFixed(2)),
       trip_count: inPeriod.length,
+      cash_trip_count: cashTripCount,
+      online_trip_count: onlineTripCount,
+      cash_earnings: parseFloat(cashEarnings.toFixed(2)),
+      online_earnings: parseFloat(onlineEarnings.toFixed(2)),
       breakdown: {
         gross_fare: parseFloat(totalGrossFare.toFixed(2)),
         app_commission: parseFloat(totalAppCommission.toFixed(2)),
