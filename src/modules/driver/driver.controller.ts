@@ -445,7 +445,7 @@ export class DriverController {
       amount: order.amount,       // in paise
       amount_inr: amount,
       currency: 'INR',
-      key_id: process.env.RAZORPAY_KEY_ID ?? '',
+      key_id: this.razorpayService.getKeyId(),
     };
   }
 

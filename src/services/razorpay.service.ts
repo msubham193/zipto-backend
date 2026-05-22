@@ -37,6 +37,10 @@ export class RazorpayService {
     }
   }
 
+  getKeyId(): string {
+    return this.keyId;
+  }
+
   /**
    * Create Razorpay order
    */
