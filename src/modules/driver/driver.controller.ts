@@ -438,7 +438,7 @@ export class DriverController {
     }
     const order = await this.razorpayService.createOrder(
       amount,
-      `topup_${user.id}_${Date.now()}`,
+      `tp_${user.id.slice(0, 8)}_${Date.now() % 1000000}`,  // max ~24 chars, well under Razorpay's 40-char limit
     );
     return {
       order_id: order.id,
