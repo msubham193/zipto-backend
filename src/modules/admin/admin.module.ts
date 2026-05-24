@@ -8,6 +8,7 @@ import { PricingRule } from '../booking/entities/pricing-rule.entity';
 import { Payment } from '../payment/entities/payment.entity';
 import { DriverProfile } from '../driver/entities/driver-profile.entity';
 import { WithdrawalRequest } from '../driver/entities/withdrawal-request.entity';
+import { BankAccount } from '../driver/entities/bank-account.entity';
 import { Vehicle } from '../vehicle/entities/vehicle.entity';
 import { AuthModule } from '../auth/auth.module';
 import { BookingModule } from '../booking/booking.module';
@@ -19,7 +20,7 @@ import { CouponModule } from '../coupon/coupon.module';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([User, Booking, PricingRule, Payment, DriverProfile, Vehicle, WithdrawalRequest]),
+    TypeOrmModule.forFeature([User, Booking, PricingRule, Payment, DriverProfile, Vehicle, WithdrawalRequest, BankAccount]),
     AuthModule,
     BookingModule,
     DriverModule,

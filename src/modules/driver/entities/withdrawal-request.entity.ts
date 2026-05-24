@@ -47,6 +47,18 @@ export class WithdrawalRequest {
   @Column({ type: 'text', nullable: true })
   remarks: string;
 
+  /** UTR / NEFT / IMPS reference recorded by admin after manual bank transfer */
+  @Column({ type: 'varchar', length: 100, nullable: true })
+  payout_reference: string | null;
+
+  /** Razorpay payout ID — set when automated payout is initiated via RazorpayX */
+  @Column({ type: 'varchar', length: 100, nullable: true })
+  payout_id: string | null;
+
+  /** Failure reason from Razorpay if payout failed or was reversed */
+  @Column({ type: 'text', nullable: true })
+  failure_reason: string | null;
+
   @CreateDateColumn()
   created_at: Date;
 

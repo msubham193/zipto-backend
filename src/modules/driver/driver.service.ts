@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException, BadRequestException, ForbiddenException, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, Not, IsNull } from 'typeorm';
 import { ConfigService } from '@nestjs/config';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const Razorpay = require('razorpay');
@@ -28,6 +28,7 @@ import { S3Service } from '../../services/s3.service';
 import { NotificationService } from '../notification/notification.service';
 import { RedisService } from '../../services/redis.service';
 import { DriverWalletService } from './driver-wallet.service';
+import { RazorpayXService } from '../../services/razorpayx.service';
 
 /** GPS ping TTL: if a driver stops sending location for 20 min during an active delivery,
  *  the cron guard treats them as a ghost. */
@@ -59,6 +60,7 @@ export class DriverService {
     private readonly cacheManager: RedisService,
     private readonly driverWalletService: DriverWalletService,
     private readonly configService: ConfigService,
+    private readonly razorpayXService: RazorpayXService,
   ) {}
 
   /**
@@ -647,10 +649,55 @@ export class DriverService {
       ...dto,
       ifsc_code: dto.ifsc_code.toUpperCase(),
       driver_profile_id: driverProfileId,
-      is_primary: existingCount === 0, // first account is auto-primary
+      is_primary: existingCount === 0,
+      razorpay_sync_status: 'pending',
+    });
+    const saved = await this.bankAccountRepository.save(account);
+
+    // Fire-and-forget RazorpayX sync so the API response is instant
+    this.syncBankAccountToRazorpay(userId, saved).catch(err =>
+      this.logger.warn(`[RazorpayX] Sync failed for bank_account=${saved.id}: ${err?.message}`)
+    );
+
+    return saved;
+  }
+
+  private async syncBankAccountToRazorpay(userId: string, bankAccount: BankAccount): Promise<void> {
+    if (!this.razorpayXService.isConfigured) return;
+
+    const user = await this.userRepository.findOne({ where: { id: userId } });
+    if (!user) return;
+
+    // Reuse the contact_id from any other bank account of this driver if it already exists
+    const withContact = await this.bankAccountRepository.findOne({
+      where: { driver_profile_id: bankAccount.driver_profile_id, razorpay_contact_id: Not(IsNull()) },
     });
 
-    return this.bankAccountRepository.save(account);
+    let contactId: string;
+    if (withContact?.razorpay_contact_id) {
+      contactId = withContact.razorpay_contact_id!;
+    } else {
+      contactId = await this.razorpayXService.createContact({
+        name: user.name,
+        email: user.email || undefined,
+        phone: user.phone ?? '',
+        referenceId: userId,
+      });
+    }
+
+    const fundAccountId = await this.razorpayXService.createFundAccount({
+      contactId,
+      accountHolderName: bankAccount.account_holder_name,
+      ifscCode: bankAccount.ifsc_code,
+      accountNumber: bankAccount.account_number,
+    });
+
+    await this.bankAccountRepository.update(bankAccount.id, {
+      razorpay_contact_id: contactId,
+      razorpay_fund_account_id: fundAccountId,
+      razorpay_sync_status: 'synced',
+    });
+    this.logger.log(`[RazorpayX] Bank account synced: ${bankAccount.id} → fundAccount=${fundAccountId}`);
   }
 
   async updateBankAccount(
@@ -878,6 +925,19 @@ export class DriverService {
       );
     }
 
+    // Block if there is already a pending/processing withdrawal to prevent double-withdrawal
+    const existing = await this.withdrawalRepository.findOne({
+      where: [
+        { driver_profile_id: profile.id, status: WithdrawalStatus.PENDING },
+        { driver_profile_id: profile.id, status: WithdrawalStatus.PROCESSING },
+      ],
+    });
+    if (existing) {
+      throw new BadRequestException(
+        `You already have a withdrawal request of ₹${Number(existing.amount).toFixed(2)} pending. Please wait for it to be processed.`,
+      );
+    }
+
     // Validate bank account belongs to this driver (optional but safe)
     if (bankAccountId) {
       const account = await this.bankAccountRepository.findOne({
@@ -892,12 +952,7 @@ export class DriverService {
       bankAccountId = primary?.id ?? undefined;
     }
 
-    // Deduct balance
-    await this.driverProfileRepository.update(profile.id, {
-      wallet_balance: balance - amount,
-    });
-
-    // Record withdrawal request
+    // Create PENDING request first (no wallet touch yet)
     const request = this.withdrawalRepository.create({
       driver_profile_id: profile.id,
       amount,
@@ -906,12 +961,26 @@ export class DriverService {
     });
     const saved = await this.withdrawalRepository.save(request) as WithdrawalRequest;
 
+    // Atomically debit wallet under a FOR UPDATE lock — re-checks balance against concurrent requests
+    try {
+      await this.driverWalletService.withdrawalDebit(userId, amount, saved.id);
+    } catch (err) {
+      // Rollback: if debit fails (e.g. concurrent withdrawal drained balance), void the request
+      await this.withdrawalRepository.update(saved.id, {
+        status: WithdrawalStatus.REJECTED,
+        remarks: 'Auto-voided: wallet debit failed (possible concurrent request)',
+      });
+      throw err;
+    }
+
+    const remainingBalance = await this.driverWalletService.getWalletBalance(userId);
+
     return {
       success: true,
       message: 'Withdrawal request submitted successfully',
       withdrawal_id: saved.id,
       amount: saved.amount,
-      remaining_balance: parseFloat((balance - amount).toFixed(2)),
+      remaining_balance: parseFloat(remainingBalance.toFixed(2)),
     };
   }
 

@@ -103,6 +103,8 @@ export class DriverWalletService {
   /**
    * Top up driver wallet via Razorpay.  Call this from the payment webhook
    * after confirming the topup payment is captured.
+   * If the wallet was negative, the description explicitly notes how much
+   * outstanding debt was recovered so the ledger is transparent.
    */
   async topUp(
     driverUserId: string,
@@ -110,18 +112,103 @@ export class DriverWalletService {
     referenceId: string,
   ): Promise<number> {
     if (amount <= 0) throw new BadRequestException('Top-up amount must be > 0');
+    const currentBalance = await this.getWalletBalance(driverUserId);
+    const recovered = currentBalance < 0 ? Math.min(Math.abs(currentBalance), amount) : 0;
+    const description =
+      recovered > 0
+        ? `Wallet top-up ₹${amount} (₹${recovered.toFixed(0)} outstanding recovered)`
+        : `Wallet top-up ₹${amount}`;
     const balanceAfter = await this.adjustWallet(
       driverUserId,
       amount,
       DriverWalletTxnType.TOPUP,
-      `Wallet top-up ₹${amount}`,
+      description,
       null,
       referenceId,
     );
     this.logger.log(
-      `[DriverWallet] Top-up ₹${amount} for driver=${driverUserId}, balance_after=${balanceAfter}`,
+      `[DriverWallet] Top-up ₹${amount} for driver=${driverUserId}, balance_after=${balanceAfter}` +
+        (recovered > 0 ? `, recovered_outstanding=₹${recovered}` : ''),
     );
     return balanceAfter;
+  }
+
+  /**
+   * Atomically debit wallet for a withdrawal request.
+   * Uses a FOR UPDATE lock to prevent race conditions when two requests
+   * arrive concurrently — only one can succeed if balance is insufficient.
+   * Idempotent: safe to call twice with the same withdrawalId.
+   */
+  async withdrawalDebit(
+    driverUserId: string,
+    amount: number,
+    withdrawalId: string,
+  ): Promise<number> {
+    const existing = await this.txnRepository.findOne({
+      where: { reference_id: withdrawalId, type: DriverWalletTxnType.WITHDRAWAL },
+    });
+    if (existing) return this.getWalletBalance(driverUserId);
+
+    let newBalance = 0;
+    await this.dataSource.transaction(async (manager) => {
+      const rows = await manager.query<{ wallet_balance: string }[]>(
+        `SELECT wallet_balance FROM driver_profiles WHERE user_id = $1 FOR UPDATE`,
+        [driverUserId],
+      );
+      const current = rows.length ? Number(rows[0].wallet_balance) : 0;
+      if (amount > current) {
+        throw new BadRequestException(
+          `Insufficient balance. Available: ₹${current.toFixed(2)}`,
+        );
+      }
+      newBalance = Math.round((current - amount) * 100) / 100;
+      await manager.query(
+        `UPDATE driver_profiles SET wallet_balance = $1 WHERE user_id = $2`,
+        [newBalance, driverUserId],
+      );
+      const txn = manager.getRepository(DriverWalletTransaction).create({
+        driver_user_id: driverUserId,
+        type: DriverWalletTxnType.WITHDRAWAL,
+        amount,
+        balance_after: newBalance,
+        description: `Withdrawal request #${withdrawalId.slice(-6).toUpperCase()}`,
+        booking_id: null,
+        reference_id: withdrawalId,
+      });
+      await manager.getRepository(DriverWalletTransaction).save(txn);
+    });
+    this.logger.log(
+      `[DriverWallet] Withdrawal debit ₹${amount} for driver=${driverUserId}, ref=${withdrawalId}, balance_after=${newBalance}`,
+    );
+    return newBalance;
+  }
+
+  /**
+   * Refund a rejected withdrawal back to the driver's wallet.
+   * Idempotent: safe to call twice with the same withdrawalId.
+   */
+  async withdrawalRefund(
+    driverUserId: string,
+    amount: number,
+    withdrawalId: string,
+  ): Promise<number> {
+    const refRef = `refund_${withdrawalId}`;
+    const existing = await this.txnRepository.findOne({
+      where: { reference_id: refRef, driver_user_id: driverUserId },
+    });
+    if (existing) return this.getWalletBalance(driverUserId);
+    const newBalance = await this.adjustWallet(
+      driverUserId,
+      amount,
+      DriverWalletTxnType.ADMIN_CREDIT,
+      `Withdrawal refunded — request #${withdrawalId.slice(-6).toUpperCase()} rejected`,
+      null,
+      refRef,
+    );
+    this.logger.log(
+      `[DriverWallet] Withdrawal refunded ₹${amount} for driver=${driverUserId}, ref=${withdrawalId}`,
+    );
+    return newBalance;
   }
 
   async adminCredit(

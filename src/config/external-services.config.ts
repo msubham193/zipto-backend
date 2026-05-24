@@ -9,6 +9,12 @@ export default registerAs('externalServices', () => ({
     keySecret: process.env.RAZORPAY_KEY_SECRET || '',
     webhookSecret: process.env.RAZORPAY_WEBHOOK_SECRET || '',
   },
+  razorpayx: {
+    // RazorpayX current account number (e.g. 7878780126480956) — required for automated driver payouts
+    accountNumber: process.env.RAZORPAYX_ACCOUNT_NUMBER || '',
+    // Set this in the Razorpay dashboard under Webhooks → secret for payout events
+    webhookSecret: process.env.RAZORPAYX_WEBHOOK_SECRET || '',
+  },
   twoFactor: {
     apiKey       : process.env.TWO_FACTOR_API_KEY || '',
     senderId     : 'Zipto',

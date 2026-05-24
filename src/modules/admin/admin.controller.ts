@@ -1,5 +1,8 @@
-import { Controller, Get, Put, Post, Delete, Param, Query, Body, BadRequestException } from '@nestjs/common';
+import { Controller, Get, Put, Post, Delete, Param, Query, Body, BadRequestException, Req, Headers } from '@nestjs/common';
+import { RawBodyRequest } from '@nestjs/common';
+import { Request } from 'express';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
+import { Public } from '../../common/decorators/public.decorator';
 import { AdminService } from './admin.service';
 import { BookingService } from '../booking/booking.service';
 import { NotificationService } from '../notification/notification.service';
@@ -328,8 +331,12 @@ export class AdminController {
   @ApiOperation({ summary: 'Approve a withdrawal request' })
   @ApiResponse({ status: 200, description: 'Withdrawal approved' })
   @ApiResponse({ status: 404, description: 'Withdrawal not found' })
-  async approveWithdrawal(@Param('id') id: string, @Body('remarks') remarks?: string) {
-    return this.adminService.approveWithdrawal(id, remarks);
+  async approveWithdrawal(
+    @Param('id') id: string,
+    @Body('remarks') remarks?: string,
+    @Body('payout_reference') payoutReference?: string,
+  ) {
+    return this.adminService.approveWithdrawal(id, remarks, payoutReference);
   }
 
   @Put('withdrawals/:id/reject')
@@ -338,6 +345,20 @@ export class AdminController {
   @ApiResponse({ status: 404, description: 'Withdrawal not found' })
   async rejectWithdrawal(@Param('id') id: string, @Body('remarks') remarks?: string) {
     return this.adminService.rejectWithdrawal(id, remarks);
+  }
+
+  // ─── RazorpayX Payout Webhook (no auth — verified by HMAC) ──────────────
+
+  @Public()
+  @Post('webhooks/razorpay-payout')
+  @ApiOperation({ summary: 'RazorpayX payout webhook — do not call manually' })
+  async razorpayPayoutWebhook(
+    @Req() req: RawBodyRequest<Request>,
+    @Headers('x-razorpay-signature') signature: string,
+  ) {
+    const rawBody = req.rawBody ?? Buffer.from(JSON.stringify(req.body));
+    await this.adminService.handlePayoutWebhook(rawBody, signature ?? '');
+    return { received: true };
   }
 
   // ─── System Settings ──────────────────────────────────────────────────────

@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, Between, DataSource } from 'typeorm';
 import { User, UserRole } from '../auth/entities/user.entity';
@@ -6,6 +6,7 @@ import { Booking, BookingStatus } from '../booking/entities/booking.entity';
 import { Payment, PaymentStatus } from '../payment/entities/payment.entity';
 import { DriverProfile, VerificationStatus } from '../driver/entities/driver-profile.entity';
 import { WithdrawalRequest, WithdrawalStatus } from '../driver/entities/withdrawal-request.entity';
+import { BankAccount } from '../driver/entities/bank-account.entity';
 import { Vehicle } from '../vehicle/entities/vehicle.entity';
 import { NotificationService } from '../notification/notification.service';
 
@@ -16,9 +17,12 @@ import {
   LEGACY_VEHICLE_TYPES,
 } from '../booking/constants/default-pricing-rules';
 import { DriverWalletService } from '../driver/driver-wallet.service';
+import { RazorpayXService } from '../../services/razorpayx.service';
 
 @Injectable()
 export class AdminService {
+  private readonly logger = new Logger(AdminService.name);
+
   constructor(
     @InjectRepository(User)
     private userRepository: Repository<User>,
@@ -34,9 +38,12 @@ export class AdminService {
     private pricingRuleRepository: Repository<PricingRule>,
     @InjectRepository(WithdrawalRequest)
     private withdrawalRepository: Repository<WithdrawalRequest>,
+    @InjectRepository(BankAccount)
+    private bankAccountRepository: Repository<BankAccount>,
     private notificationService: NotificationService,
     private dataSource: DataSource,
     private driverWalletService: DriverWalletService,
+    private razorpayXService: RazorpayXService,
   ) {}
 
   /**
@@ -407,7 +414,7 @@ export class AdminService {
   async getDriverById(driverId: string) {
     const driver = await this.driverProfileRepository.findOne({
       where: { id: driverId },
-      relations: ['user'],
+      relations: ['user', 'bank_accounts'],
     });
 
     if (!driver) {
@@ -1157,23 +1164,73 @@ export class AdminService {
     });
   }
 
-  async approveWithdrawal(withdrawalId: string, remarks?: string) {
+  async approveWithdrawal(withdrawalId: string, remarks?: string, payoutReference?: string) {
     const withdrawal = await this.withdrawalRepository.findOne({
       where: { id: withdrawalId },
       relations: ['driver_profile', 'driver_profile.user', 'bank_account'],
     });
     if (!withdrawal) throw new NotFoundException('Withdrawal request not found');
+    if (withdrawal.status === WithdrawalStatus.COMPLETED) return withdrawal;
+    if (withdrawal.status === WithdrawalStatus.REJECTED) {
+      throw new BadRequestException('Cannot approve a withdrawal that has already been rejected');
+    }
 
+    const driverUserId = withdrawal.driver_profile?.user_id;
+    const amount       = Number(withdrawal.amount);
+    const bankAccount  = withdrawal.bank_account;
+
+    // ── Attempt automated payout via RazorpayX ────────────────────────────
+    if (this.razorpayXService.isConfigured && bankAccount?.razorpay_fund_account_id) {
+      try {
+        const payout = await this.razorpayXService.createPayout({
+          fundAccountId: bankAccount.razorpay_fund_account_id,
+          amountPaise:   Math.round(amount * 100),
+          referenceId:   `WD_${withdrawalId.slice(-32)}`,
+          narration:     `Zipto Payout`,
+          mode:          'IMPS',
+        });
+
+        // Mark as PROCESSING — final status comes via webhook
+        withdrawal.status     = WithdrawalStatus.PROCESSING;
+        withdrawal.payout_id  = payout.id;
+        if (remarks) withdrawal.remarks = remarks;
+        const saved = await this.withdrawalRepository.save(withdrawal);
+
+        this.logger.log(`[RazorpayX] Payout queued: withdrawal=${withdrawalId}, payout=${payout.id}`);
+
+        if (driverUserId) {
+          const bankName = bankAccount.bank_name ?? 'your bank account';
+          const last4    = bankAccount.account_number?.slice(-4) ?? '';
+          this.notificationService.sendPushNotification({
+            user_id: driverUserId,
+            title: '💸 Payout Initiated!',
+            body: `₹${amount.toLocaleString('en-IN')} is being transferred to ${bankName}${last4 ? ` (••••${last4})` : ''}. Expect credit within 30 minutes via IMPS.`,
+            data: { type: 'withdrawal_approved', amount: String(amount), withdrawal_id: withdrawalId },
+          }).catch(() => {});
+        }
+        return saved;
+      } catch (err: any) {
+        // RazorpayX call failed — fall through to manual-approve path
+        this.logger.error(
+          `[RazorpayX] Automated payout failed for withdrawal=${withdrawalId}: ${err?.error?.description ?? err?.message}. Falling back to manual.`,
+        );
+      }
+    } else if (this.razorpayXService.isConfigured && !bankAccount?.razorpay_fund_account_id) {
+      // Bank account not yet synced — try syncing now and proceed manually
+      this.logger.warn(
+        `[RazorpayX] Bank account ${bankAccount?.id ?? 'unknown'} has no fund_account_id — payout will be manual.`,
+      );
+    }
+
+    // ── Manual fallback: mark COMPLETED (admin physically transfers money) ──
     withdrawal.status = WithdrawalStatus.COMPLETED;
     if (remarks) withdrawal.remarks = remarks;
+    if (payoutReference) withdrawal.payout_reference = payoutReference;
     const saved = await this.withdrawalRepository.save(withdrawal);
 
-    // Notify driver: money is on its way
-    const driverUserId = withdrawal.driver_profile?.user_id;
     if (driverUserId) {
-      const amount = Number(withdrawal.amount);
-      const bankName = withdrawal.bank_account?.bank_name ?? 'your bank account';
-      const last4 = withdrawal.bank_account?.account_number?.slice(-4) ?? '';
+      const bankName = bankAccount?.bank_name ?? 'your bank account';
+      const last4    = bankAccount?.account_number?.slice(-4) ?? '';
       this.notificationService.sendPushNotification({
         user_id: driverUserId,
         title: '💸 Withdrawal Approved!',
@@ -1181,8 +1238,84 @@ export class AdminService {
         data: { type: 'withdrawal_approved', amount: String(amount), withdrawal_id: withdrawalId },
       }).catch(() => {});
     }
-
     return saved;
+  }
+
+  /**
+   * Handle Razorpay payout webhook events.
+   * Called from the webhook endpoint after signature verification.
+   */
+  async handlePayoutWebhook(rawBody: Buffer, signature: string): Promise<void> {
+    if (!this.razorpayXService.validateWebhookSignature(rawBody, signature)) {
+      this.logger.warn('[RazorpayX] Webhook signature invalid — ignored');
+      return;
+    }
+
+    let event: any;
+    try { event = JSON.parse(rawBody.toString('utf8')); } catch {
+      this.logger.warn('[RazorpayX] Webhook: invalid JSON');
+      return;
+    }
+
+    const payoutId: string = event?.payload?.payout?.entity?.id;
+    if (!payoutId) return;
+
+    this.logger.log(`[RazorpayX] Webhook event=${event.event}, payout=${payoutId}`);
+
+    const withdrawal = await this.withdrawalRepository.findOne({
+      where: { payout_id: payoutId },
+      relations: ['driver_profile'],
+    });
+    if (!withdrawal) {
+      this.logger.warn(`[RazorpayX] No withdrawal found for payout_id=${payoutId}`);
+      return;
+    }
+
+    const driverUserId = withdrawal.driver_profile?.user_id;
+    const amount       = Number(withdrawal.amount);
+
+    if (event.event === 'payout.processed') {
+      // ── Success: finalize ──────────────────────────────────────────────
+      if (withdrawal.status === WithdrawalStatus.COMPLETED) return; // idempotent
+      const utr: string = event?.payload?.payout?.entity?.utr ?? '';
+      withdrawal.status          = WithdrawalStatus.COMPLETED;
+      withdrawal.payout_reference = utr || withdrawal.payout_reference;
+      await this.withdrawalRepository.save(withdrawal);
+      this.logger.log(`[RazorpayX] Payout processed: withdrawal=${withdrawal.id}, UTR=${utr}`);
+
+      if (driverUserId) {
+        this.notificationService.sendPushNotification({
+          user_id: driverUserId,
+          title: '✅ Payout Successful',
+          body: `₹${amount.toLocaleString('en-IN')} has been credited to your bank account.${utr ? ` UTR: ${utr}` : ''}`,
+          data: { type: 'payout_processed', amount: String(amount), withdrawal_id: withdrawal.id },
+        }).catch(() => {});
+      }
+
+    } else if (event.event === 'payout.failed' || event.event === 'payout.reversed') {
+      // ── Failure: refund wallet ─────────────────────────────────────────
+      if (withdrawal.status === WithdrawalStatus.REJECTED) return; // idempotent
+      const failureReason: string =
+        event?.payload?.payout?.entity?.failure_reason ??
+        event?.payload?.payout?.entity?.status_details?.description ??
+        event.event;
+
+      withdrawal.status         = WithdrawalStatus.REJECTED;
+      withdrawal.failure_reason = failureReason;
+      await this.withdrawalRepository.save(withdrawal);
+
+      // Refund driver wallet
+      if (driverUserId) {
+        await this.driverWalletService.withdrawalRefund(driverUserId, amount, withdrawal.id);
+        this.logger.log(`[RazorpayX] Payout ${event.event}: wallet refunded ₹${amount} for driver=${driverUserId}`);
+        this.notificationService.sendPushNotification({
+          user_id: driverUserId,
+          title: '⚠️ Payout Failed',
+          body: `Your ₹${amount.toLocaleString('en-IN')} withdrawal could not be processed and has been refunded to your Zipto wallet. Please try again.`,
+          data: { type: 'payout_failed', amount: String(amount), withdrawal_id: withdrawal.id },
+        }).catch(() => {});
+      }
+    }
   }
 
   async rejectWithdrawal(withdrawalId: string, remarks?: string) {
@@ -1191,20 +1324,28 @@ export class AdminService {
       relations: ['driver_profile', 'driver_profile.user'],
     });
     if (!withdrawal) throw new NotFoundException('Withdrawal request not found');
+    if (withdrawal.status === WithdrawalStatus.COMPLETED) {
+      throw new BadRequestException('Cannot reject a withdrawal that has already been completed');
+    }
+    if (withdrawal.status === WithdrawalStatus.REJECTED) {
+      return withdrawal; // idempotent — already rejected
+    }
 
-    // Refund the amount back to driver wallet
-    await this.driverProfileRepository.increment(
-      { id: withdrawal.driver_profile_id },
-      'wallet_balance',
-      Number(withdrawal.amount),
-    );
+    // Refund via wallet service (idempotent, logs a transaction record)
+    const driverUserId = withdrawal.driver_profile?.user_id;
+    if (driverUserId) {
+      await this.driverWalletService.withdrawalRefund(
+        driverUserId,
+        Number(withdrawal.amount),
+        withdrawalId,
+      );
+    }
 
     withdrawal.status = WithdrawalStatus.REJECTED;
     if (remarks) withdrawal.remarks = remarks;
     const saved = await this.withdrawalRepository.save(withdrawal);
 
     // Notify driver: amount refunded to wallet
-    const driverUserId = withdrawal.driver_profile?.user_id;
     if (driverUserId) {
       const amount = Number(withdrawal.amount);
       this.notificationService.sendPushNotification({

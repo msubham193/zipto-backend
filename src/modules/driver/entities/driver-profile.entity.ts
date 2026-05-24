@@ -5,10 +5,12 @@ import {
   CreateDateColumn,
   UpdateDateColumn,
   OneToOne,
+  OneToMany,
   JoinColumn,
   Index,
 } from 'typeorm';
 import { User } from '../../auth/entities/user.entity';
+import { BankAccount } from './bank-account.entity';
 
 export enum VerificationStatus {
   PENDING = 'pending',
@@ -100,6 +102,9 @@ export class DriverProfile {
 
   @Column({ type: 'varchar', nullable: true })
   wallet_freeze_reason: string;
+
+  @OneToMany(() => BankAccount, (ba) => ba.driver_profile)
+  bank_accounts: BankAccount[];
 
   @CreateDateColumn()
   created_at: Date;

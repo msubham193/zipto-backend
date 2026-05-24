@@ -24,7 +24,7 @@ export class BankAccount {
   @Index()
   driver_profile_id: string;
 
-  @ManyToOne(() => DriverProfile, { onDelete: 'CASCADE' })
+  @ManyToOne(() => DriverProfile, (dp) => dp.bank_accounts, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'driver_profile_id' })
   driver_profile: DriverProfile;
 
@@ -51,6 +51,18 @@ export class BankAccount {
 
   @Column({ type: 'boolean', default: false })
   is_verified: boolean;
+
+  /** RazorpayX contact ID for the driver (shared across all their bank accounts) */
+  @Column({ type: 'varchar', length: 100, nullable: true })
+  razorpay_contact_id: string | null;
+
+  /** RazorpayX fund account ID for this specific bank account (used to initiate payouts) */
+  @Column({ type: 'varchar', length: 100, nullable: true })
+  razorpay_fund_account_id: string | null;
+
+  /** Sync status with RazorpayX: pending | synced | failed */
+  @Column({ type: 'varchar', length: 20, nullable: true, default: 'pending' })
+  razorpay_sync_status: string | null;
 
   @CreateDateColumn()
   created_at: Date;
