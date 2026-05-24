@@ -8,6 +8,7 @@ import { DriverProfile, VerificationStatus } from '../driver/entities/driver-pro
 import { WithdrawalRequest, WithdrawalStatus } from '../driver/entities/withdrawal-request.entity';
 import { BankAccount } from '../driver/entities/bank-account.entity';
 import { Vehicle } from '../vehicle/entities/vehicle.entity';
+import { Rating } from '../rating/entities/rating.entity';
 import { NotificationService } from '../notification/notification.service';
 
 import { PricingRule } from '../booking/entities/pricing-rule.entity';
@@ -40,6 +41,8 @@ export class AdminService {
     private withdrawalRepository: Repository<WithdrawalRequest>,
     @InjectRepository(BankAccount)
     private bankAccountRepository: Repository<BankAccount>,
+    @InjectRepository(Rating)
+    private ratingRepository: Repository<Rating>,
     private notificationService: NotificationService,
     private dataSource: DataSource,
     private driverWalletService: DriverWalletService,
@@ -450,6 +453,14 @@ export class AdminService {
         .getRawOne(),
     ]);
 
+    // Fetch last 20 ratings for this driver
+    const recentRatings = await this.ratingRepository.find({
+      where: { driver_id: driverUserId },
+      relations: ['customer'],
+      order: { created_at: 'DESC' },
+      take: 20,
+    });
+
     return {
       ...driver,
       statistics: {
@@ -457,6 +468,13 @@ export class AdminService {
         completed_bookings: completedBookings,
         total_earnings: parseFloat(totalEarnings?.total || '0'),
       },
+      recent_ratings: recentRatings.map((r) => ({
+        id: r.id,
+        rating: Number(r.rating),
+        comment: r.comment || null,
+        customer_name: r.customer?.name || 'Anonymous',
+        created_at: r.created_at,
+      })),
     };
   }
 
@@ -570,7 +588,18 @@ export class AdminService {
       relations: ['customer', 'driver', 'vehicle', 'payments'],
     });
     if (!booking) throw new NotFoundException('Booking not found');
-    return booking;
+
+    // Include driver profile ID so admin panel can link to the driver detail page
+    let driver_profile_id: string | null = null;
+    if (booking.driver_id) {
+      const profile = await this.driverProfileRepository.findOne({
+        where: { user_id: booking.driver_id },
+        select: ['id'],
+      });
+      driver_profile_id = profile?.id ?? null;
+    }
+
+    return { ...booking, driver_profile_id };
   }
 
   /**
