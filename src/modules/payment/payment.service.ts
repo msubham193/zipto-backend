@@ -278,8 +278,7 @@ export class PaymentService {
       link = await razorpay.paymentLink.create({
         amount: amountPaise,
         currency: 'INR',
-        description: `Zipto Delivery Payment — Booking #${booking_id.slice(-6).toUpperCase()}`,
-        upi_link: true,
+        description: `Zipto Delivery Payment #${booking_id.slice(-6).toUpperCase()}`,
         reminder_enable: false,
         notify: { sms: false, email: false },
         reference_id: booking_id,

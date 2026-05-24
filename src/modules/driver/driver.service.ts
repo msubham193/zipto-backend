@@ -1092,17 +1092,18 @@ export class DriverService {
     let link: any;
     try {
       link = await razorpay.paymentLink.create({
-        amount:           amountPaise,
-        currency:         'INR',
-        description:      `Zipto Driver Wallet Top-up ₹${amount}`,
-        upi_link:         true,
-        reminder_enable:  false,
-        notify:           { sms: false, email: false },
-        reference_id:     `tp_${request.id}`,
+        amount:       amountPaise,
+        currency:     'INR',
+        description:  `Zipto Driver Wallet Top-up Rs.${amount}`,
+        reminder_enable: false,
+        notify:       { sms: false, email: false },
+        reference_id: `tp_${request.id}`,
       });
     } catch (err: any) {
+      this.logger.error(`[Topup] Razorpay paymentLink.create failed: ${JSON.stringify(err)}`);
       await this.topupRequestRepository.remove(request);
-      throw new BadRequestException(err?.error?.description ?? 'Failed to create payment link. Please try again.');
+      const msg = err?.error?.description || err?.message || 'Failed to create payment link. Please try again.';
+      throw new BadRequestException(msg);
     }
 
     // Store Razorpay link ID so getTopupRequestStatus can fetch payment status
