@@ -1098,7 +1098,7 @@ export class DriverService {
         upi_link:         true,
         reminder_enable:  false,
         notify:           { sms: false, email: false },
-        reference_id:     `topup_${request.id}`,
+        reference_id:     `tp_${request.id}`,
       });
     } catch (err: any) {
       await this.topupRequestRepository.remove(request);
