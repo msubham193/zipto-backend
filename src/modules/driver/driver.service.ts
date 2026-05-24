@@ -1,6 +1,9 @@
-import { Injectable, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, ForbiddenException, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { ConfigService } from '@nestjs/config';
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const Razorpay = require('razorpay');
 import {
   DriverProfile,
   AvailabilityStatus,
@@ -32,6 +35,8 @@ const GPS_PING_TTL_MS = 20 * 60 * 1000;
 
 @Injectable()
 export class DriverService {
+  private readonly logger = new Logger(DriverService.name);
+
   constructor(
     @InjectRepository(DriverProfile)
     private driverProfileRepository: Repository<DriverProfile>,
@@ -53,6 +58,7 @@ export class DriverService {
     private readonly notificationService: NotificationService,
     private readonly cacheManager: RedisService,
     private readonly driverWalletService: DriverWalletService,
+    private readonly configService: ConfigService,
   ) {}
 
   /**
@@ -1027,5 +1033,138 @@ export class DriverService {
       where: { driver_user_id: userId },
       order: { created_at: 'DESC' },
     });
+  }
+
+  /**
+   * Create a Razorpay payment link for wallet top-up.
+   * In test mode the wallet is credited immediately (no real payment required).
+   * In live mode a short URL is returned; the app opens it, the customer pays,
+   * and the app polls getTopupRequestStatus() until it flips to 'approved'.
+   */
+  async createWalletTopupLink(userId: string, amount: number): Promise<{
+    short_url: string | null;
+    amount: number;
+    request_id: string;
+    is_test_mode?: boolean;
+    new_balance?: number;
+  }> {
+    const profile = await this.driverProfileRepository.findOne({ where: { user_id: userId } });
+    if (!profile) throw new NotFoundException('Driver profile not found');
+
+    const keyId     = this.configService.get<string>('externalServices.razorpay.keyId')     ?? '';
+    const keySecret = this.configService.get<string>('externalServices.razorpay.keySecret') ?? '';
+    if (!keyId || !keySecret) throw new BadRequestException('Payment gateway not configured');
+
+    const isTestMode = keyId.startsWith('rzp_test');
+
+    if (isTestMode) {
+      const ref = `TEST-${userId.slice(-6).toUpperCase()}-${Date.now()}`;
+      const request = this.topupRequestRepository.create({
+        driver_user_id:    userId,
+        driver_profile_id: profile.id,
+        amount,
+        utr_number:  ref,
+        status:      TopupRequestStatus.APPROVED,
+        remarks:     'Auto-approved (Razorpay test mode)',
+      });
+      await this.topupRequestRepository.save(request);
+      const new_balance = await this.driverWalletService.topUp(userId, amount, ref);
+      this.logger.log(`[Topup] Test-mode auto-credit ₹${amount} for driver=${userId}`);
+      return { short_url: null, amount, request_id: request.id, is_test_mode: true, new_balance };
+    }
+
+    // Create a PENDING record first so we have an ID to embed in reference_id
+    const placeholder = `INIT-${Date.now()}-${Math.floor(Math.random() * 9999)}`;
+    const request = this.topupRequestRepository.create({
+      driver_user_id:    userId,
+      driver_profile_id: profile.id,
+      amount,
+      utr_number:  placeholder,
+      status:      TopupRequestStatus.PENDING,
+      remarks:     'Razorpay payment link initiated',
+    });
+    await this.topupRequestRepository.save(request);
+
+    const razorpay    = new Razorpay({ key_id: keyId, key_secret: keySecret });
+    const forceOneRupee = this.configService.get<string>('RAZORPAY_FORCE_ONE_RUPEE') === 'true';
+    const amountPaise = forceOneRupee ? 100 : Math.round(amount * 100);
+
+    let link: any;
+    try {
+      link = await razorpay.paymentLink.create({
+        amount:           amountPaise,
+        currency:         'INR',
+        description:      `Zipto Driver Wallet Top-up ₹${amount}`,
+        upi_link:         true,
+        reminder_enable:  false,
+        notify:           { sms: false, email: false },
+        reference_id:     `topup_${request.id}`,
+      });
+    } catch (err: any) {
+      await this.topupRequestRepository.remove(request);
+      throw new BadRequestException(err?.error?.description ?? 'Failed to create payment link. Please try again.');
+    }
+
+    // Store Razorpay link ID so getTopupRequestStatus can fetch payment status
+    request.utr_number = link.id;
+    request.remarks    = `Razorpay link: ${link.id}`;
+    await this.topupRequestRepository.save(request);
+
+    this.logger.log(`[Topup] Payment link created ${link.id} for driver=${userId} amount=₹${amount}`);
+    return { short_url: link.short_url, amount, request_id: request.id };
+  }
+
+  /**
+   * Poll this after returning from the Razorpay payment page.
+   * When the payment link is paid, credits the wallet atomically (idempotent).
+   */
+  async getTopupRequestStatus(userId: string, requestId: string): Promise<{
+    status: 'pending' | 'approved' | 'rejected';
+    new_balance?: number;
+  }> {
+    const request = await this.topupRequestRepository.findOne({
+      where: { id: requestId, driver_user_id: userId },
+    });
+    if (!request) throw new NotFoundException('Top-up request not found');
+
+    if (request.status === TopupRequestStatus.APPROVED) {
+      const balance = await this.driverWalletService.getWalletBalance(userId);
+      return { status: 'approved', new_balance: balance };
+    }
+    if (request.status === TopupRequestStatus.REJECTED) {
+      return { status: 'rejected' };
+    }
+
+    // PENDING: check Razorpay if the link has been paid
+    const linkId = request.utr_number;
+    if (linkId && linkId.startsWith('plink_')) {
+      const keyId     = this.configService.get<string>('externalServices.razorpay.keyId')     ?? '';
+      const keySecret = this.configService.get<string>('externalServices.razorpay.keySecret') ?? '';
+      if (keyId && keySecret) {
+        try {
+          const razorpay = new Razorpay({ key_id: keyId, key_secret: keySecret });
+          const link = await razorpay.paymentLink.fetch(linkId);
+          if (link.status === 'paid') {
+            // Atomic: only credit once — UPDATE WHERE status = 'pending'
+            const result = await this.topupRequestRepository.update(
+              { id: requestId, driver_user_id: userId, status: TopupRequestStatus.PENDING },
+              { status: TopupRequestStatus.APPROVED, remarks: `Paid via Razorpay | link: ${linkId}` },
+            );
+            if (result.affected && result.affected > 0) {
+              const new_balance = await this.driverWalletService.topUp(userId, Number(request.amount), linkId);
+              this.logger.log(`[Topup] Wallet credited ₹${request.amount} for driver=${userId} via poll`);
+              return { status: 'approved', new_balance };
+            }
+            // Another concurrent poll already credited — return current balance
+            const balance = await this.driverWalletService.getWalletBalance(userId);
+            return { status: 'approved', new_balance: balance };
+          }
+        } catch (err) {
+          this.logger.warn(`[Topup] Razorpay fetch failed for link=${linkId}: ${err}`);
+        }
+      }
+    }
+
+    return { status: 'pending' };
   }
 }

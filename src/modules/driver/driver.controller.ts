@@ -444,6 +444,25 @@ export class DriverController {
     return this.driverService.submitTopupRequest(user.id, amount, utrNumber.trim().toUpperCase());
   }
 
+  @Post('wallet/topup/create-link')
+  @ApiOperation({ summary: 'Create Razorpay payment link for wallet top-up — test mode credits instantly' })
+  async createWalletTopupLink(
+    @GetUser() user: User,
+    @Body('amount') amount: number,
+  ) {
+    if (!amount || amount < 10) throw new BadRequestException('Minimum top-up is ₹10');
+    return this.driverService.createWalletTopupLink(user.id, amount);
+  }
+
+  @Get('wallet/topup/request/:id/status')
+  @ApiOperation({ summary: 'Poll Razorpay payment status for a wallet top-up request' })
+  async getTopupRequestStatus(
+    @GetUser() user: User,
+    @Param('id') id: string,
+  ) {
+    return this.driverService.getTopupRequestStatus(user.id, id);
+  }
+
   @Post('wallet/topup/upi-verify')
   @ApiOperation({ summary: 'Auto-verify UPI topup from react-native-upi-payment response — credits wallet instantly' })
   async autoVerifyUpiTopup(
