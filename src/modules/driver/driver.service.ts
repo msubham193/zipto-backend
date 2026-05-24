@@ -1036,6 +1036,115 @@ export class DriverService {
   }
 
   /**
+   * Step 1 of native Razorpay checkout top-up.
+   * Creates a Razorpay Order and a PENDING DriverTopupRequest.
+   * Returns order_id + key so the app can open RazorpayCheckout.open().
+   */
+  async createTopupOrder(userId: string, amount: number): Promise<{
+    order_id: string;
+    amount_paise: number;
+    key_id: string;
+    currency: string;
+    request_id: string;
+    is_test_mode?: boolean;
+    new_balance?: number;
+  }> {
+    const profile = await this.driverProfileRepository.findOne({ where: { user_id: userId } });
+    if (!profile) throw new NotFoundException('Driver profile not found');
+
+    const keyId     = this.configService.get<string>('externalServices.razorpay.keyId')     ?? '';
+    const keySecret = this.configService.get<string>('externalServices.razorpay.keySecret') ?? '';
+    if (!keyId || !keySecret) throw new BadRequestException('Payment gateway not configured');
+
+    const forceOneRupee = this.configService.get<string>('RAZORPAY_FORCE_ONE_RUPEE') === 'true';
+    const amountPaise   = forceOneRupee ? 100 : Math.round(amount * 100);
+
+    const isTestMode = keyId.startsWith('rzp_test');
+    if (isTestMode) {
+      const ref = `TEST-${userId.slice(-6).toUpperCase()}-${Date.now()}`;
+      const request = this.topupRequestRepository.create({
+        driver_user_id: userId, driver_profile_id: profile.id,
+        amount, utr_number: ref, status: TopupRequestStatus.APPROVED,
+        remarks: 'Auto-approved (Razorpay test mode)',
+      });
+      await this.topupRequestRepository.save(request);
+      const new_balance = await this.driverWalletService.topUp(userId, amount, ref);
+      return { order_id: ref, amount_paise: amountPaise, key_id: keyId, currency: 'INR', request_id: request.id, is_test_mode: true, new_balance };
+    }
+
+    const razorpay = new Razorpay({ key_id: keyId, key_secret: keySecret });
+    let order: any;
+    try {
+      order = await razorpay.orders.create({
+        amount:   amountPaise,
+        currency: 'INR',
+        receipt:  `topup_${userId.slice(-8)}_${Date.now()}`,
+      });
+    } catch (err: any) {
+      this.logger.error(`[Topup] Razorpay order.create failed: ${JSON.stringify(err)}`);
+      throw new BadRequestException(err?.error?.description || err?.message || 'Failed to create payment order.');
+    }
+
+    const request = this.topupRequestRepository.create({
+      driver_user_id: userId, driver_profile_id: profile.id,
+      amount, utr_number: order.id,
+      status:  TopupRequestStatus.PENDING,
+      remarks: `Razorpay order: ${order.id}`,
+    });
+    await this.topupRequestRepository.save(request);
+
+    return { order_id: order.id, amount_paise: amountPaise, key_id: keyId, currency: 'INR', request_id: request.id };
+  }
+
+  /**
+   * Step 2 — called after RazorpayCheckout.open() succeeds.
+   * Verifies the HMAC signature then credits the wallet.
+   */
+  async verifyTopupPayment(
+    userId: string,
+    razorpayOrderId:   string,
+    razorpayPaymentId: string,
+    razorpaySignature: string,
+    amount: number,
+  ): Promise<{ new_balance: number }> {
+    const crypto = require('crypto');
+    const keySecret = this.configService.get<string>('externalServices.razorpay.keySecret') ?? '';
+    if (!keySecret) throw new BadRequestException('Payment gateway not configured');
+
+    const generated = crypto
+      .createHmac('sha256', keySecret)
+      .update(`${razorpayOrderId}|${razorpayPaymentId}`)
+      .digest('hex');
+    if (generated !== razorpaySignature) {
+      throw new BadRequestException('Invalid payment signature — payment could not be verified.');
+    }
+
+    // Idempotency: find the pending request by order_id
+    const request = await this.topupRequestRepository.findOne({
+      where: { utr_number: razorpayOrderId, driver_user_id: userId },
+    });
+    if (!request) throw new NotFoundException('Top-up request not found');
+    if (request.status === TopupRequestStatus.APPROVED) {
+      const balance = await this.driverWalletService.getWalletBalance(userId);
+      return { new_balance: balance };
+    }
+
+    // Atomic approve-and-credit
+    const updated = await this.topupRequestRepository.update(
+      { id: request.id, status: TopupRequestStatus.PENDING },
+      { status: TopupRequestStatus.APPROVED, remarks: `Paid | paymentId: ${razorpayPaymentId}` },
+    );
+    if (!updated.affected) {
+      const balance = await this.driverWalletService.getWalletBalance(userId);
+      return { new_balance: balance };
+    }
+
+    const new_balance = await this.driverWalletService.topUp(userId, Number(request.amount), razorpayPaymentId);
+    this.logger.log(`[Topup] Wallet credited ₹${request.amount} for driver=${userId} payment=${razorpayPaymentId}`);
+    return { new_balance };
+  }
+
+  /**
    * Create a Razorpay payment link for wallet top-up.
    * In test mode the wallet is credited immediately (no real payment required).
    * In live mode a short URL is returned; the app opens it, the customer pays,

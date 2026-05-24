@@ -444,6 +444,31 @@ export class DriverController {
     return this.driverService.submitTopupRequest(user.id, amount, utrNumber.trim().toUpperCase());
   }
 
+  @Post('wallet/topup/create-order')
+  @ApiOperation({ summary: 'Create Razorpay order for native checkout wallet top-up' })
+  async createTopupOrder(
+    @GetUser() user: User,
+    @Body('amount') amount: number,
+  ) {
+    if (!amount || amount < 10) throw new BadRequestException('Minimum top-up is ₹10');
+    return this.driverService.createTopupOrder(user.id, amount);
+  }
+
+  @Post('wallet/topup/verify-payment')
+  @ApiOperation({ summary: 'Verify Razorpay payment signature and credit wallet' })
+  async verifyTopupPayment(
+    @GetUser() user: User,
+    @Body('razorpay_order_id')   razorpayOrderId: string,
+    @Body('razorpay_payment_id') razorpayPaymentId: string,
+    @Body('razorpay_signature')  razorpaySignature: string,
+    @Body('amount')              amount: number,
+  ) {
+    if (!razorpayOrderId || !razorpayPaymentId || !razorpaySignature) {
+      throw new BadRequestException('razorpay_order_id, razorpay_payment_id and razorpay_signature are required');
+    }
+    return this.driverService.verifyTopupPayment(user.id, razorpayOrderId, razorpayPaymentId, razorpaySignature, amount);
+  }
+
   @Post('wallet/topup/create-link')
   @ApiOperation({ summary: 'Create Razorpay payment link for wallet top-up — test mode credits instantly' })
   async createWalletTopupLink(
