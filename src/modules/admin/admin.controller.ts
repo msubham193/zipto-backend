@@ -425,24 +425,21 @@ export class AdminController {
   @ApiOperation({ summary: 'List all coupons (active + inactive)' })
   @ApiResponse({ status: 200, description: 'Coupons retrieved' })
   async getCoupons() {
-    const data = await this.couponService.findAll(true);
-    return { success: true, data };
+    return this.couponService.findAll(true);
   }
 
   @Post('coupons')
   @ApiOperation({ summary: 'Create a new coupon' })
   @ApiResponse({ status: 201, description: 'Coupon created' })
   async createCoupon(@Body() dto: CreateCouponDto) {
-    const data = await this.couponService.create(dto);
-    return { success: true, data };
+    return this.couponService.create(dto);
   }
 
   @Put('coupons/:id')
   @ApiOperation({ summary: 'Update coupon by ID' })
   @ApiResponse({ status: 200, description: 'Coupon updated' })
   async updateCoupon(@Param('id') id: string, @Body() dto: UpdateCouponDto) {
-    const data = await this.couponService.update(id, dto);
-    return { success: true, data };
+    return this.couponService.update(id, dto);
   }
 
   @Delete('coupons/:id')
@@ -456,8 +453,20 @@ export class AdminController {
   @ApiOperation({ summary: 'Get coupon usage stats' })
   @ApiResponse({ status: 200, description: 'Stats retrieved' })
   async getCouponStats(@Param('id') id: string) {
-    const data = await this.couponService.getUsageStats(id);
-    return { success: true, data };
+    return this.couponService.getUsageStats(id);
+  }
+
+  @Delete('drivers/:id/reset-data')
+  @ApiOperation({ summary: 'Reset a single driver — clears earnings, wallet, trips and ride history' })
+  @ApiResponse({ status: 200, description: 'Driver data cleared' })
+  async resetDriverData(
+    @Param('id') id: string,
+    @Body('confirm') confirm: string,
+  ) {
+    if (confirm !== 'RESET_DRIVER') {
+      throw new BadRequestException('Pass { "confirm": "RESET_DRIVER" } in body to proceed');
+    }
+    return this.adminService.resetDriverData(id);
   }
 
   // ─── Data Reset (dev/test only) ───────────────────────────────────────────

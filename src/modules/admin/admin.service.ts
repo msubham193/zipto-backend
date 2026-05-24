@@ -432,16 +432,19 @@ export class AdminService {
       }
     }
 
+    // bookings.driver_id stores the User ID (not DriverProfile ID)
+    const driverUserId = driver.user_id;
+
     // Get driver's booking statistics
     const [totalBookings, completedBookings, totalEarnings] = await Promise.all([
-      this.bookingRepository.count({ where: { driver: { id: driverId } } }),
+      this.bookingRepository.count({ where: { driver_id: driverUserId } }),
       this.bookingRepository.count({
-        where: { driver: { id: driverId }, status: BookingStatus.COMPLETED },
+        where: { driver_id: driverUserId, status: BookingStatus.COMPLETED },
       }),
       this.paymentRepository
         .createQueryBuilder('payment')
         .leftJoin('payment.booking', 'booking')
-        .where('booking.driver_id = :driverId', { driverId })
+        .where('booking.driver_id = :driverUserId', { driverUserId })
         .andWhere('payment.payment_status = :status', { status: PaymentStatus.COMPLETED })
         .select('SUM(payment.driver_earnings)', 'total')
         .getRawOne(),
@@ -1448,6 +1451,73 @@ export class AdminService {
     }).catch(() => {});
 
     return { message: 'Wallet credited', new_balance: newBalance };
+  }
+
+  // ─── Driver Data Reset ────────────────────────────────────────────────────
+
+  /**
+   * Reset a single driver's earnings, wallet, trips and ride history.
+   * Deletes only records belonging to this driver — no other driver is affected.
+   */
+  async resetDriverData(driverProfileId: string) {
+    const profile = await this.driverProfileRepository.findOne({
+      where: { id: driverProfileId },
+      relations: ['user'],
+    });
+    if (!profile) throw new NotFoundException('Driver profile not found');
+
+    const userId = profile.user_id;
+    const q = this.dataSource.query.bind(this.dataSource);
+
+    // 1. Wallet transactions
+    const [, walletDeleted] = await q(
+      `DELETE FROM driver_wallet_transactions WHERE driver_user_id = $1`, [userId],
+    );
+    // 2. Topup requests
+    const [, topupDeleted] = await q(
+      `DELETE FROM driver_topup_requests WHERE driver_user_id = $1`, [userId],
+    );
+    // 3. Withdrawal requests
+    const [, withdrawalDeleted] = await q(
+      `DELETE FROM driver_withdrawal_requests WHERE driver_profile_id = $1`, [driverProfileId],
+    );
+    // 4. Payments tied to bookings driven by this driver
+    const [, paymentDeleted] = await q(
+      `DELETE FROM payments WHERE booking_id IN (
+         SELECT id FROM bookings WHERE driver_id = $1
+       )`, [driverProfileId],
+    );
+    // 5. Ratings given for this driver
+    const [, ratingDeleted] = await q(
+      `DELETE FROM ratings WHERE driver_id = $1`, [driverProfileId],
+    );
+    // 6. Bookings assigned to this driver
+    const [, bookingDeleted] = await q(
+      `DELETE FROM bookings WHERE driver_id = $1`, [driverProfileId],
+    );
+    // 7. Reset counters on driver profile
+    await q(
+      `UPDATE driver_profiles
+       SET wallet_balance = 0, total_trips = 0, average_rating = NULL,
+           wallet_frozen = false, wallet_freeze_reason = NULL
+       WHERE id = $1`, [driverProfileId],
+    );
+
+    this.logger.log(
+      `[Admin] Driver data reset: driver=${driverProfileId} (${profile.user?.name ?? userId})`,
+    );
+
+    return {
+      message: `All earnings, wallet, and ride data cleared for driver ${profile.user?.name ?? userId}.`,
+      cleared: {
+        wallet_transactions: walletDeleted ?? 0,
+        topup_requests:      topupDeleted  ?? 0,
+        withdrawals:         withdrawalDeleted ?? 0,
+        payments:            paymentDeleted ?? 0,
+        ratings:             ratingDeleted  ?? 0,
+        bookings:            bookingDeleted ?? 0,
+      },
+    };
   }
 
   // ─── Dev / Test Data Reset ────────────────────────────────────────────────
