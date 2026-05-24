@@ -44,14 +44,19 @@ export class FcmService implements OnModuleInit {
   /**
    * Send push notification to a single device token.
    * Returns false for invalid/stale tokens so the caller can clean them up.
+   *
+   * isNewBooking=true: uses high-priority heads-up channel for driver alerts
+   * (full-screen intent — Rapido / Ola style loud ring + banner).
    */
   async sendToToken(
     token: string,
     title: string,
     body: string,
     data?: Record<string, string>,
+    isNewBooking = false,
   ): Promise<boolean> {
     if (!this.messaging) return false;
+    const channelId = isNewBooking ? 'zipto_new_booking' : 'zipto_default';
     try {
       await this.messaging.send({
         token,
@@ -60,16 +65,20 @@ export class FcmService implements OnModuleInit {
         android: {
           priority: 'high',
           notification: {
-            channelId: 'zipto_default',
-            sound: 'default',
+            channelId,
+            sound: isNewBooking ? 'new_booking' : 'default',
+            // Heads-up notification (like Rapido's incoming booking)
+            visibility: 'public',
+            priority: isNewBooking ? 'max' : 'high',
           },
         },
         apns: {
           payload: {
             aps: {
-              sound: 'default',
+              sound: isNewBooking ? 'new_booking.caf' : 'default',
               badge: 1,
               'content-available': 1,
+              'interruption-level': isNewBooking ? 'time-sensitive' : 'active',
             },
           },
         },

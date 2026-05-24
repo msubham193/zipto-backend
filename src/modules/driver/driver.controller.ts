@@ -433,8 +433,7 @@ export class DriverController {
   }
 
   @Post('wallet/topup/request')
-  @ApiOperation({ summary: 'Submit UPI top-up request with UTR number' })
-  @ApiResponse({ status: 201, description: 'Request submitted, pending admin approval' })
+  @ApiOperation({ summary: 'Submit UPI top-up request with UTR number (manual fallback)' })
   async submitTopupRequest(
     @GetUser() user: User,
     @Body('amount') amount: number,
@@ -443,6 +442,20 @@ export class DriverController {
     if (!amount || amount < 10) throw new BadRequestException('Minimum top-up is ₹10');
     if (!utrNumber?.trim()) throw new BadRequestException('UTR number is required');
     return this.driverService.submitTopupRequest(user.id, amount, utrNumber.trim().toUpperCase());
+  }
+
+  @Post('wallet/topup/upi-verify')
+  @ApiOperation({ summary: 'Auto-verify UPI topup from react-native-upi-payment response — credits wallet instantly' })
+  async autoVerifyUpiTopup(
+    @GetUser() user: User,
+    @Body('amount') amount: number,
+    @Body('upi_txn_id') upiTxnId: string,
+    @Body('utr_number') utrNumber: string,
+    @Body('status') status: string,
+  ) {
+    if (!amount || amount < 10) throw new BadRequestException('Minimum top-up is ₹10');
+    if (!status) throw new BadRequestException('UPI status is required');
+    return this.driverService.autoVerifyUpiTopup(user.id, amount, upiTxnId ?? '', utrNumber ?? '', status);
   }
 
   @Get('wallet/topup/requests')

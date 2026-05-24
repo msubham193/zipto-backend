@@ -116,9 +116,15 @@ export class NotificationService implements OnModuleInit {
     this.bookingGateway.notifyUser(userId, 'new_notification', notif);
 
     // 3. FCM push (app is in background or closed) — fire-and-forget
-    this.sendFcmToUser(userId, title, message, { type, notificationId: notif.id }).catch(
-      () => {},
-    );
+    // Use high-priority booking channel for new_booking alerts
+    const isNewBooking = (data as any)?.type === 'new_booking';
+    this.sendFcmToUser(
+      userId,
+      title,
+      message,
+      { type, notificationId: notif.id, ...(data ? Object.fromEntries(Object.entries(data).map(([k, v]) => [k, String(v)])) : {}) },
+      isNewBooking,
+    ).catch(() => {});
 
     this.logger.log(`Notification pushed to ${userId}: ${title}`);
     return notif;
@@ -476,6 +482,7 @@ export class NotificationService implements OnModuleInit {
     title: string,
     body: string,
     data?: Record<string, string>,
+    isNewBooking = false,
   ): Promise<void> {
     const user = await this.userRepository.findOne({
       where: { id: userId },
@@ -483,7 +490,7 @@ export class NotificationService implements OnModuleInit {
     });
     if (!user?.fcm_token) return;
 
-    const ok = await this.fcmService.sendToToken(user.fcm_token, title, body, data);
+    const ok = await this.fcmService.sendToToken(user.fcm_token, title, body, data, isNewBooking);
     if (!ok) {
       // Stale token — clear it
       await this.userRepository.update(userId, { fcm_token: null });

@@ -15,6 +15,7 @@ import { DriverModule } from '../driver/driver.module';
 import { NotificationModule } from '../notification/notification.module';
 import { FraudModule } from '../fraud/fraud.module';
 import { SettingsModule } from '../settings/settings.module';
+import { CouponModule } from '../coupon/coupon.module';
 
 @Module({
   imports: [
@@ -25,6 +26,7 @@ import { SettingsModule } from '../settings/settings.module';
     NotificationModule,
     FraudModule,
     SettingsModule,
+    CouponModule,
   ],
   controllers: [AdminController],
   providers: [AdminService],

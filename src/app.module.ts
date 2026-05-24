@@ -27,6 +27,7 @@ import { DriverFraudModule } from './modules/driver-fraud/driver-fraud.module';
 import { SupportModule } from './modules/support/support.module';
 import { SettingsModule } from './modules/settings/settings.module';
 import { ZiptoShieldModule } from './modules/zipto-shield/zipto-shield.module';
+import { CouponModule } from './modules/coupon/coupon.module';
 import { BullModule } from '@nestjs/bull';
 import { ScheduleModule } from '@nestjs/schedule';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
@@ -104,6 +105,7 @@ import { RolesGuard } from './common/guards/roles.guard';
     SupportModule,
     SettingsModule,
     ZiptoShieldModule,
+    CouponModule,
     ServeStaticModule.forRoot({
       rootPath: join(__dirname, '..', 'uploads'),
       serveRoot: '/uploads',

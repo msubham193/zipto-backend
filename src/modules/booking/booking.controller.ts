@@ -31,6 +31,8 @@ import { Roles } from '../../common/decorators/roles.decorator';
 import { GetUser } from '../../common/decorators/get-user.decorator';
 import { User } from '../auth/entities/user.entity';
 import { Public } from '../../common/decorators/public.decorator';
+import { CouponService } from '../coupon/coupon.service';
+import { ValidateCouponDto } from '../coupon/dto/coupon.dto';
 
 @ApiTags('Booking')
 @Controller('booking')
@@ -39,6 +41,7 @@ export class BookingController {
   constructor(
     private readonly bookingService: BookingService,
     private readonly bookingGateway: BookingGateway,
+    private readonly couponService: CouponService,
   ) {}
 
   // Public/Customer Endpoints
@@ -58,6 +61,15 @@ export class BookingController {
   @ApiResponse({ status: 200, description: 'Fare estimated successfully' })
   async estimateFare(@Body() estimateFareDto: EstimateFareDto) {
     return this.bookingService.estimateFare(estimateFareDto);
+  }
+
+  @Post('coupon/validate')
+  @Roles('customer')
+  @ApiOperation({ summary: 'Validate a coupon code before booking' })
+  @ApiResponse({ status: 200, description: 'Coupon valid — returns discount amount and final fare' })
+  async validateCoupon(@GetUser() user: User, @Body() dto: ValidateCouponDto) {
+    const result = await this.couponService.validate(user.id, dto);
+    return { success: true, data: result };
   }
 
   @Post('create')

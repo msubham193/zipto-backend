@@ -10,6 +10,8 @@ import { ReportsQueryDto } from './dto/reports-query.dto';
 import { CreatePricingRuleDto, UpdatePricingRuleDto } from './dto/pricing-rule.dto';
 import { VehiclesQueryDto } from './dto/vehicles-query.dto';
 import { SystemSettingsService } from '../settings/system-settings.service';
+import { CouponService } from '../coupon/coupon.service';
+import { CreateCouponDto, UpdateCouponDto } from '../coupon/dto/coupon.dto';
 
 @ApiTags('Admin')
 @Controller('admin')
@@ -21,6 +23,7 @@ export class AdminController {
     private readonly bookingService: BookingService,
     private readonly notificationService: NotificationService,
     private readonly systemSettings: SystemSettingsService,
+    private readonly couponService: CouponService,
   ) {}
 
   @Get('dashboard/stats')
@@ -393,6 +396,47 @@ export class AdminController {
   ) {
     if (!amount || amount <= 0) throw new BadRequestException('amount must be > 0');
     return this.adminService.adminCreditDriverWallet(driverId, amount, note ?? 'Admin credit');
+  }
+
+  // ─── Coupon / Promo Code Management ──────────────────────────────────────
+
+  @Get('coupons')
+  @ApiOperation({ summary: 'List all coupons (active + inactive)' })
+  @ApiResponse({ status: 200, description: 'Coupons retrieved' })
+  async getCoupons() {
+    const data = await this.couponService.findAll(true);
+    return { success: true, data };
+  }
+
+  @Post('coupons')
+  @ApiOperation({ summary: 'Create a new coupon' })
+  @ApiResponse({ status: 201, description: 'Coupon created' })
+  async createCoupon(@Body() dto: CreateCouponDto) {
+    const data = await this.couponService.create(dto);
+    return { success: true, data };
+  }
+
+  @Put('coupons/:id')
+  @ApiOperation({ summary: 'Update coupon by ID' })
+  @ApiResponse({ status: 200, description: 'Coupon updated' })
+  async updateCoupon(@Param('id') id: string, @Body() dto: UpdateCouponDto) {
+    const data = await this.couponService.update(id, dto);
+    return { success: true, data };
+  }
+
+  @Delete('coupons/:id')
+  @ApiOperation({ summary: 'Delete coupon by ID' })
+  @ApiResponse({ status: 200, description: 'Coupon deleted' })
+  async deleteCoupon(@Param('id') id: string) {
+    return this.couponService.remove(id);
+  }
+
+  @Get('coupons/:id/stats')
+  @ApiOperation({ summary: 'Get coupon usage stats' })
+  @ApiResponse({ status: 200, description: 'Stats retrieved' })
+  async getCouponStats(@Param('id') id: string) {
+    const data = await this.couponService.getUsageStats(id);
+    return { success: true, data };
   }
 
   // ─── Data Reset (dev/test only) ───────────────────────────────────────────

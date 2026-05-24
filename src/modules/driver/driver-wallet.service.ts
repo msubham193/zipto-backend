@@ -34,6 +34,18 @@ export class DriverWalletService {
     amount: number,
     bookingId: string,
   ): Promise<number> {
+    // Idempotency guard — prevents double-credit if completeTrip is retried
+    const existing = await this.txnRepository.findOne({
+      where: {
+        driver_user_id: driverUserId,
+        booking_id: bookingId,
+        type: DriverWalletTxnType.TRIP_EARNINGS_CREDIT,
+      },
+    });
+    if (existing) {
+      this.logger.warn(`[DriverWallet] Duplicate creditTripEarnings blocked for booking=${bookingId}`);
+      return await this.getWalletBalance(driverUserId);
+    }
     return this.adjustWallet(
       driverUserId,
       amount,
@@ -56,6 +68,18 @@ export class DriverWalletService {
     shieldAmount: number,
     bookingId: string,
   ): Promise<number> {
+    // Idempotency guard
+    const existing = await this.txnRepository.findOne({
+      where: {
+        driver_user_id: driverUserId,
+        booking_id: bookingId,
+        type: DriverWalletTxnType.CASH_COMMISSION_DEDUCTION,
+      },
+    });
+    if (existing) {
+      this.logger.warn(`[DriverWallet] Duplicate deductCashCommission blocked for booking=${bookingId}`);
+      return await this.getWalletBalance(driverUserId);
+    }
     const total = Math.round(skidoCommission + shieldAmount);
     const balanceAfter = await this.adjustWallet(
       driverUserId,

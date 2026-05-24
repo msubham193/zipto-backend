@@ -24,6 +24,7 @@ import { getPaginationMeta } from '../../common/utils/helpers.util';
 import { S3Service } from '../../services/s3.service';
 import { NotificationService } from '../notification/notification.service';
 import { RedisService } from '../../services/redis.service';
+import { DriverWalletService } from './driver-wallet.service';
 
 /** GPS ping TTL: if a driver stops sending location for 20 min during an active delivery,
  *  the cron guard treats them as a ghost. */
@@ -51,6 +52,7 @@ export class DriverService {
     private readonly s3Service: S3Service,
     private readonly notificationService: NotificationService,
     private readonly cacheManager: RedisService,
+    private readonly driverWalletService: DriverWalletService,
   ) {}
 
   /**
@@ -973,6 +975,51 @@ export class DriverService {
       message: 'Top-up request submitted. Your wallet will be credited once admin verifies the payment.',
       request_id: request.id,
     };
+  }
+
+  /**
+   * Auto-verify a UPI topup using the response from react-native-upi-payment.
+   * Called immediately after the UPI app returns SUCCESS to the driver app.
+   * Credits the wallet in real-time — no admin action required.
+   */
+  async autoVerifyUpiTopup(
+    userId: string,
+    amount: number,
+    upiTxnId: string,
+    utrNumber: string,
+    upiStatus: string,
+  ): Promise<{ new_balance: number }> {
+    const profile = await this.driverProfileRepository.findOne({ where: { user_id: userId } });
+    if (!profile) throw new NotFoundException('Driver profile not found');
+
+    if (upiStatus !== 'SUCCESS') {
+      throw new BadRequestException(`UPI payment status is ${upiStatus} — only SUCCESS payments are credited.`);
+    }
+
+    // Use UTR if available, otherwise generate a unique ref for this topup
+    const ref = (utrNumber || upiTxnId || `AUTO-${userId.slice(-8)}-${Date.now()}`).toUpperCase();
+
+    // Idempotency: if this UTR was already credited, return current balance
+    const existing = await this.topupRequestRepository.findOne({ where: { utr_number: ref } });
+    if (existing && existing.status === TopupRequestStatus.APPROVED) {
+      const balance = await this.driverWalletService.getWalletBalance(userId);
+      return { new_balance: balance };
+    }
+    if (existing) throw new BadRequestException('This transaction has already been processed.');
+
+    // Record + credit atomically
+    const request = this.topupRequestRepository.create({
+      driver_user_id: userId,
+      driver_profile_id: profile.id,
+      amount,
+      utr_number: ref,
+      status: TopupRequestStatus.APPROVED,
+      remarks: `Auto-verified via UPI app | txnId: ${upiTxnId}`,
+    });
+    await this.topupRequestRepository.save(request);
+
+    const new_balance = await this.driverWalletService.topUp(userId, amount, ref);
+    return { new_balance };
   }
 
   async getDriverTopupRequests(userId: string) {

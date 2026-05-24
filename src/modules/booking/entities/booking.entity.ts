@@ -177,6 +177,16 @@ export class Booking {
   @Column({ type: 'decimal', precision: 10, scale: 2, default: 0 })
   coin_discount: number;
 
+  // --- Coupon Discount ---
+  @Column({ type: 'varchar', length: 50, nullable: true })
+  coupon_code: string;
+
+  @Column({ type: 'uuid', nullable: true })
+  coupon_id: string;
+
+  @Column({ type: 'decimal', precision: 10, scale: 2, default: 0 })
+  coupon_discount: number;
+
   // --- Fare Breakdown & Additional Charges ---
 
   @Column({ type: 'jsonb', nullable: true })

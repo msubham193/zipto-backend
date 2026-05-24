@@ -41,6 +41,7 @@ import { DriverFraudService } from '../driver-fraud/driver-fraud.service';
 import { NotificationService } from '../notification/notification.service';
 import { ZiptoShieldService } from '../zipto-shield/zipto-shield.service';
 import { DriverWalletService } from '../driver/driver-wallet.service';
+import { CouponService } from '../coupon/coupon.service';
 
 @Injectable()
 export class BookingService {
@@ -70,6 +71,7 @@ export class BookingService {
     private notificationService: NotificationService,
     private ziptoShieldService: ZiptoShieldService,
     private driverWalletService: DriverWalletService,
+    private couponService: CouponService,
   ) {}
 
   private async ensureDefaultPricingRules() {
@@ -276,6 +278,7 @@ export class BookingService {
       alternative_phone,
       paid_by = 'sender',
       coins_to_redeem = 0,
+      coupon_code,
     } = createBookingDto;
 
     // Validate scheduled time
@@ -317,6 +320,21 @@ export class BookingService {
       extra_stops: extra_drop_locations.length,
     });
 
+    // Validate coupon (if provided) against the raw fare before coin discount
+    let couponDiscount  = 0;
+    let appliedCouponId: string | null = null;
+    let appliedCouponCode: string | null = null;
+    if (coupon_code) {
+      const result = await this.couponService._validateInternal(userId, {
+        code:         coupon_code,
+        order_value:  fareEstimate.estimated_fare,
+        vehicle_type,
+      });
+      couponDiscount    = result.discount_amount;
+      appliedCouponId   = result.coupon_id;
+      appliedCouponCode = result.code;
+    }
+
     // Generate OTPs for later (sent via SMS after driver accepts)
     const pickup_otp   = Math.floor(100000 + Math.random() * 900000).toString();
     const delivery_otp = Math.floor(100000 + Math.random() * 900000).toString();
@@ -324,8 +342,11 @@ export class BookingService {
     const offerId = randomUUID();
     const OFFER_TTL_MS = 6 * 60 * 1000; // 6 minutes
 
-    // Apply coin discount to estimated fare (floor at 0)
-    const discountedFare = Math.max(0, Math.round(fareEstimate.estimated_fare - coinDiscount));
+    // Apply coin + coupon discount to estimated fare (floor at 0)
+    const discountedFare = Math.max(
+      0,
+      Math.round(fareEstimate.estimated_fare - coinDiscount - couponDiscount),
+    );
 
     // Store entire offer data in Redis — NO DB write yet
     await this.cacheManager.set(`offer:${offerId}`, {
@@ -354,6 +375,9 @@ export class BookingService {
       delivery_otp,
       coins_to_redeem:  validatedCoins,
       coin_discount:    coinDiscount,
+      coupon_code:      appliedCouponCode,
+      coupon_id:        appliedCouponId,
+      coupon_discount:  couponDiscount,
     }, OFFER_TTL_MS);
 
     // Track active offer per customer so the status banner can find it
@@ -642,6 +666,21 @@ export class BookingService {
 
     for (const driverId of driverIds) {
       this.bookingGateway.notifyUser(driverId, 'booking_available', payload);
+
+      // FCM push so the new-booking alert arrives even if the driver app is background
+      this.notificationService.push(
+        driverId,
+        'general',
+        '🔔 New Booking Nearby!',
+        `${offerData.pickup_address} → ${offerData.drop_address} · ₹${Math.round(offerData.estimated_fare)}`,
+        {
+          type:       'new_booking',
+          bookingId:  offerId,
+          fare:       String(Math.round(offerData.estimated_fare)),
+          distance:   String(offerData.distance),
+          vehicleType,
+        },
+      ).catch(() => {});
 
       // Track per-driver so getAvailableBookings() can return them
       const existing = (await this.cacheManager.get<string[]>(`driver:broadcasts:${driverId}`)) || [];
@@ -1073,6 +1112,10 @@ export class BookingService {
         this.logger.log(`[acceptBooking] Redeemed ${coinsToRedeem} coins (₹${coinDiscount} off) for customer ${offerData.customer_id}`);
       }
 
+      const couponDiscount: number  = offerData.coupon_discount  || 0;
+      const couponId: string | null = offerData.coupon_id        || null;
+      const couponCode: string | null = offerData.coupon_code    || null;
+
       const booking = this.bookingRepository.create({
         customer_id:     offerData.customer_id,
         name:            offerData.name,
@@ -1105,7 +1148,10 @@ export class BookingService {
         acceptance_time: new Date(),
         coins_redeemed:  coinsToRedeem,
         coin_discount:   coinDiscount,
-      });
+        coupon_code:     couponCode,
+        coupon_id:       couponId,
+        coupon_discount: couponDiscount,
+      } as any);
 
       await this.bookingRepository
         .createQueryBuilder()
@@ -1128,6 +1174,21 @@ export class BookingService {
 
       if (!createdBooking) throw new Error('Failed to retrieve created booking');
 
+      // Record coupon usage if one was applied
+      if (couponId && couponDiscount > 0) {
+        try {
+          await this.couponService.recordUsage(
+            couponId,
+            offerData.customer_id,
+            createdBooking.id,
+            couponDiscount,
+          );
+        } catch (couponErr: any) {
+          this.logger.warn(`[acceptBooking] Coupon usage record failed: ${couponErr?.message}`);
+          // Non-fatal — booking is already confirmed; coupon limit check already passed at create()
+        }
+      }
+
       // Send OTP SMS now that booking is confirmed
       const smsPhone = offerData.mobile_number;
       const smsBody =
@@ -1147,6 +1208,15 @@ export class BookingService {
         offerId,
         driverId,
       });
+
+      // FCM push to customer (works even if app is background/closed)
+      this.notificationService.pushToCustomer(
+        offerData.customer_id,
+        'general',
+        '🚀 Driver Found!',
+        `Your driver is on the way. OTP sent via SMS.`,
+        { type: 'booking_accepted', bookingId: createdBooking.id },
+      ).catch(() => {});
 
       // Notify other broadcast drivers that booking is taken
       if (isBroadcast) {
@@ -1302,6 +1372,15 @@ export class BookingService {
         );
       }
     }
+
+    // FCM push to customer — package picked up
+    this.notificationService.pushToCustomer(
+      booking.customer_id,
+      'general',
+      '📦 Package Picked Up',
+      'Your package has been collected. The rider is on the way!',
+      { type: 'trip_started', bookingId: booking.id },
+    ).catch(() => {});
 
     return booking;
   }
@@ -1475,18 +1554,16 @@ export class BookingService {
       where: { booking_id: bookingId, payment_status: PaymentStatus.COMPLETED },
     });
 
-    if (!alreadyPaid && paymentMethod === 'cash') {
-      // ── CASH TRIP ───────────────────────────────────────────────────────────
-      // Driver physically collected the full fare from the customer.
-      // Zipto's cut (commission + platform fee + shield) is recovered by debiting
-      // the driver's virtual wallet — same model as Rapido/Ola for cash rides.
+    if (paymentMethod === 'cash' && !alreadyPaid) {
+      // ── CASH TRIP ────────────────────────────────────────────────────────────
+      // Driver physically collected the full fare. Zipto recovers commission +
+      // platform fee + shield by debiting the driver's virtual wallet.
       await this.driverWalletService.deductCashCommission(
         driverId,
         skidoCommission,
         PLATFORM_FEE + SHIELD_FEE,
         bookingId,
       );
-
       const cashPayment = this.paymentRepository.create({
         booking_id: bookingId,
         amount: finalFare,
@@ -1495,10 +1572,9 @@ export class BookingService {
         payment_status: PaymentStatus.COMPLETED,
       });
       await this.paymentRepository.save(cashPayment);
-    } else {
-      // ── ONLINE / QR TRIP ────────────────────────────────────────────────────
-      // Customer already paid Zipto via Razorpay.  Credit the driver's share
-      // into their virtual wallet so they can withdraw it later.
+    } else if (paymentMethod !== 'cash') {
+      // ── ONLINE / QR TRIP ─────────────────────────────────────────────────────
+      // Credit driver earnings — idempotent (won't double-credit on retry).
       await this.driverWalletService.creditTripEarnings(
         driverId,
         driverEarnings,
@@ -1508,6 +1584,15 @@ export class BookingService {
 
     // Zipto Shield: ₹1 contributed per completed booking (fire-and-forget)
     this.ziptoShieldService.contribute(savedBooking.id).catch(() => {});
+
+    // FCM: notify customer trip is complete
+    this.notificationService.pushToCustomer(
+      booking.customer_id,
+      'general',
+      '✅ Delivery Completed!',
+      `Your package has been delivered. Final fare: ₹${Math.round(finalFare)}`,
+      { type: 'trip_completed', bookingId: savedBooking.id, finalFare: String(Math.round(finalFare)) },
+    ).catch(() => {});
 
     // Award coins to customer for successful delivery
     const coinReward = await this.coinService.awardCoins(

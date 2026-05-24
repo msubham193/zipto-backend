@@ -159,6 +159,12 @@ export class CreateBookingDto {
   @IsInt()
   @Min(0)
   coins_to_redeem?: number;
+
+  @ApiPropertyOptional({ example: 'FIRST50', description: 'Promo / coupon code to apply' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(50)
+  coupon_code?: string;
 }
 
 export class StartTripDto {
