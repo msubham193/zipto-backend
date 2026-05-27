@@ -130,6 +130,54 @@ export class NotificationService implements OnModuleInit {
     return notif;
   }
 
+  /**
+   * Batch push to many drivers in a single DB round-trip + one FCM multicast call.
+   * Used by broadcastBookingToNearby to avoid N separate DB queries per driver.
+   */
+  async pushToMany(
+    userIds: string[],
+    type: NotificationType,
+    title: string,
+    message: string,
+    data?: Record<string, unknown>,
+    isNewBooking = false,
+  ): Promise<void> {
+    if (userIds.length === 0) return;
+
+    const now = Date.now();
+
+    // 1. Store individual notification + WebSocket for each driver (Redis + in-memory)
+    for (const userId of userIds) {
+      const notif: DriverNotification = {
+        id: uuidv4(), type, title, message, data, createdAt: now, read: false,
+      };
+      const key = this.key(userId);
+      const existing = (await this.cacheManager.get<DriverNotification[]>(key)) ?? [];
+      await this.cacheManager.set(key, [notif, ...existing].slice(0, MAX_NOTIFICATIONS), NOTIFICATION_TTL_MS);
+      this.bookingGateway.notifyUser(userId, 'new_notification', notif);
+    }
+
+    // 2. Batch fetch FCM tokens — one DB query for all drivers
+    const users = await this.userRepository.find({
+      where: { id: In(userIds) },
+      select: ['id', 'fcm_token'],
+    });
+    const tokens = users.map(u => u.fcm_token).filter(Boolean) as string[];
+    if (tokens.length === 0) return;
+
+    const dataStr = data
+      ? Object.fromEntries(Object.entries(data).map(([k, v]) => [k, String(v)]))
+      : undefined;
+
+    // 3. One batch FCM multicast — uses booking_alert channel when isNewBooking
+    const { success, failure } = await this.fcmService.sendToTokens(
+      tokens, title, message, dataStr, isNewBooking,
+    );
+    this.logger.log(
+      `[pushToMany] ${userIds.length} drivers — FCM: ${success} ok, ${failure} failed`,
+    );
+  }
+
   async getForUser(userId: string): Promise<DriverNotification[]> {
     return (
       (await this.cacheManager.get<DriverNotification[]>(this.key(userId))) ?? []

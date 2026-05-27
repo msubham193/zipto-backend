@@ -200,10 +200,28 @@ export class BookingService {
     const skidoCommission = this.round(estimatedFare * (commissionPercent / 100));
     const driverEarnings = this.round(estimatedFare - skidoCommission);
 
+    // 8. Driver availability — parallel check at search radius (does not block fare calc)
+    let nearbyDriverCount = 0;
+    try {
+      const settings = await this.systemSettings.getDispatchSettings();
+      const drivers = await this.findNearbyDrivers(
+        pickup_location.latitude,
+        pickup_location.longitude,
+        settings.search_radius_km,
+        vehicle_type,
+      );
+      nearbyDriverCount = drivers.length;
+    } catch {
+      // availability check is best-effort; never fail the fare response
+      nearbyDriverCount = 0;
+    }
+
     return {
       distance: this.round(distance),
       duration,
       estimated_fare: estimatedFare,
+      drivers_available: nearbyDriverCount > 0,
+      nearby_driver_count: nearbyDriverCount,
       breakdown: {
         base_fare: baseFare,
         base_distance_km: baseDistanceKm,
@@ -664,30 +682,30 @@ export class BookingService {
       timeLeft:  60, // broadcast offers give drivers 60s to accept
     };
 
+    // Emit booking_available to all drivers via WebSocket + track per-driver in Redis
     for (const driverId of driverIds) {
       this.bookingGateway.notifyUser(driverId, 'booking_available', payload);
-
-      // FCM push so the new-booking alert arrives even if the driver app is background
-      this.notificationService.push(
-        driverId,
-        'general',
-        '🔔 New Booking Nearby!',
-        `${offerData.pickup_address} → ${offerData.drop_address} · ₹${Math.round(offerData.estimated_fare)}`,
-        {
-          type:       'new_booking',
-          bookingId:  offerId,
-          fare:       String(Math.round(offerData.estimated_fare)),
-          distance:   String(offerData.distance),
-          vehicleType,
-        },
-      ).catch(() => {});
-
-      // Track per-driver so getAvailableBookings() can return them
       const existing = (await this.cacheManager.get<string[]>(`driver:broadcasts:${driverId}`)) || [];
       if (!existing.includes(offerId)) {
         await this.cacheManager.set(`driver:broadcasts:${driverId}`, [...existing, offerId], BROADCAST_TTL_MS);
       }
     }
+
+    // Single batch FCM push (1 DB query + 1 Firebase multicast for all drivers)
+    this.notificationService.pushToMany(
+      driverIds,
+      'general',
+      '🔔 New Booking Nearby!',
+      `${offerData.pickup_address} → ${offerData.drop_address} · ₹${Math.round(offerData.estimated_fare)}`,
+      {
+        type:       'new_booking',
+        bookingId:  offerId,
+        fare:       String(Math.round(offerData.estimated_fare)),
+        distance:   String(offerData.distance),
+        vehicleType: vehicleType ?? '',
+      },
+      true, // isNewBooking — routes to zipto_new_booking channel
+    ).catch(err => this.logger.error(`[broadcast] pushToMany failed: ${err.message}`));
 
     this.logger.log(`Broadcast offer ${offerId} to ${driverIds.length} nearby drivers`);
 

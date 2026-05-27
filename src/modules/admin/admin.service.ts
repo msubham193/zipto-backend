@@ -1206,6 +1206,12 @@ export class AdminService {
     if (withdrawal.status === WithdrawalStatus.REJECTED) {
       throw new BadRequestException('Cannot approve a withdrawal that has already been rejected');
     }
+    // Auto-payout already triggered at request time — payout is in flight, webhook will finalize
+    if (withdrawal.status === WithdrawalStatus.PROCESSING && withdrawal.payout_id) {
+      throw new BadRequestException(
+        `Payout already in progress (payout_id: ${withdrawal.payout_id}). Status will update automatically via webhook when IMPS settles.`,
+      );
+    }
 
     const driverUserId = withdrawal.driver_profile?.user_id;
     const amount       = Number(withdrawal.amount);

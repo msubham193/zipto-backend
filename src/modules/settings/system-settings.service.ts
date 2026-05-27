@@ -11,7 +11,7 @@ export interface DispatchSettings {
 }
 
 const DEFAULTS: Array<{ key: string; value: string; description: string }> = [
-  { key: 'search_radius_km',       value: '5',  description: 'Radius in km for sequential driver search (nearest driver first)' },
+  { key: 'search_radius_km',       value: '4',  description: 'Radius in km for sequential driver search (nearest driver first)' },
   { key: 'broadcast_radius_km',    value: '10', description: 'Radius in km for broadcast after sequential search is exhausted' },
   { key: 'offer_timeout_seconds',  value: '15', description: 'Seconds each driver has to accept or reject an offer' },
   { key: 'max_search_attempts',    value: '10', description: 'Max sequential attempts before falling back to broadcast' },
@@ -58,7 +58,7 @@ export class SystemSettingsService implements OnModuleInit {
       for (const r of rows) { map[r.key] = r.value; }
 
       this.cache = {
-        search_radius_km:      parseFloat(map.search_radius_km      ?? '5'),
+        search_radius_km:      parseFloat(map.search_radius_km      ?? '4'),
         broadcast_radius_km:   parseFloat(map.broadcast_radius_km   ?? '10'),
         offer_timeout_seconds: parseInt(map.offer_timeout_seconds   ?? '15', 10),
         max_search_attempts:   parseInt(map.max_search_attempts     ?? '10', 10),
@@ -67,7 +67,7 @@ export class SystemSettingsService implements OnModuleInit {
     } catch (err) {
       this.logger.error('Failed to read system settings, using defaults', err);
       // Fall back to hardcoded defaults so booking flow never breaks
-      this.cache = { search_radius_km: 5, broadcast_radius_km: 10, offer_timeout_seconds: 15, max_search_attempts: 10 };
+      this.cache = { search_radius_km: 4, broadcast_radius_km: 10, offer_timeout_seconds: 15, max_search_attempts: 10 };
     }
     return this.cache!;
   }

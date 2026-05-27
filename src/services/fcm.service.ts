@@ -66,8 +66,7 @@ export class FcmService implements OnModuleInit {
           priority: 'high',
           notification: {
             channelId,
-            sound: isNewBooking ? 'new_booking' : 'default',
-            // Heads-up notification (like Rapido's incoming booking)
+            sound: isNewBooking ? 'booking_alert' : 'default',
             visibility: 'public',
             priority: isNewBooking ? 'max' : 'high',
           },
@@ -75,7 +74,7 @@ export class FcmService implements OnModuleInit {
         apns: {
           payload: {
             aps: {
-              sound: isNewBooking ? 'new_booking.caf' : 'default',
+              sound: isNewBooking ? 'booking_alert.caf' : 'default',
               badge: 1,
               'content-available': 1,
               'interruption-level': isNewBooking ? 'time-sensitive' : 'active',
@@ -102,17 +101,20 @@ export class FcmService implements OnModuleInit {
 
   /**
    * Send to many tokens at once (auto-chunked at 500).
+   * isNewBooking=true routes to the high-priority booking alert channel.
    */
   async sendToTokens(
     tokens: string[],
     title: string,
     body: string,
     data?: Record<string, string>,
+    isNewBooking = false,
   ): Promise<{ success: number; failure: number }> {
     if (!this.messaging || tokens.length === 0) {
       return { success: 0, failure: 0 };
     }
 
+    const channelId = isNewBooking ? 'zipto_new_booking' : 'zipto_default';
     let success = 0;
     let failure = 0;
 
@@ -123,10 +125,23 @@ export class FcmService implements OnModuleInit {
           tokens: chunk,
           notification: { title, body },
           data: data ?? {},
-          android: { priority: 'high' },
+          android: {
+            priority: 'high',
+            notification: {
+              channelId,
+              sound: isNewBooking ? 'booking_alert' : 'default',
+              visibility: 'public',
+              priority: isNewBooking ? 'max' : 'high',
+            },
+          },
           apns: {
             payload: {
-              aps: { sound: 'default', badge: 1, 'content-available': 1 },
+              aps: {
+                sound: isNewBooking ? 'booking_alert.caf' : 'default',
+                badge: 1,
+                'content-available': 1,
+                'interruption-level': isNewBooking ? 'time-sensitive' : 'active',
+              },
             },
           },
         });

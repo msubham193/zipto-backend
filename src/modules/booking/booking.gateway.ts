@@ -17,6 +17,9 @@ import { RedisService } from '../../services/redis.service';
 /** How long we wait after a socket disconnect before treating the driver as AWOL. */
 const DISCONNECT_GRACE_MS = 15 * 60 * 1000; // 15 minutes
 
+/** How long a pending offer survives waiting for driver to reconnect. */
+const PENDING_OFFER_TTL_MS = 30_000; // 30 seconds
+
 @WebSocketGateway({
   cors: {
     origin: true,
@@ -29,7 +32,6 @@ export class BookingGateway implements OnGatewayConnection, OnGatewayDisconnect 
   server!: Server;
 
   private readonly logger = new Logger(BookingGateway.name);
-  private pendingOffers = new Map<string, any>();
 
   constructor(
     private jwtService: JwtService,
@@ -67,11 +69,12 @@ export class BookingGateway implements OnGatewayConnection, OnGatewayDisconnect 
         this.logger.log(`[Gateway] Driver ${payload.sub} reconnected within grace — ghost check cancelled for booking ${gracePending}`);
       }
 
-      const pendingOffer = this.pendingOffers.get(payload.sub);
+      // Deliver any offer that was queued while the driver was briefly disconnected
+      const pendingOffer = await this.cacheManager.get<any>(`offer:pending:${payload.sub}`);
       if (pendingOffer) {
-        this.logger.log(`[Gateway] Delivering pending offer to reconnected user ${payload.sub}`);
+        this.logger.log(`[Gateway] Delivering pending offer to reconnected driver ${payload.sub}`);
         client.emit('booking_offer', pendingOffer);
-        this.pendingOffers.delete(payload.sub);
+        await this.cacheManager.del(`offer:pending:${payload.sub}`);
       }
     } catch (error: any) {
       this.logger.error(`Connection error: ${error?.message}`);
@@ -124,15 +127,10 @@ export class BookingGateway implements OnGatewayConnection, OnGatewayDisconnect 
     if (sockets.length > 0) {
       this.server.to(room).emit('booking_offer', bookingData);
     } else {
-      this.logger.log(`[Gateway] Driver ${driverId} offline, storing pending offer`);
-      this.pendingOffers.set(driverId, bookingData);
-
-      setTimeout(() => {
-        if (this.pendingOffers.get(driverId) === bookingData) {
-          this.pendingOffers.delete(driverId);
-          this.logger.log(`[Gateway] Pending offer expired for driver ${driverId}`);
-        }
-      }, 30000);
+      // Driver socket is disconnected — persist offer in Redis so it survives reconnect
+      // and server restarts. TTL matches the offer timeout window.
+      this.logger.log(`[Gateway] Driver ${driverId} offline — queuing offer in Redis`);
+      await this.cacheManager.set(`offer:pending:${driverId}`, bookingData, PENDING_OFFER_TTL_MS);
     }
   }
 

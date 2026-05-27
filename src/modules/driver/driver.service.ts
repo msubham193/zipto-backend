@@ -825,7 +825,9 @@ export class DriverService {
     let totalAppCommission = 0;
     let totalPlatformFee = 0;
     let totalShieldFee = 0;
+    // cash_earnings = gross fare physically collected from customer (not net)
     let cashEarnings = 0;
+    let cashNetEarnings = 0; // net for cash trips, used to compute dues
     let onlineEarnings = 0;
     let cashTripCount = 0;
     let onlineTripCount = 0;
@@ -847,7 +849,10 @@ export class DriverService {
         onlineEarnings += driverEarnings;
         onlineTripCount++;
       } else {
-        cashEarnings += driverEarnings;
+        // Driver physically collects the full gross fare from the customer.
+        // They owe (gross - net) back to the platform — tracked as cash_dues.
+        cashEarnings += gross;
+        cashNetEarnings += driverEarnings;
         cashTripCount++;
       }
     }
@@ -869,6 +874,7 @@ export class DriverService {
       cash_trip_count: cashTripCount,
       online_trip_count: onlineTripCount,
       cash_earnings: parseFloat(cashEarnings.toFixed(2)),
+      cash_dues: parseFloat((cashEarnings - cashNetEarnings).toFixed(2)),
       online_earnings: parseFloat(onlineEarnings.toFixed(2)),
       breakdown: {
         gross_fare: parseFloat(totalGrossFare.toFixed(2)),
@@ -971,6 +977,58 @@ export class DriverService {
         remarks: 'Auto-voided: wallet debit failed (possible concurrent request)',
       });
       throw err;
+    }
+
+    // ── Auto-trigger RazorpayX payout immediately (no admin approval needed) ──
+    if (this.razorpayXService.isConfigured && bankAccountId) {
+      const bankAccount = await this.bankAccountRepository.findOne({
+        where: { id: bankAccountId },
+      });
+
+      if (bankAccount) {
+        // Ensure fund account is synced — sync now if it hasn't been yet
+        if (!bankAccount.razorpay_fund_account_id) {
+          await this.syncBankAccountToRazorpay(userId, bankAccount).catch(err =>
+            this.logger.warn(`[RazorpayX] Fund account sync failed before payout: ${err?.message}`),
+          );
+          // Reload after sync attempt
+          const refreshed = await this.bankAccountRepository.findOne({ where: { id: bankAccountId } });
+          if (refreshed?.razorpay_fund_account_id) {
+            bankAccount.razorpay_fund_account_id = refreshed.razorpay_fund_account_id;
+          }
+        }
+
+        if (bankAccount.razorpay_fund_account_id) {
+          try {
+            const payout = await this.razorpayXService.createPayout({
+              fundAccountId: bankAccount.razorpay_fund_account_id,
+              amountPaise:   Math.round(amount * 100),
+              referenceId:   `WD_${saved.id.slice(-32)}`,
+              narration:     'Zipto Payout',
+              mode:          'IMPS',
+            });
+
+            await this.withdrawalRepository.update(saved.id, {
+              status:    WithdrawalStatus.PROCESSING,
+              payout_id: payout.id,
+            });
+
+            this.logger.log(`[RazorpayX] Auto-payout triggered: withdrawal=${saved.id}, payout=${payout.id}`);
+
+            this.notificationService.sendPushNotification({
+              user_id: userId,
+              title: '💸 Payout Initiated!',
+              body: `₹${amount.toLocaleString('en-IN')} is being transferred to ${bankAccount.bank_name ?? 'your bank account'}${bankAccount.account_number ? ` (••••${bankAccount.account_number.slice(-4)})` : ''}. Expect credit within 30 minutes via IMPS.`,
+              data: { type: 'withdrawal_processing', amount: String(amount), withdrawal_id: saved.id },
+            }).catch(() => {});
+          } catch (err: any) {
+            // Payout failed to initiate — leave as PENDING so admin can manually approve
+            this.logger.error(
+              `[RazorpayX] Auto-payout initiation failed for withdrawal=${saved.id}: ${err?.error?.description ?? err?.message}. Stays PENDING for admin review.`,
+            );
+          }
+        }
+      }
     }
 
     const remainingBalance = await this.driverWalletService.getWalletBalance(userId);
