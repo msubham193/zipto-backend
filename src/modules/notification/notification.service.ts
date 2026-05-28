@@ -223,10 +223,12 @@ export class NotificationService implements OnModuleInit {
     // WebSocket delivery
     this.bookingGateway.notifyUser(userId, 'new_notification', notif);
 
-    // FCM push
-    this.sendFcmToUser(userId, title, message, { type, notificationId: notif.id }).catch(
-      () => {},
-    );
+    // FCM push — data-only so setBackgroundMessageHandler fires on all OEM devices
+    const fcmData: Record<string, string> = { type, notificationId: notif.id };
+    if (data) {
+      for (const [k, v] of Object.entries(data)) fcmData[k] = String(v);
+    }
+    this.sendDataOnlyFcmToUser(userId, title, message, fcmData).catch(() => {});
 
     return notif;
   }
@@ -543,6 +545,21 @@ export class NotificationService implements OnModuleInit {
       // Stale token — clear it
       await this.userRepository.update(userId, { fcm_token: null });
     }
+  }
+
+  private async sendDataOnlyFcmToUser(
+    userId: string,
+    title: string,
+    body: string,
+    data?: Record<string, string>,
+  ): Promise<void> {
+    const user = await this.userRepository.findOne({
+      where: { id: userId },
+      select: ['id', 'fcm_token'],
+    });
+    if (!user?.fcm_token) return;
+    const ok = await this.fcmService.sendDataOnlyToToken(user.fcm_token, title, body, data);
+    if (!ok) await this.userRepository.update(userId, { fcm_token: null });
   }
 
   private async safeGet<T>(key: string): Promise<T | undefined> {

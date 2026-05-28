@@ -161,6 +161,41 @@ export class FcmService implements OnModuleInit {
     return { success, failure };
   }
 
+  /**
+   * Send a data-only FCM message (no `notification` field).
+   * On Android, this triggers setBackgroundMessageHandler even when the app is killed.
+   * title and body are embedded in `data` so the background handler can display them via notifee.
+   * Returns false for invalid/stale tokens.
+   */
+  async sendDataOnlyToToken(
+    token: string,
+    title: string,
+    body: string,
+    data?: Record<string, string>,
+  ): Promise<boolean> {
+    if (!this.messaging) return false;
+    try {
+      await this.messaging.send({
+        token,
+        data: { title, body, ...(data ?? {}) },
+        android: { priority: 'high' },
+        apns: {
+          payload: { aps: { 'content-available': 1 } },
+        },
+      });
+      return true;
+    } catch (err: any) {
+      const staleTokenCodes = [
+        'messaging/registration-token-not-registered',
+        'messaging/invalid-registration-token',
+        'messaging/invalid-argument',
+      ];
+      if (staleTokenCodes.includes(err.code)) return false;
+      this.logger.warn(`FCM data-only send failed for token ...${token.slice(-8)}: ${err.message}`);
+      return false;
+    }
+  }
+
   // Legacy compat methods used by existing code
   async sendToDevice(deviceToken: string, notification: { title: string; body: string; data?: Record<string, any> }): Promise<boolean> {
     return this.sendToToken(deviceToken, notification.title, notification.body);

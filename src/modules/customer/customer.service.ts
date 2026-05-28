@@ -13,7 +13,7 @@ import {
   WalletTxnSource,
 } from './entities/wallet-transaction.entity';
 import { UpdateCustomerDto, SavedLocationDto } from './dto/customer.dto';
-import { RazorpayService } from '../../services/razorpay.service';
+import { HdfcPaymentService } from '../../services/hdfc-payment.service';
 
 @Injectable()
 export class CustomerService {
@@ -25,7 +25,7 @@ export class CustomerService {
     @InjectRepository(WalletTransaction)
     private walletTxnRepository: Repository<WalletTransaction>,
     private dataSource: DataSource,
-    private razorpayService: RazorpayService,
+    private hdfcService: HdfcPaymentService,
   ) {}
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -142,83 +142,22 @@ export class CustomerService {
   }
 
   /**
-   * Step 1 — create Razorpay order for wallet top-up
+   * Initiate HDFC wallet top-up — returns encRequest + HDFC payment URL.
+   * The frontend opens the Payment screen (WebView); HDFC posts back to
+   * /payment/hdfc/response which credits the wallet and emits wallet_topped_up.
    */
   async initiateAddMoney(userId: string, amount: number) {
-    if (amount < 10) {
-      throw new BadRequestException('Minimum top-up amount is ₹10');
-    }
-    if (amount > 50000) {
-      throw new BadRequestException('Maximum top-up amount is ₹50,000');
-    }
+    if (amount < 10) throw new BadRequestException('Minimum top-up amount is ₹10');
+    if (amount > 50000) throw new BadRequestException('Maximum top-up amount is ₹50,000');
 
-    const receipt = `wallet_${userId.slice(-8)}_${Date.now()}`;
-    const order = await this.razorpayService.createOrder(amount, receipt);
-
-    return {
-      order_id: order.id,
-      amount: order.amount,
-      currency: order.currency,
-      key_id: process.env.RAZORPAY_KEY_ID,
-    };
-  }
-
-  /**
-   * Step 2 — verify Razorpay payment and credit wallet
-   */
-  async verifyAddMoney(
-    userId: string,
-    orderId: string,
-    paymentId: string,
-    signature: string,
-    amount: number,
-  ) {
-    // Verify signature
-    const isValid = this.razorpayService.verifyPaymentSignature(
+    const orderId = this.hdfcService.generateOrderId();
+    const req = this.hdfcService.buildRequest({
       orderId,
-      paymentId,
-      signature,
-    );
-    if (!isValid) {
-      throw new BadRequestException('Payment verification failed');
-    }
-
-    // Prevent duplicate crediting
-    const existing = await this.walletTxnRepository.findOne({
-      where: { reference_id: paymentId },
+      amount,
+      merchantRef: `WALLET:${userId}`,
     });
-    if (existing) {
-      throw new BadRequestException('Payment already processed');
-    }
 
-    // Credit wallet atomically
-    return this.dataSource.transaction(async (manager) => {
-      const user = await manager.findOne(User, {
-        where: { id: userId },
-        lock: { mode: 'pessimistic_write' },
-      });
-      if (!user) throw new NotFoundException('User not found');
-
-      const currentBalance = parseFloat(
-        user.wallet_balance as unknown as string,
-      );
-      const newBalance = currentBalance + amount;
-
-      await manager.update(User, userId, { wallet_balance: newBalance });
-
-      const txn = manager.create(WalletTransaction, {
-        user_id: userId,
-        type: WalletTxnType.CREDIT,
-        amount,
-        balance_after: newBalance,
-        description: `Wallet top-up via Razorpay`,
-        source: WalletTxnSource.RAZORPAY,
-        reference_id: paymentId,
-      });
-      await manager.save(txn);
-
-      return { success: true, balance: newBalance, transaction: txn };
-    });
+    return { ...req, orderId, amount };
   }
 
   /**

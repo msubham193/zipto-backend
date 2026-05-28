@@ -35,21 +35,6 @@ class InitiateAddMoneyDto {
   amount: number;
 }
 
-class VerifyAddMoneyDto {
-  @ApiProperty({ example: 'order_xyz' })
-  order_id: string;
-
-  @ApiProperty({ example: 'pay_xyz' })
-  payment_id: string;
-
-  @ApiProperty({ example: 'sig_xyz' })
-  signature: string;
-
-  @ApiProperty({ example: 500 })
-  @IsNumber()
-  @Type(() => Number)
-  amount: number;
-}
 
 @ApiTags('Customer')
 @Controller('customer')
@@ -141,19 +126,4 @@ export class CustomerController {
     return { success: true, data };
   }
 
-  @Post('wallet/add-money/verify')
-  @ApiOperation({ summary: 'Verify Razorpay payment + credit wallet' })
-  async verifyAddMoney(
-    @GetUser() user: User,
-    @Body() dto: VerifyAddMoneyDto,
-  ) {
-    const data = await this.customerService.verifyAddMoney(
-      user.id,
-      dto.order_id,
-      dto.payment_id,
-      dto.signature,
-      dto.amount,
-    );
-    return { success: true, data };
-  }
 }

@@ -61,6 +61,7 @@ export class Payment {
   @Index()
   transaction_id: string;
 
+  // Legacy Razorpay columns (kept for historical data, unused for new payments)
   @Column({ type: 'varchar', length: 100, nullable: true })
   razorpay_order_id: string;
 
@@ -72,6 +73,20 @@ export class Payment {
 
   @Column({ type: 'varchar', length: 512, nullable: true })
   payment_link_url: string;
+
+  // HDFC SmartGateway columns
+  @Column({ type: 'varchar', length: 50, nullable: true })
+  @Index()
+  hdfc_order_id: string;
+
+  @Column({ type: 'varchar', length: 100, nullable: true })
+  hdfc_tracking_id: string;
+
+  @Column({ type: 'varchar', length: 100, nullable: true })
+  hdfc_bank_ref_no: string;
+
+  @Column({ type: 'varchar', length: 20, nullable: true })
+  hdfc_status_code: string;
 
   @CreateDateColumn()
   created_at: Date;

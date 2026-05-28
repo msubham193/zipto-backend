@@ -1,7 +1,36 @@
-import { IsString, IsNotEmpty, IsNumber, IsUUID, IsEnum, IsOptional } from 'class-validator';
+import { IsString, IsNotEmpty, IsNumber, IsUUID, IsEnum, IsOptional, Min } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { PaymentMethod } from '../entities/payment.entity';
 
+export class InitiatePaymentDto {
+  @ApiProperty({ example: 'uuid-of-booking' })
+  @IsUUID()
+  booking_id: string;
+
+  @ApiProperty({ example: 250.5, description: 'Amount in INR' })
+  @IsNumber()
+  @Min(1)
+  amount: number;
+}
+
+export class InitiateWalletPaymentDto {
+  @ApiProperty({ example: 500, description: 'Amount to add to wallet in INR (min ₹10, max ₹50,000)' })
+  @IsNumber()
+  @Min(10)
+  amount: number;
+}
+
+export class CashPaymentDto {
+  @ApiProperty({ example: 'uuid-of-booking' })
+  @IsUUID()
+  booking_id: string;
+
+  @ApiProperty({ example: 250.0 })
+  @IsNumber()
+  amount: number;
+}
+
+// Legacy — kept so existing imports don't break; not used for new HDFC flow
 export class CreateOrderDto {
   @ApiPropertyOptional({ example: 'uuid-of-booking' })
   @IsOptional()
@@ -12,13 +41,9 @@ export class CreateOrderDto {
   @IsNumber()
   amount: number;
 
-  @ApiPropertyOptional({
-    enum: PaymentMethod,
-    example: PaymentMethod.UPI,
-    description: 'Payment method: upi, card, or wallet',
-  })
+  @ApiPropertyOptional({ enum: PaymentMethod })
   @IsOptional()
-  @IsEnum(PaymentMethod, { message: 'payment_method must be one of: upi, card, wallet' })
+  @IsEnum(PaymentMethod)
   payment_method?: PaymentMethod;
 }
 
@@ -42,16 +67,6 @@ export class VerifyPaymentDto {
   @IsOptional()
   @IsUUID()
   booking_id?: string;
-}
-
-export class CashPaymentDto {
-  @ApiProperty({ example: 'uuid-of-booking' })
-  @IsUUID()
-  booking_id: string;
-
-  @ApiProperty({ example: 250.0 })
-  @IsNumber()
-  amount: number;
 }
 
 export class CreatePaymentLinkDto {
