@@ -106,17 +106,31 @@ export class CouponService {
     });
 
     const vt = vehicleType?.trim().toLowerCase();
-    return coupons.filter((c) => {
-      if (now < new Date(c.valid_from)) return false;
-      if (c.valid_until && now > new Date(c.valid_until)) return false;
-      if (c.max_uses_total !== null && c.used_count >= c.max_uses_total) return false;
+    const result = coupons.filter((c) => {
+      if (now < new Date(c.valid_from)) {
+        this.logger.warn(`[coupons] "${c.code}" hidden: valid_from ${c.valid_from} is in the future (now=${now.toISOString()})`);
+        return false;
+      }
+      if (c.valid_until && now > new Date(c.valid_until)) {
+        this.logger.warn(`[coupons] "${c.code}" hidden: expired (valid_until ${c.valid_until})`);
+        return false;
+      }
+      if (c.max_uses_total !== null && c.used_count >= c.max_uses_total) {
+        this.logger.warn(`[coupons] "${c.code}" hidden: usage limit reached`);
+        return false;
+      }
       if (vt && c.applicable_vehicle_types?.length) {
         // Case-insensitive match — admin may enter "Bike" while the app sends "bike".
         const allowed = c.applicable_vehicle_types.map((t) => String(t).trim().toLowerCase());
-        if (!allowed.includes(vt)) return false;
+        if (!allowed.includes(vt)) {
+          this.logger.warn(`[coupons] "${c.code}" hidden: vehicle "${vt}" not in [${allowed.join(', ')}]`);
+          return false;
+        }
       }
       return true;
     });
+    this.logger.log(`[coupons] vehicleType=${vehicleType ?? 'none'} | active in DB=${coupons.length} | returned=${result.length}`);
+    return result;
   }
 
   // ─── Customer validation (called before booking is confirmed) ─────────────
