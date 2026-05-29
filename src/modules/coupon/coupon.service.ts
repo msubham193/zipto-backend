@@ -106,9 +106,14 @@ export class CouponService {
     });
 
     const vt = vehicleType?.trim().toLowerCase();
+    // Grace window for valid_from: the admin's datetime-local picker stores a
+    // naive timestamp, so a coupon meant for "now" can land a few hours in the
+    // future on a UTC server. Allow up to 24h of skew so freshly-created
+    // coupons still appear. (apply-time validate() still enforces precisely.)
+    const VALID_FROM_GRACE_MS = 24 * 60 * 60 * 1000;
     const result = coupons.filter((c) => {
-      if (now < new Date(c.valid_from)) {
-        this.logger.warn(`[coupons] "${c.code}" hidden: valid_from ${c.valid_from} is in the future (now=${now.toISOString()})`);
+      if (now.getTime() < new Date(c.valid_from).getTime() - VALID_FROM_GRACE_MS) {
+        this.logger.warn(`[coupons] "${c.code}" hidden: valid_from ${c.valid_from} is >24h in the future (now=${now.toISOString()})`);
         return false;
       }
       if (c.valid_until && now > new Date(c.valid_until)) {
