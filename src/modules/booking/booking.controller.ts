@@ -72,6 +72,16 @@ export class BookingController {
     return { success: true, data: result };
   }
 
+  @Get('coupons')
+  @Roles('customer')
+  @ApiOperation({ summary: 'List active coupons available to the customer' })
+  @ApiResponse({ status: 200, description: 'Available coupons retrieved' })
+  @ApiQuery({ name: 'vehicle_type', required: false })
+  async listCoupons(@Query('vehicle_type') vehicleType?: string) {
+    const data = await this.couponService.listAvailable(vehicleType);
+    return { success: true, data };
+  }
+
   @Post('create')
   @Roles('customer')
   @Throttle({ default: { ttl: 30000, limit: 3 } }) // max 3 bookings per 30s per user

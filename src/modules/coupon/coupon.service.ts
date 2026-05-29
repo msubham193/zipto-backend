@@ -87,6 +87,38 @@ export class CouponService {
     return { coupon, usages };
   }
 
+  // ─── Customer-facing list of usable coupons ───────────────────────────────
+
+  /**
+   * Returns coupons the customer can currently see in the "View All Coupons"
+   * sheet: active, within the validity window, not over the global usage cap,
+   * and (if a vehicle type is given) applicable to it.
+   *
+   * Per-user usage / first-ride rules are intentionally NOT filtered here —
+   * the coupon still shows, and validate() gives a precise reason if the user
+   * can't actually apply it. This keeps the list informative.
+   */
+  async listAvailable(vehicleType?: string): Promise<Coupon[]> {
+    const now = new Date();
+    const coupons = await this.couponRepository.find({
+      where: { is_active: true },
+      order: { value: 'DESC', created_at: 'DESC' },
+    });
+
+    const vt = vehicleType?.trim().toLowerCase();
+    return coupons.filter((c) => {
+      if (now < new Date(c.valid_from)) return false;
+      if (c.valid_until && now > new Date(c.valid_until)) return false;
+      if (c.max_uses_total !== null && c.used_count >= c.max_uses_total) return false;
+      if (vt && c.applicable_vehicle_types?.length) {
+        // Case-insensitive match — admin may enter "Bike" while the app sends "bike".
+        const allowed = c.applicable_vehicle_types.map((t) => String(t).trim().toLowerCase());
+        if (!allowed.includes(vt)) return false;
+      }
+      return true;
+    });
+  }
+
   // ─── Customer validation (called before booking is confirmed) ─────────────
 
   async validate(userId: string, dto: ValidateCouponDto): Promise<CouponValidationResult> {
