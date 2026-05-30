@@ -1,5 +1,5 @@
 import { NestFactory, Reflector } from '@nestjs/core';
-import { ValidationPipe } from '@nestjs/common';
+import { ValidationPipe, RequestMethod } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import helmet from 'helmet';
@@ -61,8 +61,11 @@ async function bootstrap() {
     }),
   );
 
-  // Global prefix
-  app.setGlobalPrefix(apiPrefix);
+  // Global prefix — exclude the public referral landing page so share links are
+  // clean (e.g. https://api.ridezipto.com/refer/CODE) and crawlable by WhatsApp.
+  app.setGlobalPrefix(apiPrefix, {
+    exclude: [{ path: 'refer/:code', method: RequestMethod.GET }],
+  });
 
   // Global pipes
   app.useGlobalPipes(

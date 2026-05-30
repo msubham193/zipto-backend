@@ -27,7 +27,7 @@ export class ReferralController {
   @ApiResponse({ status: 400, description: 'Invalid code / not eligible' })
   @ApiResponse({ status: 409, description: 'Already used a referral code' })
   async apply(@GetUser() user: User, @Body() dto: ApplyReferralDto) {
-    return this.referralService.applyCode(user.id, dto.code);
+    return this.referralService.applyCode(user.id, dto.code, dto.device_id);
   }
 
   @Get('my-referrals')

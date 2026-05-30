@@ -49,6 +49,11 @@ export class Referral {
   @Column({ type: 'enum', enum: ReferralStatus, default: ReferralStatus.PENDING })
   status: ReferralStatus;
 
+  /** Referee's device install id at apply-time — used for anti-abuse checks. */
+  @Column({ type: 'varchar', length: 128, nullable: true })
+  @Index()
+  device_id: string | null;
+
   /** Coins credited to the referee (new user) on qualification. */
   @Column({ type: 'integer', default: 0 })
   referee_coins: number;

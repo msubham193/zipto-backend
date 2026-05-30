@@ -11,6 +11,7 @@ import { User } from '../auth/entities/user.entity';
 import { Booking, BookingStatus } from '../booking/entities/booking.entity';
 import { CoinService } from '../coin/coin.service';
 import { SystemSettingsService } from '../settings/system-settings.service';
+import { NotificationService } from '../notification/notification.service';
 import { getPaginationMeta } from '../../common/utils/helpers.util';
 
 // Unambiguous alphabet (no 0/O/1/I) for human-friendly, shareable codes.
@@ -30,6 +31,7 @@ export class ReferralService {
     private readonly bookingRepo: Repository<Booking>,
     private readonly coinService: CoinService,
     private readonly settingsService: SystemSettingsService,
+    private readonly notificationService: NotificationService,
   ) {}
 
   // ─── Code generation ─────────────────────────────────────────────────────────
@@ -80,7 +82,8 @@ export class ReferralService {
       referrer_coins: settings.referrer_coins,
       share_message:
         `Join Zipto with my referral code ${code} for fast, affordable delivery. ` +
-        `Complete your first order and we both earn Zipto coins!`,
+        `Complete your first order and we both earn Zipto coins!\n\n` +
+        `Tap to join: ${settings.share_base_url}/${code}`,
       stats: {
         total_referred: referrals.length,
         total_rewarded: rewarded.length,
@@ -97,7 +100,7 @@ export class ReferralService {
    * referral that pays out once the referee completes their first ride.
    * Safe to call from signup (best-effort) or from the in-app refer screen.
    */
-  async applyCode(refereeId: string, rawCode: string) {
+  async applyCode(refereeId: string, rawCode: string, deviceId?: string) {
     const settings = await this.settingsService.getReferralSettings();
     if (!settings.enabled) {
       throw new BadRequestException('The referral program is currently unavailable');
@@ -128,10 +131,30 @@ export class ReferralService {
       throw new BadRequestException('You cannot use your own referral code');
     }
 
+    // ── Fraud guard ────────────────────────────────────────────────────────────
+    const device = (deviceId || '').trim().slice(0, 128) || null;
+    if (device) {
+      // The same physical device can only ever be a referee once — stops a user
+      // from farming their own code across multiple accounts on one phone.
+      const deviceUsed = await this.referralRepo.findOne({ where: { device_id: device } });
+      if (deviceUsed) {
+        this.logger.warn(`Referral blocked (device reuse): device=${device} referee=${refereeId}`);
+        throw new BadRequestException('This device has already redeemed a referral');
+      }
+      // The referrer must not be on the same device as the referee.
+      const referrerDevice = await this.referralRepo.findOne({
+        where: { referrer_id: referrer.id, device_id: device },
+      });
+      if (referrerDevice) {
+        throw new BadRequestException('Referrer and referee cannot share the same device');
+      }
+    }
+
     const referral = this.referralRepo.create({
       referrer_id: referrer.id,
       referee_id: refereeId,
       code,
+      device_id: device,
       status: ReferralStatus.PENDING,
       // Snapshot the reward amounts at apply-time so later admin changes are fair.
       referee_coins: settings.referee_coins,
@@ -151,10 +174,10 @@ export class ReferralService {
   }
 
   /** Best-effort variant for signup — never throws, returns whether it applied. */
-  async applyCodeSafe(refereeId: string, rawCode?: string): Promise<boolean> {
+  async applyCodeSafe(refereeId: string, rawCode?: string, deviceId?: string): Promise<boolean> {
     if (!rawCode) return false;
     try {
-      await this.applyCode(refereeId, rawCode);
+      await this.applyCode(refereeId, rawCode, deviceId);
       return true;
     } catch (err: any) {
       this.logger.warn(`Referral apply skipped for ${refereeId}: ${err?.message}`);
@@ -206,6 +229,26 @@ export class ReferralService {
         `Referral rewarded: referrer=${referral.referrer_id} (+${referral.referrer_coins}) ` +
           `referee=${referral.referee_id} (+${referral.referee_coins}) booking=${bookingId}`,
       );
+
+      // Notify both parties their coins landed (fire-and-forget).
+      this.notificationService
+        .pushToCustomer(
+          referral.referee_id,
+          'general',
+          '🎉 Referral bonus credited!',
+          `You earned ${referral.referee_coins} Zipto coins for your first order. Enjoy!`,
+          { type: 'referral_reward', coins: String(referral.referee_coins) },
+        )
+        .catch(() => {});
+      this.notificationService
+        .pushToCustomer(
+          referral.referrer_id,
+          'general',
+          '🎉 You earned referral coins!',
+          `Your friend completed their first order — ${referral.referrer_coins} Zipto coins added to your balance.`,
+          { type: 'referral_reward', coins: String(referral.referrer_coins) },
+        )
+        .catch(() => {});
     } catch (err: any) {
       // Crediting failed after claim — revert so it can be retried on a later ride.
       this.logger.error(`Referral credit failed, reverting claim: ${err?.message}`);

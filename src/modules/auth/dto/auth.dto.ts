@@ -50,6 +50,12 @@ export class VerifyOtpDto {
   @IsOptional()
   @MaxLength(12)
   referral_code?: string;
+
+  @ApiProperty({ required: false, description: 'Stable device install id (anti-abuse for referrals)' })
+  @IsString()
+  @IsOptional()
+  @MaxLength(128)
+  device_id?: string;
 }
 
 export class LoginDto {
@@ -125,6 +131,12 @@ export class CustomerEmailRegisterDto {
   @IsOptional()
   @MaxLength(12)
   referral_code?: string;
+
+  @ApiProperty({ required: false, description: 'Stable device install id (anti-abuse for referrals)' })
+  @IsString()
+  @IsOptional()
+  @MaxLength(128)
+  device_id?: string;
 }
 
 export class DriverEmailLoginDto {

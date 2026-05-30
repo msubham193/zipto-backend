@@ -136,7 +136,7 @@ export class AuthService {
    * Fully Redis-backed — no DB OTP table involved.
    */
   async verifyOtp(verifyOtpDto: VerifyOtpDto) {
-    const { phone, otp, role, referral_code } = verifyOtpDto;
+    const { phone, otp, role, referral_code, device_id } = verifyOtpDto;
     const formattedPhone = formatPhoneNumber(phone);
 
     this.logger.log(`[verifyOtp] phone=${this.mask(formattedPhone)}`);
@@ -170,7 +170,7 @@ export class AuthService {
 
       // Apply referral code for brand-new customers (best-effort, never blocks signup).
       if (assignedRole === UserRole.CUSTOMER && referral_code) {
-        await this.referralService.applyCodeSafe(user.id, referral_code);
+        await this.referralService.applyCodeSafe(user.id, referral_code, device_id);
       }
     } else {
       if (!user.is_active) {
@@ -284,7 +284,7 @@ export class AuthService {
 
   /** Customer email/password registration (temporary). */
   async customerEmailRegister(dto: CustomerEmailRegisterDto) {
-    const { email, password, name, referral_code } = dto;
+    const { email, password, name, referral_code, device_id } = dto;
 
     const existingUser = await this.userRepository.findOne({ where: { email } });
     if (existingUser) throw new ConflictException('An account with this email already exists.');
@@ -303,7 +303,7 @@ export class AuthService {
 
     // Apply referral code (best-effort, never blocks signup).
     if (referral_code) {
-      await this.referralService.applyCodeSafe(user.id, referral_code);
+      await this.referralService.applyCodeSafe(user.id, referral_code, device_id);
     }
 
     const tokens = await this.generateTokens(user);

@@ -145,6 +145,7 @@ CREATE TABLE IF NOT EXISTS referrals (
   referee_id            UUID NOT NULL UNIQUE,
   code                  VARCHAR(12) NOT NULL,
   status                referrals_status_enum NOT NULL DEFAULT 'pending',
+  device_id             VARCHAR(128),
   referee_coins         INTEGER NOT NULL DEFAULT 0,
   referrer_coins        INTEGER NOT NULL DEFAULT 0,
   qualifying_booking_id UUID,
@@ -154,16 +155,23 @@ CREATE TABLE IF NOT EXISTS referrals (
   CONSTRAINT fk_referrals_referee  FOREIGN KEY (referee_id)  REFERENCES users (id) ON DELETE CASCADE
 );
 
+-- device_id may be added later if the table already exists from an earlier run
+ALTER TABLE referrals ADD COLUMN IF NOT EXISTS device_id VARCHAR(128);
+
 CREATE INDEX IF NOT EXISTS idx_referrals_referrer_id ON referrals (referrer_id);
 CREATE INDEX IF NOT EXISTS idx_referrals_status      ON referrals (status);
 CREATE INDEX IF NOT EXISTS idx_referrals_code        ON referrals (code);
+CREATE INDEX IF NOT EXISTS idx_referrals_device_id   ON referrals (device_id);
 
 -- Referral reward settings (admin-configurable via /admin/settings)
 INSERT INTO system_settings (key, value, description)
 VALUES
   ('referral_enabled',        'true', 'Master switch for the referral program'),
   ('referral_referee_coins',  '500',  'Coins credited to the new user (referee) after their first completed ride'),
-  ('referral_referrer_coins', '1000', 'Coins credited to the referrer after their referee completes a first ride')
+  ('referral_referrer_coins', '1000', 'Coins credited to the referrer after their referee completes a first ride'),
+  ('referral_share_base_url', 'https://api.ridezipto.com/refer', 'Base URL for referral share links (code appended: /refer/CODE)'),
+  ('referral_banner_url',     'https://ridezipto.com/referral-banner.png', 'Banner image shown as the WhatsApp/social link preview (og:image)'),
+  ('referral_play_store_url', 'https://play.google.com/store/apps/details?id=com.ridezipto.customer', 'Play Store URL the referral landing page redirects to')
 ON CONFLICT (key) DO NOTHING;
 
 -- ── Done ──────────────────────────────────────────────────────
