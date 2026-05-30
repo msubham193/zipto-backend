@@ -8,14 +8,12 @@ import { User } from '../auth/entities/user.entity';
 import { Booking } from '../booking/entities/booking.entity';
 import { CoinModule } from '../coin/coin.module';
 import { SettingsModule } from '../settings/settings.module';
-import { NotificationModule } from '../notification/notification.module';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([Referral, User, Booking]),
     CoinModule,
     SettingsModule,
-    NotificationModule,
   ],
   controllers: [ReferralController, ReferralLandingController],
   providers: [ReferralService],

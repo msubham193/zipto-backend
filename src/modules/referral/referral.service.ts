@@ -4,6 +4,7 @@ import {
   BadRequestException,
   ConflictException,
 } from '@nestjs/common';
+import { ModuleRef } from '@nestjs/core';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Referral, ReferralStatus } from './entities/referral.entity';
@@ -31,7 +32,9 @@ export class ReferralService {
     private readonly bookingRepo: Repository<Booking>,
     private readonly coinService: CoinService,
     private readonly settingsService: SystemSettingsService,
-    private readonly notificationService: NotificationService,
+    // Resolved lazily to avoid a circular module dependency
+    // (NotificationModule → AuthModule → ReferralModule).
+    private readonly moduleRef: ModuleRef,
   ) {}
 
   // ─── Code generation ─────────────────────────────────────────────────────────
@@ -230,25 +233,31 @@ export class ReferralService {
           `referee=${referral.referee_id} (+${referral.referee_coins}) booking=${bookingId}`,
       );
 
-      // Notify both parties their coins landed (fire-and-forget).
-      this.notificationService
-        .pushToCustomer(
-          referral.referee_id,
-          'general',
-          '🎉 Referral bonus credited!',
-          `You earned ${referral.referee_coins} Zipto coins for your first order. Enjoy!`,
-          { type: 'referral_reward', coins: String(referral.referee_coins) },
-        )
-        .catch(() => {});
-      this.notificationService
-        .pushToCustomer(
-          referral.referrer_id,
-          'general',
-          '🎉 You earned referral coins!',
-          `Your friend completed their first order — ${referral.referrer_coins} Zipto coins added to your balance.`,
-          { type: 'referral_reward', coins: String(referral.referrer_coins) },
-        )
-        .catch(() => {});
+      // Notify both parties their coins landed (fire-and-forget). NotificationService
+      // is resolved lazily here to keep ReferralModule free of a circular import.
+      try {
+        const notificationService = this.moduleRef.get(NotificationService, { strict: false });
+        notificationService
+          .pushToCustomer(
+            referral.referee_id,
+            'general',
+            '🎉 Referral bonus credited!',
+            `You earned ${referral.referee_coins} Zipto coins for your first order. Enjoy!`,
+            { type: 'referral_reward', coins: String(referral.referee_coins) },
+          )
+          .catch(() => {});
+        notificationService
+          .pushToCustomer(
+            referral.referrer_id,
+            'general',
+            '🎉 You earned referral coins!',
+            `Your friend completed their first order — ${referral.referrer_coins} Zipto coins added to your balance.`,
+            { type: 'referral_reward', coins: String(referral.referrer_coins) },
+          )
+          .catch(() => {});
+      } catch {
+        /* notifications are best-effort */
+      }
     } catch (err: any) {
       // Crediting failed after claim — revert so it can be retried on a later ride.
       this.logger.error(`Referral credit failed, reverting claim: ${err?.message}`);
