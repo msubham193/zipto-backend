@@ -170,7 +170,7 @@ VALUES
   ('referral_referee_coins',  '500',  'Coins credited to the new user (referee) after their first completed ride'),
   ('referral_referrer_coins', '1000', 'Coins credited to the referrer after their referee completes a first ride'),
   ('referral_share_base_url', 'https://api.ridezipto.com/refer', 'Base URL for referral share links (code appended: /refer/CODE)'),
-  ('referral_banner_url',     'https://ridezipto.com/referral-banner.png', 'Banner image shown as the WhatsApp/social link preview (og:image)'),
+  ('referral_banner_url',     'https://api.ridezipto.com/referral-banner.png', 'Banner image shown as the WhatsApp/social link preview (og:image)'),
   ('referral_play_store_url', 'https://play.google.com/store/apps/details?id=com.ridezipto.customer', 'Play Store URL the referral landing page redirects to')
 ON CONFLICT (key) DO NOTHING;
 

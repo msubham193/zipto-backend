@@ -2,15 +2,17 @@ import { NestFactory, Reflector } from '@nestjs/core';
 import { ValidationPipe, RequestMethod } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
+import { NestExpressApplication } from '@nestjs/platform-express';
 import helmet from 'helmet';
 import * as express from 'express';
+import { join } from 'path';
 import { AppModule } from './app.module';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 import { TransformInterceptor } from './common/interceptors/transform.interceptor';
 import { RolesGuard } from './common/guards/roles.guard';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule, { rawBody: true });
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, { rawBody: true });
 
   // Get configuration
   const configService = app.get(ConfigService);
@@ -25,6 +27,17 @@ async function bootstrap() {
   // Body size limit — prevent oversized payload attacks
   app.use(express.json({ limit: '1mb' }));
   app.use(express.urlencoded({ extended: true, limit: '1mb' }));
+
+  // Serve static public assets (e.g. the referral banner used for link previews)
+  // at the host root, unaffected by the /api global prefix:
+  //   skido-backend/public/referral-banner.png → https://<host>/referral-banner.png
+  app.useStaticAssets(join(__dirname, '..', 'public'), {
+    setHeaders: (res) => {
+      // Allow social/CDN crawlers to embed the image cross-origin.
+      res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+      res.setHeader('Cache-Control', 'public, max-age=86400');
+    },
+  });
 
   // CORS — must be registered before Helmet so headers are not stripped
   app.enableCors({
