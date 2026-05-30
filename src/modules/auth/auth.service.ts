@@ -28,6 +28,7 @@ import {
 import { formatPhoneNumber, generateRandomUsername } from '../../common/utils/helpers.util';
 import { SmsService } from '../../services/sms.service';
 import { DriverProfile, AvailabilityStatus, VerificationStatus } from '../driver/entities/driver-profile.entity';
+import { ReferralService } from '../referral/referral.service';
 
 @Injectable()
 export class AuthService {
@@ -43,6 +44,7 @@ export class AuthService {
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
     private readonly smsService: SmsService,
+    private readonly referralService: ReferralService,
   ) {}
 
   // ─── OTP Send Flows ──────────────────────────────────────────────────────────
@@ -134,7 +136,7 @@ export class AuthService {
    * Fully Redis-backed — no DB OTP table involved.
    */
   async verifyOtp(verifyOtpDto: VerifyOtpDto) {
-    const { phone, otp, role } = verifyOtpDto;
+    const { phone, otp, role, referral_code } = verifyOtpDto;
     const formattedPhone = formatPhoneNumber(phone);
 
     this.logger.log(`[verifyOtp] phone=${this.mask(formattedPhone)}`);
@@ -165,6 +167,11 @@ export class AuthService {
 
       await this.userRepository.save(user);
       this.logger.log(`New user registered: ${user.id} (${assignedRole})`);
+
+      // Apply referral code for brand-new customers (best-effort, never blocks signup).
+      if (assignedRole === UserRole.CUSTOMER && referral_code) {
+        await this.referralService.applyCodeSafe(user.id, referral_code);
+      }
     } else {
       if (!user.is_active) {
         throw new UnauthorizedException('User account is deactivated');
@@ -277,7 +284,7 @@ export class AuthService {
 
   /** Customer email/password registration (temporary). */
   async customerEmailRegister(dto: CustomerEmailRegisterDto) {
-    const { email, password, name } = dto;
+    const { email, password, name, referral_code } = dto;
 
     const existingUser = await this.userRepository.findOne({ where: { email } });
     if (existingUser) throw new ConflictException('An account with this email already exists.');
@@ -293,6 +300,12 @@ export class AuthService {
     });
 
     await this.userRepository.save(user);
+
+    // Apply referral code (best-effort, never blocks signup).
+    if (referral_code) {
+      await this.referralService.applyCodeSafe(user.id, referral_code);
+    }
+
     const tokens = await this.generateTokens(user);
     return { user: this.sanitizeUser(user), is_new_user: true, ...tokens };
   }

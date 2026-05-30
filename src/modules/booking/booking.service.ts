@@ -24,6 +24,7 @@ import { MapboxService } from '../../services/mapbox.service';
 import { SmsService } from '../../services/sms.service';
 import { ExotelService } from '../../services/exotel.service';
 import { CoinService } from '../coin/coin.service';
+import { ReferralService } from '../referral/referral.service';
 import { InjectQueue } from '@nestjs/bull';
 import { Queue } from 'bull';
 import { BookingGateway } from './booking.gateway';
@@ -62,6 +63,7 @@ export class BookingService {
     private smsService: SmsService,
     private exotelService: ExotelService,
     private coinService: CoinService,
+    private referralService: ReferralService,
     @InjectQueue('booking_assignment') private bookingQueue: Queue,
     private bookingGateway: BookingGateway,
     private cacheManager: RedisService,
@@ -1620,6 +1622,14 @@ export class BookingService {
       Number(booking.final_fare),
       booking.service_category,
     );
+
+    // Referral payout — if this customer was referred and this is their first
+    // completed ride, credit both the referee and the referrer (idempotent).
+    this.referralService
+      .onFirstCompletedRide(booking.customer_id, booking.id)
+      .catch((err) =>
+        this.logger.error(`Referral reward failed for booking ${booking.id}: ${err?.message}`),
+      );
 
     return {
       ...savedBooking,

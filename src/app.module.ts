@@ -28,6 +28,7 @@ import { SupportModule } from './modules/support/support.module';
 import { SettingsModule } from './modules/settings/settings.module';
 import { ZiptoShieldModule } from './modules/zipto-shield/zipto-shield.module';
 import { CouponModule } from './modules/coupon/coupon.module';
+import { ReferralModule } from './modules/referral/referral.module';
 import { BullModule } from '@nestjs/bull';
 import { ScheduleModule } from '@nestjs/schedule';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
@@ -100,6 +101,7 @@ import { RolesGuard } from './common/guards/roles.guard';
     AdminModule,
     NotificationModule,
     CoinModule,
+    ReferralModule,
     FraudModule,
     DriverFraudModule,
     SupportModule,

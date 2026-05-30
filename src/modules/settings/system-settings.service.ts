@@ -17,7 +17,16 @@ const DEFAULTS: Array<{ key: string; value: string; description: string }> = [
   { key: 'max_search_attempts',    value: '10', description: 'Max sequential attempts before falling back to broadcast' },
   { key: 'zipto_upi_id',           value: 'zipto@upi', description: 'Zipto UPI ID shown to drivers for wallet top-up payments' },
   { key: 'zipto_upi_name',         value: 'Zipto',     description: 'Display name shown in UPI apps during top-up' },
+  { key: 'referral_enabled',        value: 'true', description: 'Master switch for the referral program' },
+  { key: 'referral_referee_coins',  value: '500',  description: 'Coins credited to the new user (referee) after their first completed ride' },
+  { key: 'referral_referrer_coins', value: '1000', description: 'Coins credited to the referrer after their referee completes a first ride' },
 ];
+
+export interface ReferralSettings {
+  enabled: boolean;
+  referee_coins: number;
+  referrer_coins: number;
+}
 
 const CACHE_TTL_MS = 30_000; // re-read DB at most every 30 s
 
@@ -70,6 +79,24 @@ export class SystemSettingsService implements OnModuleInit {
       this.cache = { search_radius_km: 4, broadcast_radius_km: 10, offer_timeout_seconds: 15, max_search_attempts: 10 };
     }
     return this.cache!;
+  }
+
+  /** Referral program settings (admin-configurable). Falls back to defaults. */
+  async getReferralSettings(): Promise<ReferralSettings> {
+    const rows = await this.repo.find({
+      where: [
+        { key: 'referral_enabled' },
+        { key: 'referral_referee_coins' },
+        { key: 'referral_referrer_coins' },
+      ],
+    });
+    const map: Record<string, string> = {};
+    for (const r of rows) { map[r.key] = r.value; }
+    return {
+      enabled: (map.referral_enabled ?? 'true') !== 'false',
+      referee_coins: parseInt(map.referral_referee_coins ?? '500', 10) || 0,
+      referrer_coins: parseInt(map.referral_referrer_coins ?? '1000', 10) || 0,
+    };
   }
 
   /** Returns UPI ID and display name for driver wallet top-up. */

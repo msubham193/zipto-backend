@@ -132,6 +132,33 @@ export class CoinService {
   }
 
   /**
+   * Credit a fixed number of coins to a user (e.g. referral bonus, promo).
+   * Records a transaction and atomically increments the balance. Reuses the
+   * EARNED type — the description distinguishes the source for reporting.
+   */
+  async creditCoins(
+    userId: string,
+    coins: number,
+    description: string,
+    bookingId?: string,
+  ): Promise<CoinTransaction> {
+    const transaction = this.coinTransactionRepository.create({
+      user_id: userId,
+      coins,
+      type: CoinTransactionType.EARNED,
+      booking_id: bookingId ?? undefined,
+      description,
+      multiplier: 1,
+    });
+
+    await this.coinTransactionRepository.save(transaction);
+    await this.userRepository.increment({ id: userId }, 'coins', coins);
+
+    this.logger.log(`Credited ${coins} coins to user ${userId} — ${description}`);
+    return transaction;
+  }
+
+  /**
    * Get user's coin balance
    */
   async getBalance(userId: string) {

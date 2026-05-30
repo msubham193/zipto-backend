@@ -121,5 +121,50 @@ ALTER TABLE driver_profiles
   ADD COLUMN IF NOT EXISTS wallet_frozen       BOOLEAN NOT NULL DEFAULT FALSE,
   ADD COLUMN IF NOT EXISTS wallet_freeze_reason VARCHAR;
 
+-- ── 7. Referral system ───────────────────────────────────────
+
+DO $$ BEGIN
+  CREATE TYPE referrals_status_enum AS ENUM (
+    'pending',
+    'rewarded',
+    'cancelled'
+  );
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+-- Each user's own shareable referral code
+ALTER TABLE users
+  ADD COLUMN IF NOT EXISTS referral_code VARCHAR(12);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_users_referral_code
+  ON users (referral_code);
+
+CREATE TABLE IF NOT EXISTS referrals (
+  id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  referrer_id           UUID NOT NULL,
+  referee_id            UUID NOT NULL UNIQUE,
+  code                  VARCHAR(12) NOT NULL,
+  status                referrals_status_enum NOT NULL DEFAULT 'pending',
+  referee_coins         INTEGER NOT NULL DEFAULT 0,
+  referrer_coins        INTEGER NOT NULL DEFAULT 0,
+  qualifying_booking_id UUID,
+  rewarded_at           TIMESTAMP,
+  created_at            TIMESTAMP NOT NULL DEFAULT NOW(),
+  CONSTRAINT fk_referrals_referrer FOREIGN KEY (referrer_id) REFERENCES users (id) ON DELETE CASCADE,
+  CONSTRAINT fk_referrals_referee  FOREIGN KEY (referee_id)  REFERENCES users (id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_referrals_referrer_id ON referrals (referrer_id);
+CREATE INDEX IF NOT EXISTS idx_referrals_status      ON referrals (status);
+CREATE INDEX IF NOT EXISTS idx_referrals_code        ON referrals (code);
+
+-- Referral reward settings (admin-configurable via /admin/settings)
+INSERT INTO system_settings (key, value, description)
+VALUES
+  ('referral_enabled',        'true', 'Master switch for the referral program'),
+  ('referral_referee_coins',  '500',  'Coins credited to the new user (referee) after their first completed ride'),
+  ('referral_referrer_coins', '1000', 'Coins credited to the referrer after their referee completes a first ride')
+ON CONFLICT (key) DO NOTHING;
+
 -- ── Done ──────────────────────────────────────────────────────
 SELECT 'Migration complete' AS result;

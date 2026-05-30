@@ -44,6 +44,12 @@ export class VerifyOtpDto {
   @IsEnum(UserRole)
   @IsOptional()
   role?: UserRole;
+
+  @ApiProperty({ required: false, example: 'AB12CD', description: 'Referral code (new users only)' })
+  @IsString()
+  @IsOptional()
+  @MaxLength(12)
+  referral_code?: string;
 }
 
 export class LoginDto {
@@ -113,6 +119,12 @@ export class CustomerEmailRegisterDto {
   @IsNotEmpty()
   @MinLength(6)
   password: string;
+
+  @ApiProperty({ required: false, example: 'AB12CD', description: 'Referral code (optional)' })
+  @IsString()
+  @IsOptional()
+  @MaxLength(12)
+  referral_code?: string;
 }
 
 export class DriverEmailLoginDto {

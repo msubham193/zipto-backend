@@ -11,10 +11,12 @@ import { DriverProfile } from '../driver/entities/driver-profile.entity';
 import { JwtStrategy } from './strategies/jwt.strategy';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
+import { ReferralModule } from '../referral/referral.module';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([User, OTP, DriverProfile]),
+    ReferralModule,
     PassportModule.register({ defaultStrategy: 'jwt' }),
     JwtModule.registerAsync({
       imports: [ConfigModule],

@@ -53,6 +53,11 @@ export class User {
   @Column({ type: 'integer', default: 0 })
   coins: number;
 
+  /** This user's own shareable referral code (generated lazily on first use). */
+  @Column({ type: 'varchar', length: 12, unique: true, nullable: true })
+  @Index()
+  referral_code: string | null;
+
   @Column({ type: 'decimal', precision: 10, scale: 2, default: 0 })
   wallet_balance: number;
 

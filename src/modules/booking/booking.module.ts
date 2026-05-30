@@ -18,12 +18,14 @@ import { NotificationModule } from '../notification/notification.module';
 import { ZiptoShieldModule } from '../zipto-shield/zipto-shield.module';
 import { DriverModule } from '../driver/driver.module';
 import { CouponModule } from '../coupon/coupon.module';
+import { ReferralModule } from '../referral/referral.module';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([Booking, PricingRule, Payment, User]),
     AuthModule,
     CoinModule,
+    ReferralModule,
     BullModule.registerQueue({
       name: 'booking_assignment',
     }),

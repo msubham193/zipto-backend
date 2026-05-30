@@ -18,6 +18,7 @@ import { NotificationModule } from '../notification/notification.module';
 import { FraudModule } from '../fraud/fraud.module';
 import { SettingsModule } from '../settings/settings.module';
 import { CouponModule } from '../coupon/coupon.module';
+import { ReferralModule } from '../referral/referral.module';
 
 @Module({
   imports: [
@@ -29,6 +30,7 @@ import { CouponModule } from '../coupon/coupon.module';
     FraudModule,
     SettingsModule,
     CouponModule,
+    ReferralModule,
   ],
   controllers: [AdminController],
   providers: [AdminService],

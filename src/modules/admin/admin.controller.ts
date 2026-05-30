@@ -15,6 +15,7 @@ import { VehiclesQueryDto } from './dto/vehicles-query.dto';
 import { SystemSettingsService } from '../settings/system-settings.service';
 import { CouponService } from '../coupon/coupon.service';
 import { CreateCouponDto, UpdateCouponDto } from '../coupon/dto/coupon.dto';
+import { ReferralService } from '../referral/referral.service';
 
 @ApiTags('Admin')
 @Controller('admin')
@@ -27,6 +28,7 @@ export class AdminController {
     private readonly notificationService: NotificationService,
     private readonly systemSettings: SystemSettingsService,
     private readonly couponService: CouponService,
+    private readonly referralService: ReferralService,
   ) {}
 
   @Get('dashboard/stats')
@@ -454,6 +456,32 @@ export class AdminController {
   @ApiResponse({ status: 200, description: 'Stats retrieved' })
   async getCouponStats(@Param('id') id: string) {
     return this.couponService.getUsageStats(id);
+  }
+
+  // ─── Referral Management ─────────────────────────────────────────────────────
+
+  @Get('referrals')
+  @ApiOperation({ summary: 'List referrals (referrer, referee, status, coins)' })
+  @ApiResponse({ status: 200, description: 'Referrals retrieved' })
+  async getReferrals(
+    @Query('status') status?: string,
+    @Query('search') search?: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.referralService.adminList({
+      status,
+      search,
+      page: page ? Number(page) : undefined,
+      limit: limit ? Number(limit) : undefined,
+    });
+  }
+
+  @Get('referrals/stats')
+  @ApiOperation({ summary: 'Referral program summary stats' })
+  @ApiResponse({ status: 200, description: 'Stats retrieved' })
+  async getReferralStats() {
+    return this.referralService.adminStats();
   }
 
   @Delete('drivers/:id/reset-data')
