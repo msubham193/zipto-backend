@@ -4,6 +4,9 @@ import {
   WebSocketServer,
   OnGatewayConnection,
   OnGatewayDisconnect,
+  SubscribeMessage,
+  MessageBody,
+  ConnectedSocket,
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
 import { JwtService } from '@nestjs/jwt';
@@ -19,6 +22,29 @@ const DISCONNECT_GRACE_MS = 15 * 60 * 1000; // 15 minutes
 
 /** How long a pending offer survives waiting for driver to reconnect. */
 const PENDING_OFFER_TTL_MS = 30_000; // 30 seconds
+
+/** Cache of booking → { driverId, customerId } so location pings avoid a DB hit. */
+const PARTICIPANTS_TTL_MS = 60 * 60 * 1000; // 1 hour
+
+/** Last-known driver location cache, read by the REST fallback. */
+const DRIVER_LOC_TTL_MS = 2 * 60 * 1000; // 2 minutes
+
+/** Min interval between accepted location pings per booking (anti-flood). */
+const LOC_MIN_INTERVAL_MS = 1500;
+
+interface BookingParticipants {
+  driverId: string;
+  customerId: string;
+  status: string;
+}
+
+interface DriverLocationPayload {
+  bookingId?: string;
+  latitude?: number;
+  longitude?: number;
+  heading?: number;
+  speed?: number;
+}
 
 @WebSocketGateway({
   cors: {
@@ -136,5 +162,104 @@ export class BookingGateway implements OnGatewayConnection, OnGatewayDisconnect 
 
   notifyUser(userId: string, event: string, data: any) {
     this.server.to(`user_${userId}`).emit(event, data);
+  }
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // Live driver location relay  (rider → backend → customer)
+  // ───────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Resolve { driverId, customerId, status } for a booking, cached in Redis so
+   * the high-frequency location stream costs ~1 Redis read per ping instead of
+   * a DB query. Cache is invalidated naturally by TTL and refreshed on miss.
+   */
+  private async getParticipants(bookingId: string): Promise<BookingParticipants | null> {
+    const key = `booking:participants:${bookingId}`;
+    const cached = await this.cacheManager.get<BookingParticipants>(key);
+    if (cached) return cached;
+
+    const booking = await this.bookingRepository.findOne({
+      where: { id: bookingId },
+      select: ['id', 'driver_id', 'customer_id', 'status'],
+    });
+    if (!booking || !booking.driver_id || !booking.customer_id) return null;
+
+    const participants: BookingParticipants = {
+      driverId: booking.driver_id,
+      customerId: booking.customer_id,
+      status: booking.status,
+    };
+    await this.cacheManager.set(key, participants, PARTICIPANTS_TTL_MS);
+    return participants;
+  }
+
+  /**
+   * Rider app emits this every few seconds while on an active trip.
+   * Validates the sender is the assigned driver (anti-spoof), throttles, caches
+   * the last known position, and relays it only to that booking's customer.
+   */
+  @SubscribeMessage('driver_location')
+  async handleDriverLocation(
+    @MessageBody() payload: DriverLocationPayload,
+    @ConnectedSocket() client: Socket,
+  ): Promise<void> {
+    const driverId: string | undefined = client.data?.user?.sub;
+    if (!driverId || !payload) return;
+
+    const { bookingId, latitude, longitude } = payload;
+    if (
+      !bookingId ||
+      typeof latitude !== 'number' ||
+      typeof longitude !== 'number' ||
+      Number.isNaN(latitude) ||
+      Number.isNaN(longitude)
+    ) {
+      return;
+    }
+
+    try {
+      const participants = await this.getParticipants(bookingId);
+      if (!participants) return;
+
+      // Anti-spoof: only the assigned driver may publish this booking's location.
+      if (participants.driverId !== driverId) {
+        this.logger.warn(`[Gateway] driver_location rejected: ${driverId} is not the driver for booking ${bookingId}`);
+        return;
+      }
+
+      // Per-booking throttle — drop pings arriving faster than the floor.
+      const throttleKey = `driver:loc_throttle:${bookingId}`;
+      const fresh = await this.cacheManager.setnx(throttleKey, '1', LOC_MIN_INTERVAL_MS);
+      if (!fresh) return;
+
+      const location = {
+        bookingId,
+        latitude,
+        longitude,
+        heading: typeof payload.heading === 'number' ? payload.heading : null,
+        speed: typeof payload.speed === 'number' ? payload.speed : null,
+        ts: Date.now(),
+      };
+
+      // Cache last-known for the REST fallback (customer opening fresh / socket gap).
+      await this.cacheManager.set(`driver:loc:${bookingId}`, location, DRIVER_LOC_TTL_MS);
+
+      // Relay only to this booking's customer room.
+      this.server.to(`user_${participants.customerId}`).emit('driver_location', location);
+    } catch (err: any) {
+      this.logger.error(`[Gateway] handleDriverLocation error: ${err?.message}`);
+    }
+  }
+
+  /** Read the last cached driver location (used by the REST fallback). */
+  async getLastDriverLocation(bookingId: string) {
+    return this.cacheManager.get<{
+      bookingId: string;
+      latitude: number;
+      longitude: number;
+      heading: number | null;
+      speed: number | null;
+      ts: number;
+    }>(`driver:loc:${bookingId}`);
   }
 }

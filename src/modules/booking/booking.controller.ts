@@ -142,7 +142,17 @@ export class BookingController {
   @ApiResponse({ status: 200, description: 'Booking retrieved successfully' })
   @ApiResponse({ status: 404, description: 'Booking not found' })
   async getById(@Param('id') id: string, @GetUser() user: User) {
-    return this.bookingService.getById(id, user.id);
+    const result = await this.bookingService.getById(id, user.id);
+    // Merge the last-known live driver location (Redis) as a REST fallback for
+    // the customer's map when the socket stream has a gap or just opened.
+    try {
+      const loc = await this.bookingGateway.getLastDriverLocation(id);
+      const data: any = (result as any)?.data ?? result;
+      if (loc && data && !data.driver_location) {
+        data.driver_location = { latitude: loc.latitude, longitude: loc.longitude, heading: loc.heading, ts: loc.ts };
+      }
+    } catch { /* non-fatal — location is best-effort */ }
+    return result;
   }
 
   @Put(':id/cancel')
