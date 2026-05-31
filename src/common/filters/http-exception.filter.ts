@@ -20,14 +20,19 @@ export class HttpExceptionFilter implements ExceptionFilter {
     let status = HttpStatus.INTERNAL_SERVER_ERROR;
     let message: string | string[] = 'Internal server error';
     let error = 'Internal Server Error';
+    const extra: Record<string, unknown> = {};
 
     if (exception instanceof HttpException) {
       status = exception.getStatus();
       const exceptionResponse = exception.getResponse();
 
       if (typeof exceptionResponse === 'object' && exceptionResponse !== null) {
-        message = (exceptionResponse as any).message || message;
-        error = (exceptionResponse as any).error || error;
+        const r = exceptionResponse as any;
+        message = r.message || message;
+        error = r.error || error;
+        // Forward custom fields (e.g. role-switch hints) so clients can react.
+        if (r.code !== undefined) extra.code = r.code;
+        if (r.existing_role !== undefined) extra.existing_role = r.existing_role;
       } else {
         message = exceptionResponse as string;
       }
@@ -48,6 +53,7 @@ export class HttpExceptionFilter implements ExceptionFilter {
       statusCode: status,
       message,
       error,
+      ...extra,
       timestamp: new Date().toISOString(),
     });
   }

@@ -6,6 +6,7 @@ import {
   MinLength,
   MaxLength,
   IsOptional,
+  IsBoolean,
   Matches,
 } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
@@ -56,6 +57,11 @@ export class VerifyOtpDto {
   @IsOptional()
   @MaxLength(128)
   device_id?: string;
+
+  @ApiProperty({ required: false, description: 'Confirm switching an existing account to this role (signs out the other app)' })
+  @IsOptional()
+  @IsBoolean()
+  confirm_switch?: boolean;
 }
 
 export class LoginDto {

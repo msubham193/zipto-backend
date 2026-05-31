@@ -56,7 +56,7 @@ export class AuthController {
   @ApiResponse({ status: 200, description: 'OTP sent successfully' })
   @ApiResponse({ status: 401, description: 'User not found' })
   async customerLogin(@Body() loginDto: LoginDto) {
-    return this.authService.login(loginDto);
+    return this.authService.login(loginDto, 'customer' as any);
   }
 
   @Public()
@@ -66,7 +66,7 @@ export class AuthController {
   @ApiResponse({ status: 200, description: 'OTP sent successfully' })
   @ApiResponse({ status: 401, description: 'User not found' })
   async driverLogin(@Body() loginDto: LoginDto) {
-    return this.authService.login(loginDto);
+    return this.authService.login(loginDto, 'driver' as any);
   }
 
   @Public()

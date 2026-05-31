@@ -80,6 +80,25 @@ export class AuthService {
   }
 
   /**
+   * Whether logging in as `requestedRole` would switch an existing account's
+   * role (e.g. a Rider's number used on the Customer app). Admins are never
+   * switchable via OTP. Returns the flag + the account's current role so the
+   * client can ask the user to confirm before they get signed out of the
+   * other app.
+   */
+  private roleSwitchInfo(existingUser: User | null, requestedRole?: UserRole) {
+    const requires =
+      !!existingUser &&
+      !!requestedRole &&
+      existingUser.role !== requestedRole &&
+      existingUser.role !== UserRole.ADMIN;
+    return {
+      requires_role_switch: requires,
+      existing_role: requires ? existingUser!.role : undefined,
+    };
+  }
+
+  /**
    * Register or login — send OTP (auto-detects new vs returning user).
    */
   async register(registerDto: RegisterDto) {
@@ -101,13 +120,15 @@ export class AuthService {
       phone: formattedPhone,
       isNewUser: !existingUser,
       expiresIn: `${process.env.OTP_EXPIRY_MINUTES ?? 5} minutes`,
+      ...this.roleSwitchInfo(existingUser, registerDto.role as UserRole | undefined),
     };
   }
 
   /**
-   * Login with phone — sends OTP.
+   * Login with phone — sends OTP. `requestedRole` is the role of the app the
+   * user is logging in from (customer/driver), used to detect a role switch.
    */
-  async login(loginDto: LoginDto) {
+  async login(loginDto: LoginDto, requestedRole?: UserRole) {
     const { phone } = loginDto;
     const formattedPhone = formatPhoneNumber(phone);
 
@@ -126,6 +147,7 @@ export class AuthService {
       phone: formattedPhone,
       isNewUser: !existingUser,
       expiresIn: `${process.env.OTP_EXPIRY_MINUTES ?? 5} minutes`,
+      ...this.roleSwitchInfo(existingUser, requestedRole),
     };
   }
 
@@ -136,7 +158,7 @@ export class AuthService {
    * Fully Redis-backed — no DB OTP table involved.
    */
   async verifyOtp(verifyOtpDto: VerifyOtpDto) {
-    const { phone, otp, role, referral_code, device_id } = verifyOtpDto;
+    const { phone, otp, role, referral_code, device_id, confirm_switch } = verifyOtpDto;
     const formattedPhone = formatPhoneNumber(phone);
 
     this.logger.log(`[verifyOtp] phone=${this.mask(formattedPhone)}`);
@@ -176,13 +198,48 @@ export class AuthService {
       if (!user.is_active) {
         throw new UnauthorizedException('User account is deactivated');
       }
-      if (user.role !== UserRole.DRIVER || user.is_verified) {
-        user.is_verified = true;
-      }
-      if (role && user.role !== role) {
+
+      const previousRole = user.role;
+
+      // Cross-role login: this number belongs to a different role than the app
+      // requesting login (e.g. a Rider's number used on the Customer app).
+      // Require explicit consent — confirming switches the active role and
+      // signs the user out of the other app (its session is rotated below).
+      if (role && user.role !== role && user.role !== UserRole.ADMIN) {
+        if (!confirm_switch) {
+          throw new ConflictException({
+            message:
+              `This number is registered as a ${this.roleLabel(user.role)}. ` +
+              `Continue and you'll be signed out of the ${this.roleLabel(user.role)} app.`,
+            code: 'ROLE_SWITCH_REQUIRED',
+            existing_role: user.role,
+          });
+        }
+        // Consent given — switch the active role. Both identities are preserved
+        // (the driver profile, keyed by user_id, is NOT deleted), so the user
+        // can switch back later from the other app.
         user.role = role as UserRole;
       }
+
+      // Verification: customers are always verified; a driver is only verified
+      // once their KYC is approved — never auto-verify a fresh role switch.
+      if (user.role !== UserRole.DRIVER) {
+        user.is_verified = true;
+      } else if (previousRole !== UserRole.DRIVER) {
+        const profile = await this.driverProfileRepository.findOne({ where: { user_id: user.id } });
+        user.is_verified = profile?.verification_status === VerificationStatus.APPROVED;
+      }
+
       await this.userRepository.save(user);
+
+      // Switching AWAY from driver → take them offline so they stop receiving
+      // ride offers while they use the customer side.
+      if (previousRole === UserRole.DRIVER && user.role !== UserRole.DRIVER) {
+        await this.driverProfileRepository.update(
+          { user_id: user.id },
+          { availability_status: AvailabilityStatus.OFFLINE },
+        );
+      }
     }
 
     // Force drivers offline on every login
@@ -426,6 +483,12 @@ export class AuthService {
   private sanitizeUser(user: User) {
     const { password_hash, refresh_token, ...sanitized } = user;
     return sanitized;
+  }
+
+  private roleLabel(role: UserRole): string {
+    if (role === UserRole.DRIVER) return 'Rider';
+    if (role === UserRole.ADMIN) return 'Admin';
+    return 'Customer';
   }
 
   private mask(phone: string): string {
