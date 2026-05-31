@@ -301,6 +301,9 @@ export class BookingService {
       coupon_code,
     } = createBookingDto;
 
+    // Diagnostic log — remove after confirming receiver_phone flows correctly
+    this.logger.log(`[create] receiver_name="${receiver_name}" receiver_phone="${receiver_phone}" mobile_number="${mobile_number}"`);
+
     // Validate scheduled time
     if (booking_type === BookingType.SCHEDULED) {
       if (!scheduled_time) {
