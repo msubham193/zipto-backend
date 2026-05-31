@@ -15,7 +15,9 @@ import { Repository } from 'typeorm';
 import { InjectQueue } from '@nestjs/bull';
 import { Queue } from 'bull';
 import { Booking, BookingStatus } from './entities/booking.entity';
+import { User } from '../auth/entities/user.entity';
 import { RedisService } from '../../services/redis.service';
+import { FcmService } from '../../services/fcm.service';
 
 /** How long we wait after a socket disconnect before treating the driver as AWOL. */
 const DISCONNECT_GRACE_MS = 15 * 60 * 1000; // 15 minutes
@@ -62,8 +64,10 @@ export class BookingGateway implements OnGatewayConnection, OnGatewayDisconnect 
   constructor(
     private jwtService: JwtService,
     @InjectRepository(Booking) private bookingRepository: Repository<Booking>,
+    @InjectRepository(User) private userRepository: Repository<User>,
     @InjectQueue('booking_assignment') private bookingQueue: Queue,
     private cacheManager: RedisService,
+    private fcmService: FcmService,
   ) {}
 
   async handleConnection(client: Socket) {
@@ -155,8 +159,34 @@ export class BookingGateway implements OnGatewayConnection, OnGatewayDisconnect 
     } else {
       // Driver socket is disconnected — persist offer in Redis so it survives reconnect
       // and server restarts. TTL matches the offer timeout window.
-      this.logger.log(`[Gateway] Driver ${driverId} offline — queuing offer in Redis`);
+      this.logger.log(`[Gateway] Driver ${driverId} offline — queuing offer in Redis + FCM`);
       await this.cacheManager.set(`offer:pending:${driverId}`, bookingData, PENDING_OFFER_TTL_MS);
+
+      // …and fire a high-priority push so the driver still gets a loud heads-up
+      // alert with sound while the app is backgrounded or killed (socket down).
+      try {
+        const driver = await this.userRepository.findOne({
+          where: { id: driverId },
+          select: ['id', 'fcm_token'],
+        });
+        if (driver?.fcm_token) {
+          const fare = Math.round(Number(bookingData?.fare) || 0);
+          await this.fcmService.sendToToken(
+            driver.fcm_token,
+            'New booking request 🛵',
+            fare > 0
+              ? `₹${fare} • ${bookingData?.pickup ?? 'Pickup nearby'} — tap to accept`
+              : 'You have a new ride request — tap to accept',
+            {
+              type: 'new_booking',
+              bookingId: String(bookingData?.bookingId ?? ''),
+            },
+            true, // isNewBooking → zipto_new_booking channel (loud sound, heads-up)
+          );
+        }
+      } catch (err: any) {
+        this.logger.warn(`[Gateway] FCM offer push failed for ${driverId}: ${err?.message}`);
+      }
     }
   }
 
