@@ -158,7 +158,11 @@ export class CouponService {
     }
 
     const now = new Date();
-    if (now < coupon.valid_from) {
+    // Same 24h valid_from grace as listAvailable() so a coupon that is SHOWN to
+    // the customer can always be applied (admin datetime-local stores a naive
+    // timestamp that can land a few hours in the future on a UTC server).
+    const VALID_FROM_GRACE_MS = 24 * 60 * 60 * 1000;
+    if (now.getTime() < new Date(coupon.valid_from).getTime() - VALID_FROM_GRACE_MS) {
       throw new BadRequestException('This coupon is not yet active');
     }
     if (coupon.valid_until && now > coupon.valid_until) {
@@ -172,7 +176,10 @@ export class CouponService {
     }
 
     if (coupon.applicable_vehicle_types?.length && dto.vehicle_type) {
-      if (!coupon.applicable_vehicle_types.includes(dto.vehicle_type)) {
+      // Case-insensitive + trimmed — consistent with listAvailable(), so a coupon
+      // shown for "bike" isn't rejected because the admin typed "Bike".
+      const allowed = coupon.applicable_vehicle_types.map((t) => String(t).trim().toLowerCase());
+      if (!allowed.includes(dto.vehicle_type.trim().toLowerCase())) {
         throw new BadRequestException(
           `Coupon not valid for ${dto.vehicle_type}. Valid for: ${coupon.applicable_vehicle_types.join(', ')}`,
         );
