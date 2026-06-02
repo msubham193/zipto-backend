@@ -14,6 +14,9 @@ const TWO_FACTOR_BASE_URL = 'https://2factor.in/API/R1/';
 const SENDER_ID           = 'Zipto';
 const PE_ID               = '1101559440000094860';
 const CT_ID               = '1107177908307247477';
+// Content template id for the DLT-approved "Delivery OTP" template.
+// Env override supported; defaults to the approved Delivery OTP CT_ID.
+const DELIVERY_CT_ID      = (process.env.TWO_FACTOR_DELIVERY_CT_ID || '').trim() || '1107177912259934237';
 
 // ─── Redis key namespaces ─────────────────────────────────────────────────────
 const KEY_OTP    = (phone: string) => `otp:${phone}`;
@@ -102,8 +105,11 @@ export class SmsService {
       return { success: true, dev_otp: otp };
     }
 
-    // Production — send via 2Factor
-    const sent = await this.send2Factor(normalised, otp);
+    // Production — send via 2Factor (DLT login template, word-for-word)
+    const loginMsg =
+      `Your Zipto OTP is ${otp}. Use this OTP for login and Verification. ` +
+      `Do not share it with anyone. -Zipto Hyperlogistics Private Limited`;
+    const sent = await this.send2Factor(normalised, loginMsg, CT_ID);
     if (!sent) {
       // Roll back Redis entries so the user can immediately retry
       await this.redisService.del(KEY_OTP(normalised), KEY_RESEND(normalised));
@@ -203,6 +209,26 @@ export class SmsService {
   }
 
   /**
+   * Send the DELIVERY OTP to the receiver's phone, using the DLT-approved
+   * "Delivery OTP" template (word-for-word). The receiver reveals this code to
+   * the rider only at delivery to confirm a successful handover.
+   */
+  async sendDeliveryOtp(phone: string, otp: string): Promise<boolean> {
+    const normalised = this.normalisePhone(phone);
+    // Must match the registered DLT template exactly.
+    const message =
+      `Your Zipto Delivery OTP is ${otp}. Use this OTP for Delivery verification. ` +
+      `Do not share it with anyone.\n- Zipto Hyperlogistics Private Limited`;
+
+    if (this.isDev) {
+      this.logger.warn(`[DEV] Delivery OTP SMS to ${this.mask(normalised)}: ${message}`);
+      return true;
+    }
+
+    return this.send2Factor(normalised, message, DELIVERY_CT_ID);
+  }
+
+  /**
    * Backward-compat shim — maps old Twilio-style `sendVerification` to `sendOTP`.
    * @deprecated Use sendOTP() directly.
    */
@@ -229,12 +255,11 @@ export class SmsService {
 
   // ─── Private helpers ─────────────────────────────────────────────────────────
 
-  private async send2Factor(phone: string, otp: string): Promise<boolean> {
-    // DLT-approved template — must match exactly (word for word)
-    const message =
-      `Your Zipto OTP is ${otp}. Use this OTP for login and Verification. ` +
-      `Do not share it with anyone. -Zipto Hyperlogistics Private Limited`;
-
+  /**
+   * Low-level 2Factor TRANS_SMS sender. `message` must match a DLT-approved
+   * template word-for-word, and `ctid` must be that template's content id.
+   */
+  private async send2Factor(phone: string, message: string, ctid: string = CT_ID): Promise<boolean> {
     // 2Factor expects a plain 10-digit number (no +91 prefix)
     const localPhone = phone.replace(/^\+91/, '').replace(/\D/g, '').slice(-10);
 
@@ -245,7 +270,7 @@ export class SmsService {
       from   : SENDER_ID,
       msg    : message,
       peid   : PE_ID,
-      ctid   : CT_ID,
+      ctid   : ctid,
     };
 
     try {

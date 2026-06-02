@@ -1212,15 +1212,16 @@ export class BookingService {
         }
       }
 
-      // Send OTP SMS now that booking is confirmed
-      const smsPhone = offerData.mobile_number;
-      const smsBody =
-        `Your Zipto booking is confirmed!\n` +
-        `Pickup OTP: *${offerData.pickup_otp}* — Share with driver when they arrive.\n` +
-        `Delivery OTP: *${offerData.delivery_otp}* — Share with driver ONLY when package is delivered.`;
-      this.smsService.sendSms(smsPhone, smsBody).catch(err =>
-        this.logger.warn(`Failed to send OTP SMS: ${err?.message}`),
-      );
+      // Send the DELIVERY OTP to the RECEIVER's phone via the DLT-approved
+      // template — they reveal it to the rider only at delivery. The pickup OTP
+      // is shown to the sender in-app on the live-tracking screen.
+      const deliveryOtpPhone =
+        offerData.receiver_phone || offerData.alternative_phone || offerData.mobile_number;
+      if (offerData.delivery_otp && deliveryOtpPhone) {
+        this.smsService.sendDeliveryOtp(deliveryOtpPhone, offerData.delivery_otp).catch(err =>
+          this.logger.warn(`Failed to send delivery OTP SMS: ${err?.message}`),
+        );
+      }
 
       // Store accepted mapping so customer can resolve offer_id → booking_id
       await this.cacheManager.set(`offer:accepted:${offerId}`, createdBooking.id, 10 * 60 * 1000);
