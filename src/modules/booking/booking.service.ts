@@ -1236,8 +1236,8 @@ export class BookingService {
       this.notificationService.pushToCustomer(
         offerData.customer_id,
         'general',
-        '🚀 Driver Found!',
-        `Your driver is on the way. OTP sent via SMS.`,
+        '🚀 Rider Found!',
+        `Your rider is on the way. OTP sent via SMS.`,
         { type: 'booking_accepted', bookingId: createdBooking.id },
       ).catch(() => {});
 

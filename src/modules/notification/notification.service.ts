@@ -337,7 +337,7 @@ export class NotificationService implements OnModuleInit {
       userId,
       'approval',
       '🎉 Account Approved!',
-      'Your driver account has been verified. You can now go online and accept bookings.',
+      'Your rider account has been verified. You can now go online and accept bookings.',
     );
   }
 
