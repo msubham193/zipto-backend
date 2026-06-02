@@ -68,8 +68,10 @@ export class BookingController {
   @ApiOperation({ summary: 'Validate a coupon code before booking' })
   @ApiResponse({ status: 200, description: 'Coupon valid — returns discount amount and final fare' })
   async validateCoupon(@GetUser() user: User, @Body() dto: ValidateCouponDto) {
-    const result = await this.couponService.validate(user.id, dto);
-    return { success: true, data: result };
+    // Return the raw result — the global TransformInterceptor wraps it as
+    // { success, data }. Returning { success, data } here caused a double-wrap
+    // so the client read `undefined` discount_amount (coupon "applied" with ₹0).
+    return this.couponService.validate(user.id, dto);
   }
 
   @Get('coupons')
