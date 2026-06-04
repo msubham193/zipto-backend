@@ -88,6 +88,14 @@ export class Payment {
   @Column({ type: 'varchar', length: 20, nullable: true })
   hdfc_status_code: string;
 
+  // ── Cashfree PG columns ──────────────────────────────────────────────────
+  @Column({ type: 'varchar', length: 80, nullable: true })
+  @Index()
+  cashfree_order_id: string;
+
+  @Column({ type: 'varchar', length: 100, nullable: true })
+  cashfree_payment_id: string;
+
   @CreateDateColumn()
   created_at: Date;
 

@@ -8,9 +8,13 @@ import {
   ParseIntPipe,
   DefaultValuePipe,
   Res,
+  Req,
   Header,
+  Headers,
+  RawBodyRequest,
+  BadRequestException,
 } from '@nestjs/common';
-import { Response } from 'express';
+import { Request, Response } from 'express';
 import { ApiTags, ApiOperation, ApiResponse, ApiQuery, ApiBearerAuth } from '@nestjs/swagger';
 import { PaymentService } from './payment.service';
 import { InitiatePaymentDto, CashPaymentDto } from './dto/payment.dto';
@@ -92,6 +96,76 @@ export class PaymentController {
   </body>
 </html>`;
     res.send(html);
+  }
+
+  // ─── Cashfree PG ──────────────────────────────────────────────────────────
+
+  @Post('create-payment-link')
+  @Roles('driver', 'customer')
+  @ApiOperation({ summary: 'Create a Cashfree payment link (delivery QR) for a booking' })
+  async createPaymentLink(
+    @GetUser() user: User,
+    @Body('booking_id') bookingId: string,
+    @Body('amount') amount: number,
+  ) {
+    if (!bookingId) throw new BadRequestException('booking_id is required');
+    return this.paymentService.createBookingPaymentLink(user.id, bookingId, amount);
+  }
+
+  @Post('cashfree/initiate')
+  @Roles('customer')
+  @ApiOperation({ summary: 'Create a Cashfree order — returns a checkout_url for the WebView' })
+  @ApiResponse({ status: 201, description: 'Cashfree order created' })
+  async initiateCashfree(@GetUser() user: User, @Body() dto: InitiatePaymentDto) {
+    return this.paymentService.initiateCashfree(user.id, dto);
+  }
+
+  /** HTML page the app WebView loads to launch the Cashfree checkout. */
+  @Get('cashfree/checkout')
+  @Public()
+  @Header('Content-Type', 'text/html')
+  @ApiOperation({ summary: 'Cashfree checkout page (loaded in WebView)' })
+  async cashfreeCheckout(@Query('sid') sid: string, @Res() res: Response) {
+    res.send(this.paymentService.buildCashfreeCheckoutHtml(sid ?? ''));
+  }
+
+  /** Cashfree redirects here after payment — WebView detection point. */
+  @Get('cashfree/return')
+  @Public()
+  @Header('Content-Type', 'text/html')
+  @ApiOperation({ summary: 'Cashfree return/result page (WebView detection point)' })
+  async cashfreeReturn(@Query('order_id') orderId: string, @Res() res: Response) {
+    res.send(await this.paymentService.handleCashfreeReturn(orderId ?? ''));
+  }
+
+  @Post('wallet/cashfree/create-order')
+  @Roles('customer')
+  @ApiOperation({ summary: 'Create a Cashfree order to add money to the customer wallet' })
+  async initiateCashfreeWallet(@GetUser() user: User, @Body('amount') amount: number) {
+    return this.paymentService.initiateCashfreeWallet(user.id, amount);
+  }
+
+  @Post('wallet/cashfree/verify')
+  @Roles('customer')
+  @ApiOperation({ summary: 'Confirm a Cashfree wallet top-up and credit the wallet (idempotent)' })
+  async verifyCashfreeWallet(@GetUser() user: User, @Body('order_id') orderId: string) {
+    if (!orderId) throw new BadRequestException('order_id is required');
+    return this.paymentService.verifyCashfreeWallet(user.id, orderId);
+  }
+
+  /** Cashfree server-to-server webhook (authoritative). */
+  @Post('cashfree/webhook')
+  @Public()
+  @ApiOperation({ summary: 'Cashfree payment webhook (PUBLIC, signature-verified)' })
+  async cashfreeWebhook(
+    @Req() req: RawBodyRequest<Request>,
+    @Headers('x-webhook-signature') signature: string,
+    @Headers('x-webhook-timestamp') timestamp: string,
+    @Res() res: Response,
+  ) {
+    const raw = req.rawBody?.toString('utf8') ?? JSON.stringify(req.body ?? {});
+    await this.paymentService.handleCashfreeWebhook(raw, signature, timestamp);
+    res.status(200).json({ received: true });
   }
 
   @Get('status/:bookingId')

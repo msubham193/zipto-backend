@@ -424,82 +424,26 @@ export class DriverController {
 
   // ─── Wallet ───────────────────────────────────────────────────────────────
 
-  // ─── Wallet Top-up (UPI) ──────────────────────────────────────────────────
+  // ─── Cashfree wallet top-up (native UPI-intent checkout, no fallback) ─────
 
-  @Get('wallet/topup/upi-info')
-  @ApiOperation({ summary: 'Get Zipto UPI ID for wallet top-up' })
-  async getTopupUpiInfo() {
-    return this.systemSettings.getUpiInfo();
-  }
-
-  @Post('wallet/topup/request')
-  @ApiOperation({ summary: 'Submit UPI top-up request with UTR number (manual fallback)' })
-  async submitTopupRequest(
-    @GetUser() user: User,
-    @Body('amount') amount: number,
-    @Body('utr_number') utrNumber: string,
-  ) {
-    if (!amount || amount < 10) throw new BadRequestException('Minimum top-up is ₹10');
-    if (!utrNumber?.trim()) throw new BadRequestException('UTR number is required');
-    return this.driverService.submitTopupRequest(user.id, amount, utrNumber.trim().toUpperCase());
-  }
-
-  @Post('wallet/topup/create-order')
-  @ApiOperation({ summary: 'Create Razorpay order for native checkout wallet top-up' })
-  async createTopupOrder(
+  @Post('wallet/topup/cashfree/create-order')
+  @ApiOperation({ summary: 'Create a Cashfree order for native wallet top-up (UPI intent)' })
+  async createCashfreeTopupOrder(
     @GetUser() user: User,
     @Body('amount') amount: number,
   ) {
     if (!amount || amount < 10) throw new BadRequestException('Minimum top-up is ₹10');
-    return this.driverService.createTopupOrder(user.id, amount);
+    return this.driverService.createCashfreeTopupOrder(user.id, amount);
   }
 
-  @Post('wallet/topup/verify-payment')
-  @ApiOperation({ summary: 'Verify Razorpay payment signature and credit wallet' })
-  async verifyTopupPayment(
+  @Post('wallet/topup/cashfree/verify')
+  @ApiOperation({ summary: 'Confirm a Cashfree top-up and credit the wallet (idempotent)' })
+  async verifyCashfreeTopup(
     @GetUser() user: User,
-    @Body('razorpay_order_id')   razorpayOrderId: string,
-    @Body('razorpay_payment_id') razorpayPaymentId: string,
-    @Body('razorpay_signature')  razorpaySignature: string,
-    @Body('amount')              amount: number,
+    @Body('order_id') orderId: string,
   ) {
-    if (!razorpayOrderId || !razorpayPaymentId || !razorpaySignature) {
-      throw new BadRequestException('razorpay_order_id, razorpay_payment_id and razorpay_signature are required');
-    }
-    return this.driverService.verifyTopupPayment(user.id, razorpayOrderId, razorpayPaymentId, razorpaySignature, amount);
-  }
-
-  @Post('wallet/topup/create-link')
-  @ApiOperation({ summary: 'Create Razorpay payment link for wallet top-up — test mode credits instantly' })
-  async createWalletTopupLink(
-    @GetUser() user: User,
-    @Body('amount') amount: number,
-  ) {
-    if (!amount || amount < 10) throw new BadRequestException('Minimum top-up is ₹10');
-    return this.driverService.createWalletTopupLink(user.id, amount);
-  }
-
-  @Get('wallet/topup/request/:id/status')
-  @ApiOperation({ summary: 'Poll Razorpay payment status for a wallet top-up request' })
-  async getTopupRequestStatus(
-    @GetUser() user: User,
-    @Param('id') id: string,
-  ) {
-    return this.driverService.getTopupRequestStatus(user.id, id);
-  }
-
-  @Post('wallet/topup/upi-verify')
-  @ApiOperation({ summary: 'Auto-verify UPI topup from react-native-upi-payment response — credits wallet instantly' })
-  async autoVerifyUpiTopup(
-    @GetUser() user: User,
-    @Body('amount') amount: number,
-    @Body('upi_txn_id') upiTxnId: string,
-    @Body('utr_number') utrNumber: string,
-    @Body('status') status: string,
-  ) {
-    if (!amount || amount < 10) throw new BadRequestException('Minimum top-up is ₹10');
-    if (!status) throw new BadRequestException('UPI status is required');
-    return this.driverService.autoVerifyUpiTopup(user.id, amount, upiTxnId ?? '', utrNumber ?? '', status);
+    if (!orderId) throw new BadRequestException('order_id is required');
+    return this.driverService.verifyCashfreeTopup(user.id, orderId);
   }
 
   @Get('wallet/topup/requests')

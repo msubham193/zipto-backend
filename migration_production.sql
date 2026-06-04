@@ -174,5 +174,14 @@ VALUES
   ('referral_play_store_url', 'https://play.google.com/store/apps/details?id=com.ridezipto.customer', 'Play Store URL the referral landing page redirects to')
 ON CONFLICT (key) DO NOTHING;
 
+-- ── 8. Cashfree PG columns on payments ───────────────────────
+
+ALTER TABLE payments
+  ADD COLUMN IF NOT EXISTS cashfree_order_id   VARCHAR(80),
+  ADD COLUMN IF NOT EXISTS cashfree_payment_id VARCHAR(100);
+
+CREATE INDEX IF NOT EXISTS idx_payments_cashfree_order_id
+  ON payments (cashfree_order_id);
+
 -- ── Done ──────────────────────────────────────────────────────
 SELECT 'Migration complete' AS result;

@@ -29,6 +29,7 @@ import { NotificationService } from '../notification/notification.service';
 import { RedisService } from '../../services/redis.service';
 import { DriverWalletService } from './driver-wallet.service';
 import { RazorpayXService } from '../../services/razorpayx.service';
+import { CashfreeService } from '../../services/cashfree.service';
 
 /** GPS ping TTL: if a driver stops sending location for 20 min during an active delivery,
  *  the cron guard treats them as a ghost. */
@@ -61,6 +62,7 @@ export class DriverService {
     private readonly driverWalletService: DriverWalletService,
     private readonly configService: ConfigService,
     private readonly razorpayXService: RazorpayXService,
+    private readonly cashfreeService: CashfreeService,
   ) {}
 
   /**
@@ -1269,6 +1271,100 @@ export class DriverService {
     const new_balance = await this.driverWalletService.topUp(userId, Number(request.amount), razorpayPaymentId);
     this.logger.log(`[Topup] Wallet credited ₹${request.amount} for driver=${userId} payment=${razorpayPaymentId}`);
     return { new_balance };
+  }
+
+  // ─── Cashfree wallet top-up (native UPI-intent checkout) ────────────────────
+
+  /**
+   * Create a Cashfree order + PENDING DriverTopupRequest. The app opens the
+   * native Cashfree checkout with the returned payment_session_id (UPI intent).
+   */
+  async createCashfreeTopupOrder(userId: string, amount: number): Promise<{
+    order_id: string;
+    payment_session_id: string;
+    mode: string;
+    request_id: string;
+  }> {
+    const profile = await this.driverProfileRepository.findOne({ where: { user_id: userId } });
+    if (!profile) throw new NotFoundException('Driver profile not found');
+    if (!this.cashfreeService.isEnabled) throw new BadRequestException('Payment gateway not configured');
+
+    const user = await this.userRepository.findOne({
+      where: { id: userId },
+      select: ['id', 'phone', 'email'],
+    });
+    const phone = (user?.phone || '').replace(/\D/g, '').slice(-10) || '9999999999';
+
+    const orderId = this.cashfreeService.generateOrderId();
+    const base = (
+      this.configService.get<string>('HDFC_REDIRECT_BASE_URL') ||
+      process.env.HDFC_REDIRECT_BASE_URL ||
+      'https://api.ridezipto.com/api'
+    ).replace(/\/+$/, '');
+
+    const { paymentSessionId } = await this.cashfreeService.createOrder({
+      orderId,
+      amount,
+      customerId: userId,
+      customerPhone: phone,
+      customerEmail: user?.email || undefined,
+      returnUrl: `${base}/payment/cashfree/return?order_id={order_id}`,
+      notifyUrl: `${base}/payment/cashfree/webhook`,
+      tags: { purpose: 'driver_topup', user_id: userId },
+    });
+
+    const request = this.topupRequestRepository.create({
+      driver_user_id: userId,
+      driver_profile_id: profile.id,
+      amount,
+      utr_number: orderId, // Cashfree order id is the unique reference
+      status: TopupRequestStatus.PENDING,
+      remarks: `Cashfree order: ${orderId}`,
+    });
+    await this.topupRequestRepository.save(request);
+
+    return {
+      order_id: orderId,
+      payment_session_id: paymentSessionId,
+      mode: this.cashfreeService.mode,
+      request_id: request.id,
+    };
+  }
+
+  /**
+   * Confirm a Cashfree top-up (called after the SDK reports completion).
+   * Verifies the order is PAID with Cashfree, then atomically credits the
+   * wallet exactly once.
+   */
+  async verifyCashfreeTopup(userId: string, orderId: string): Promise<{ new_balance: number; status: string }> {
+    const request = await this.topupRequestRepository.findOne({
+      where: { utr_number: orderId, driver_user_id: userId },
+    });
+    if (!request) throw new NotFoundException('Top-up request not found');
+
+    if (request.status === TopupRequestStatus.APPROVED) {
+      return { new_balance: await this.driverWalletService.getWalletBalance(userId), status: 'approved' };
+    }
+
+    const order = await this.cashfreeService.getOrder(orderId);
+    if (!order.isPaid) {
+      return {
+        new_balance: await this.driverWalletService.getWalletBalance(userId),
+        status: order.orderStatus,
+      };
+    }
+
+    const updated = await this.topupRequestRepository.update(
+      { id: request.id, status: TopupRequestStatus.PENDING },
+      { status: TopupRequestStatus.APPROVED, remarks: `Cashfree paid: ${orderId}` },
+    );
+    if (!updated.affected) {
+      return { new_balance: await this.driverWalletService.getWalletBalance(userId), status: 'approved' };
+    }
+
+    const new_balance = await this.driverWalletService.topUp(userId, Number(request.amount), orderId);
+    this.logger.log(`[Topup] Cashfree wallet credit ₹${request.amount} for driver=${userId} order=${orderId}`);
+    return { new_balance, status: 'approved' };
   }
 
   /**
