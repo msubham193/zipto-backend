@@ -32,6 +32,8 @@ export class CashfreeService {
 
   private readonly appId: string;
   private readonly secretKey: string;
+  /** Dedicated webhook signing secret (newer dashboards); falls back to secretKey. */
+  private readonly webhookSecret: string;
   private readonly apiVersion: string;
   private readonly baseUrl: string;
   /** 'production' | 'sandbox' — drives both the API host and the JS SDK mode. */
@@ -40,6 +42,7 @@ export class CashfreeService {
   constructor(private readonly config: ConfigService) {
     this.appId = (process.env.CASHFREE_APP_ID || '').trim();
     this.secretKey = (process.env.CASHFREE_SECRET_KEY || '').trim();
+    this.webhookSecret = (process.env.CASHFREE_WEBHOOK_SECRET || '').trim() || this.secretKey;
     this.apiVersion = (process.env.CASHFREE_API_VERSION || '2023-08-01').trim();
     this.mode = (process.env.CASHFREE_ENV || 'production').trim() === 'sandbox'
       ? 'sandbox'
@@ -189,11 +192,11 @@ export class CashfreeService {
    * `rawBody` MUST be the exact raw request body string.
    */
   verifyWebhookSignature(rawBody: string, signature: string, timestamp: string): boolean {
-    if (!signature || !timestamp || !this.secretKey) return false;
+    if (!signature || !timestamp || !this.webhookSecret) return false;
     try {
       const payload = `${timestamp}${rawBody}`;
       const expected = crypto
-        .createHmac('sha256', this.secretKey)
+        .createHmac('sha256', this.webhookSecret)
         .update(payload)
         .digest('base64');
       // Constant-time compare
