@@ -91,9 +91,19 @@ export class DriverService {
       [userId],
     );
 
+    // Documents/photos are private R2 keys → presign so the app can render them.
+    const signedDocs = await this.s3Service.signFields({
+      profile_image: profile.profile_image,
+      aadhar_front_image: profile.aadhar_front_image,
+      aadhar_back_image: profile.aadhar_back_image,
+      driving_license_image: profile.driving_license_image,
+      vehicle_rc_image: profile.vehicle_rc_image,
+    });
+
     // Surface user-level fields so frontend can read profile.name directly
     return {
       ...profile,
+      ...signedDocs,
       name: profile.user?.name ?? null,
       phone: profile.user?.phone ?? null,
       email: profile.user?.email ?? null,
@@ -106,7 +116,14 @@ export class DriverService {
    * Update driver profile
    */
   async updateProfile(userId: string, updateDriverDto: UpdateDriverDto) {
-    const profile = await this.getProfile(userId);
+    // Load the raw entity (NOT getProfile, whose doc fields hold presigned URLs —
+    // saving those would overwrite the stored R2 object keys).
+    const profile = await this.driverProfileRepository.findOne({
+      where: { user_id: userId },
+    });
+    if (!profile) {
+      throw new NotFoundException('Driver profile not found');
+    }
 
     // Update user fields
     const { name, email } = updateDriverDto;
@@ -128,7 +145,7 @@ export class DriverService {
 
     await this.driverProfileRepository.save(profile);
 
-    // Return updated profile
+    // Return updated profile (with presigned document URLs)
     return this.getProfile(userId);
   }
 
@@ -136,12 +153,16 @@ export class DriverService {
    * Update driver availability status
    */
   async updateAvailability(userId: string, updateAvailabilityDto: UpdateAvailabilityDto) {
-    const profile = await this.getProfile(userId);
-
-    profile.availability_status = updateAvailabilityDto.availability_status;
-    await this.driverProfileRepository.save(profile);
-
-    return { availability_status: profile.availability_status };
+    // Targeted update — avoid round-tripping getProfile()'s presigned doc URLs
+    // back into the stored R2 keys.
+    const result = await this.driverProfileRepository.update(
+      { user_id: userId },
+      { availability_status: updateAvailabilityDto.availability_status },
+    );
+    if (!result.affected) {
+      throw new NotFoundException('Driver profile not found');
+    }
+    return { availability_status: updateAvailabilityDto.availability_status };
   }
 
   /**

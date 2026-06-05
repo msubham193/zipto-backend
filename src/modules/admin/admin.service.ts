@@ -20,6 +20,7 @@ import {
 import { DriverWalletService } from '../driver/driver-wallet.service';
 import { RazorpayXService } from '../../services/razorpayx.service';
 import { CashfreePayoutService } from '../../services/cashfree-payout.service';
+import { S3Service } from '../../services/s3.service';
 
 @Injectable()
 export class AdminService {
@@ -49,6 +50,7 @@ export class AdminService {
     private driverWalletService: DriverWalletService,
     private razorpayXService: RazorpayXService,
     private cashfreePayoutService: CashfreePayoutService,
+    private s3Service: S3Service,
   ) {}
 
   /**
@@ -463,8 +465,18 @@ export class AdminService {
       take: 20,
     });
 
+    // Convert private R2 document keys to presigned URLs for the admin panel.
+    const signedDocs = await this.s3Service.signFields({
+      aadhar_front_image: driver.aadhar_front_image,
+      aadhar_back_image: driver.aadhar_back_image,
+      driving_license_image: driver.driving_license_image,
+      vehicle_rc_image: driver.vehicle_rc_image,
+      profile_image: driver.profile_image,
+    });
+
     return {
       ...driver,
+      ...signedDocs,
       statistics: {
         total_bookings: totalBookings,
         completed_bookings: completedBookings,
@@ -693,6 +705,15 @@ export class AdminService {
     });
     if (!profile) throw new NotFoundException('Driver not found');
 
+    // Documents are stored as private R2 keys → hand out short-lived presigned URLs.
+    const documents = await this.s3Service.signFields({
+      aadhar_front: profile.aadhar_front_image,
+      aadhar_back: profile.aadhar_back_image,
+      driving_license: profile.driving_license_image,
+      vehicle_rc: profile.vehicle_rc_image,
+      profile_image: profile.profile_image,
+    });
+
     return {
       driver_id: profile.id,
       user_id: profile.user_id,
@@ -701,13 +722,7 @@ export class AdminService {
       verification_status: profile.verification_status,
       license_number: profile.license_number,
       license_expiry: profile.license_expiry,
-      documents: {
-        aadhar_front: profile.aadhar_front_image,
-        aadhar_back: profile.aadhar_back_image,
-        driving_license: profile.driving_license_image,
-        vehicle_rc: profile.vehicle_rc_image,
-        profile_image: profile.profile_image,
-      },
+      documents,
     };
   }
 
