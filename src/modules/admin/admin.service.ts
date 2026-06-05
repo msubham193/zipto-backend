@@ -1294,17 +1294,28 @@ export class AdminService {
       return;
     }
 
+    // Parse JSON (V2) or fall back to form-urlencoded (V1).
     let event: any;
-    try { event = JSON.parse(raw); } catch {
-      this.logger.warn('[CashfreePayout] Webhook: invalid JSON');
-      return;
+    try {
+      event = JSON.parse(raw);
+    } catch {
+      try {
+        event = Object.fromEntries(new URLSearchParams(raw));
+      } catch {
+        this.logger.warn('[CashfreePayout] Webhook: unparseable body');
+        return;
+      }
     }
 
-    // V2 payload: { type, data: { transfer_id, cf_transfer_id, status, transfer_utr, status_description } }
-    const eventType: string = (event?.type ?? event?.event ?? '').toUpperCase();
-    const data = event?.data ?? event?.payload ?? {};
-    const transferId: string = data?.transfer_id ?? data?.transfer?.transfer_id;
-    const status: string = (data?.status ?? data?.transfer?.status ?? '').toUpperCase();
+    // Tolerate both V2 ({ type, data:{ transfer_id, status, transfer_utr } })
+    // and V1 ({ event, transferId, ... }) field shapes.
+    const data = event?.data ?? event?.payload ?? event?.transfer ?? event ?? {};
+    const eventType: string = String(event?.type ?? event?.event ?? data?.event ?? '').toUpperCase();
+    const transferId: string =
+      data?.transfer_id ?? data?.transfer?.transfer_id ?? data?.transferId ?? event?.transferId;
+    const status: string = String(
+      data?.status ?? data?.transfer?.status ?? event?.status ?? '',
+    ).toUpperCase();
     if (!transferId) {
       this.logger.warn('[CashfreePayout] Webhook: no transfer_id in payload');
       return;
@@ -1333,7 +1344,8 @@ export class AdminService {
     if (isSuccess) {
       // ── Success: finalize ──────────────────────────────────────────────
       if (withdrawal.status === WithdrawalStatus.COMPLETED) return; // idempotent
-      const utr: string = data?.transfer_utr ?? data?.transfer?.transfer_utr ?? '';
+      const utr: string =
+        data?.transfer_utr ?? data?.transfer?.transfer_utr ?? data?.utr ?? event?.utr ?? '';
       withdrawal.status           = WithdrawalStatus.COMPLETED;
       withdrawal.payout_reference = utr || withdrawal.payout_reference;
       await this.withdrawalRepository.save(withdrawal);
