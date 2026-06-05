@@ -15,6 +15,15 @@ export default registerAs('externalServices', () => ({
     // Set this in the Razorpay dashboard under Webhooks → secret for payout events
     webhookSecret: process.env.RAZORPAYX_WEBHOOK_SECRET || '',
   },
+  cashfreePayout: {
+    // Cashfree Payouts uses SEPARATE credentials from the Payment Gateway.
+    // Generate under Cashfree dashboard → Payouts → Developers → API Keys.
+    clientId: process.env.CASHFREE_PAYOUT_CLIENT_ID || '',
+    clientSecret: process.env.CASHFREE_PAYOUT_CLIENT_SECRET || '',
+    webhookSecret: process.env.CASHFREE_PAYOUT_WEBHOOK_SECRET || '',
+    env: process.env.CASHFREE_PAYOUT_ENV || 'production',
+    apiVersion: process.env.CASHFREE_PAYOUT_API_VERSION || '2024-01-01',
+  },
   twoFactor: {
     apiKey       : process.env.TWO_FACTOR_API_KEY || '',
     senderId     : 'Zipto',

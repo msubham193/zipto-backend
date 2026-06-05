@@ -5,6 +5,7 @@ import { CoinTransaction, CoinTransactionType } from './entities/coin-transactio
 import { User } from '../auth/entities/user.entity';
 import { ServiceCategory } from '../booking/entities/booking.entity';
 import { getPaginationMeta } from '../../common/utils/helpers.util';
+import { TransactionLogService } from '../transaction-log/transaction-log.service';
 
 @Injectable()
 export class CoinService {
@@ -19,6 +20,7 @@ export class CoinService {
     private coinTransactionRepository: Repository<CoinTransaction>,
     @InjectRepository(User)
     private userRepository: Repository<User>,
+    private readonly transactionLog: TransactionLogService,
   ) {}
 
   /**
@@ -128,6 +130,17 @@ export class CoinService {
       `Awarded ${coins} coins to user ${userId} for booking ${bookingId} (multiplier: ${multiplier}x)`,
     );
 
+    this.transactionLog.record({
+      userId,
+      category: 'coin_earn',
+      direction: 'credit',
+      amount: coins,
+      unit: 'COIN',
+      gateway: 'internal',
+      bookingId,
+      description: `Earned ${coins} coins for delivery`,
+    }).catch(() => {});
+
     return transaction;
   }
 
@@ -155,6 +168,18 @@ export class CoinService {
     await this.userRepository.increment({ id: userId }, 'coins', coins);
 
     this.logger.log(`Credited ${coins} coins to user ${userId} — ${description}`);
+
+    this.transactionLog.record({
+      userId,
+      category: /referr/i.test(description) ? 'referral_reward' : 'coin_earn',
+      direction: 'credit',
+      amount: coins,
+      unit: 'COIN',
+      gateway: 'internal',
+      bookingId,
+      description,
+    }).catch(() => {});
+
     return transaction;
   }
 
@@ -238,6 +263,26 @@ export class CoinService {
 
     this.logger.log(`User ${userId} transferred ${validCoins} coins → ₹${rupeesAdded} wallet`);
 
+    this.transactionLog.record({
+      userId,
+      category: 'coin_transfer',
+      direction: 'debit',
+      amount: validCoins,
+      unit: 'COIN',
+      gateway: 'internal',
+      balanceAfter: rows[0].coins,
+      description: `Transferred ${validCoins} coins to wallet (₹${rupeesAdded})`,
+    }).catch(() => {});
+    this.transactionLog.record({
+      userId,
+      category: 'wallet_topup',
+      direction: 'credit',
+      amount: rupeesAdded,
+      gateway: 'internal',
+      balanceAfter: Number(rows[0].wallet_balance),
+      description: `Coins converted to wallet (${validCoins} coins)`,
+    }).catch(() => {});
+
     return {
       coins_deducted: validCoins,
       rupees_added: rupeesAdded,
@@ -273,6 +318,16 @@ export class CoinService {
     await this.coinTransactionRepository.save(transaction);
 
     this.logger.log(`Redeemed ${coins} coins for user ${userId}`);
+
+    this.transactionLog.record({
+      userId,
+      category: 'coin_redeem',
+      direction: 'debit',
+      amount: coins,
+      unit: 'COIN',
+      gateway: 'internal',
+      description,
+    }).catch(() => {});
 
     return transaction;
   }

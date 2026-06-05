@@ -64,6 +64,14 @@ export class BankAccount {
   @Column({ type: 'varchar', length: 20, nullable: true, default: 'pending' })
   razorpay_sync_status: string | null;
 
+  /** Cashfree Payouts beneficiary ID for this bank account (used to initiate payouts) */
+  @Column({ type: 'varchar', length: 80, nullable: true })
+  cashfree_beneficiary_id: string | null;
+
+  /** Sync status with Cashfree Payouts: pending | synced | failed */
+  @Column({ type: 'varchar', length: 20, nullable: true, default: 'pending' })
+  cashfree_sync_status: string | null;
+
   @CreateDateColumn()
   created_at: Date;
 

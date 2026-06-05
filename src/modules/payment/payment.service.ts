@@ -13,6 +13,7 @@ import { InitiatePaymentDto, CashPaymentDto } from './dto/payment.dto';
 import { HdfcPaymentService } from '../../services/hdfc-payment.service';
 import { CashfreeService } from '../../services/cashfree.service';
 import { NotificationService } from '../notification/notification.service';
+import { TransactionLogService } from '../transaction-log/transaction-log.service';
 import { BookingGateway } from '../booking/booking.gateway';
 import { getPaginationMeta } from '../../common/utils/helpers.util';
 
@@ -30,6 +31,7 @@ export class PaymentService {
     private cashfreeService: CashfreeService,
     private notificationService: NotificationService,
     private bookingGateway: BookingGateway,
+    private transactionLog: TransactionLogService,
   ) {}
 
   /** Public backend base (incl. /api) used for Cashfree return/notify URLs. */
@@ -522,6 +524,16 @@ export class PaymentService {
 
     if (credited) {
       this.bookingGateway.notifyUser(userId, 'wallet_topped_up', { amount, newBalance });
+      this.transactionLog.record({
+        userId,
+        category: 'wallet_topup',
+        direction: 'credit',
+        amount,
+        gateway: 'cashfree',
+        gatewayRef: orderId,
+        balanceAfter: newBalance,
+        description: 'Wallet top-up (Cashfree)',
+      }).catch(() => {});
     }
     return newBalance;
   }
@@ -550,6 +562,18 @@ export class PaymentService {
       transaction_id: `cash_${Date.now()}`,
     });
     await this.paymentRepository.save(payment);
+
+    this.transactionLog.record({
+      userId: booking.customer_id ?? null,
+      counterpartyUserId: booking.driver_id ?? null,
+      category: 'booking_payment',
+      direction: 'debit',
+      amount,
+      gateway: 'cash',
+      gatewayRef: payment.transaction_id,
+      bookingId: booking_id,
+      description: 'Cash booking payment',
+    }).catch(() => {});
 
     if (booking.driver_id) {
       this.notificationService
@@ -676,6 +700,19 @@ export class PaymentService {
     this.logger.log(`Cashfree payment complete: booking=${payment.booking_id} order=${cashfreeOrderId}`);
 
     const booking = await this.bookingRepository.findOne({ where: { id: payment.booking_id } });
+
+    this.transactionLog.record({
+      userId: booking?.customer_id ?? null,
+      counterpartyUserId: booking?.driver_id ?? null,
+      category: 'booking_payment',
+      direction: 'debit',
+      amount: paidAmount,
+      gateway: 'cashfree',
+      gatewayRef: cashfreePaymentId || cashfreeOrderId,
+      bookingId: payment.booking_id,
+      description: 'Online booking payment (Cashfree)',
+    }).catch(() => {});
+
     if (booking?.driver_id) {
       this.notificationService
         .notifyPaymentReceived(booking.driver_id, paidAmount, payment.booking_id)

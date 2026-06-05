@@ -6,6 +6,7 @@ import {
   DriverWalletTxnType,
 } from './entities/driver-wallet-transaction.entity';
 import { NotificationService } from '../notification/notification.service';
+import { TransactionLogService } from '../transaction-log/transaction-log.service';
 
 /** Wallet balance below this triggers a low-balance push notification */
 const LOW_BALANCE_THRESHOLD = 100;
@@ -22,7 +23,19 @@ export class DriverWalletService {
     private txnRepository: Repository<DriverWalletTransaction>,
     private dataSource: DataSource,
     private notificationService: NotificationService,
+    private readonly transactionLog: TransactionLogService,
   ) {}
+
+  /** Map a driver wallet txn type to a unified-ledger category. */
+  private static ledgerCategory(type: DriverWalletTxnType): string {
+    switch (type) {
+      case DriverWalletTxnType.TRIP_EARNINGS_CREDIT:     return 'driver_earnings';
+      case DriverWalletTxnType.CASH_COMMISSION_DEDUCTION: return 'driver_commission';
+      case DriverWalletTxnType.TOPUP:                     return 'driver_topup';
+      case DriverWalletTxnType.WITHDRAWAL:                return 'withdrawal';
+      default:                                            return 'driver_adjustment';
+    }
+  }
 
   /**
    * Credit driver's share after an ONLINE/QR payment.
@@ -180,6 +193,16 @@ export class DriverWalletService {
     this.logger.log(
       `[DriverWallet] Withdrawal debit ₹${amount} for driver=${driverUserId}, ref=${withdrawalId}, balance_after=${newBalance}`,
     );
+    this.transactionLog.record({
+      userId: driverUserId,
+      category: 'withdrawal',
+      direction: 'debit',
+      amount,
+      gateway: 'wallet',
+      gatewayRef: withdrawalId,
+      balanceAfter: newBalance,
+      description: `Withdrawal request #${withdrawalId.slice(-6).toUpperCase()}`,
+    }).catch(() => {});
     return newBalance;
   }
 
@@ -314,6 +337,19 @@ export class DriverWalletService {
       });
       await manager.getRepository(DriverWalletTransaction).save(txn);
     });
+
+    // Unified ledger (fire-and-forget; never blocks the wallet update).
+    this.transactionLog.record({
+      userId: driverUserId,
+      category: DriverWalletService.ledgerCategory(type),
+      direction: delta >= 0 ? 'credit' : 'debit',
+      amount: Math.abs(delta),
+      gateway: type === DriverWalletTxnType.TOPUP ? 'cashfree' : 'wallet',
+      gatewayRef: referenceId ?? null,
+      bookingId: bookingId ?? null,
+      balanceAfter: newBalance,
+      description,
+    }).catch(() => {});
 
     return newBalance;
   }

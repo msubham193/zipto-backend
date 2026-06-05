@@ -183,5 +183,41 @@ ALTER TABLE payments
 CREATE INDEX IF NOT EXISTS idx_payments_cashfree_order_id
   ON payments (cashfree_order_id);
 
+-- ── 9. Unified transaction ledger ────────────────────────────
+
+CREATE TABLE IF NOT EXISTS transaction_logs (
+  id                   UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id              UUID,
+  counterparty_user_id UUID,
+  category             VARCHAR(40) NOT NULL,
+  direction            VARCHAR(10) NOT NULL,
+  amount               NUMERIC(12,2) NOT NULL DEFAULT 0,
+  unit                 VARCHAR(10) NOT NULL DEFAULT 'INR',
+  status               VARCHAR(12) NOT NULL DEFAULT 'success',
+  gateway              VARCHAR(20),
+  gateway_ref          VARCHAR(120),
+  booking_id           UUID,
+  balance_after        NUMERIC(12,2),
+  description          VARCHAR(255),
+  metadata             JSONB,
+  created_at           TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_txnlog_user_created  ON transaction_logs (user_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_txnlog_cat_created   ON transaction_logs (category, created_at);
+CREATE INDEX IF NOT EXISTS idx_txnlog_gateway_ref   ON transaction_logs (gateway_ref);
+CREATE INDEX IF NOT EXISTS idx_txnlog_booking_id    ON transaction_logs (booking_id);
+CREATE INDEX IF NOT EXISTS idx_txnlog_status        ON transaction_logs (status);
+CREATE INDEX IF NOT EXISTS idx_txnlog_created_at    ON transaction_logs (created_at);
+
+-- ── 10. Cashfree Payouts beneficiary columns on driver bank accounts ──
+
+ALTER TABLE driver_bank_accounts
+  ADD COLUMN IF NOT EXISTS cashfree_beneficiary_id VARCHAR(80),
+  ADD COLUMN IF NOT EXISTS cashfree_sync_status    VARCHAR(20) DEFAULT 'pending';
+
+CREATE INDEX IF NOT EXISTS idx_bank_accounts_cf_beneficiary
+  ON driver_bank_accounts (cashfree_beneficiary_id);
+
 -- ── Done ──────────────────────────────────────────────────────
 SELECT 'Migration complete' AS result;

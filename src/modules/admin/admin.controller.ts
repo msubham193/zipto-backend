@@ -16,6 +16,7 @@ import { SystemSettingsService } from '../settings/system-settings.service';
 import { CouponService } from '../coupon/coupon.service';
 import { CreateCouponDto, UpdateCouponDto } from '../coupon/dto/coupon.dto';
 import { ReferralService } from '../referral/referral.service';
+import { TransactionLogService } from '../transaction-log/transaction-log.service';
 
 @ApiTags('Admin')
 @Controller('admin')
@@ -29,7 +30,47 @@ export class AdminController {
     private readonly systemSettings: SystemSettingsService,
     private readonly couponService: CouponService,
     private readonly referralService: ReferralService,
+    private readonly transactionLog: TransactionLogService,
   ) {}
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Transaction ledger (unified audit log of every money/coin movement)
+  // ─────────────────────────────────────────────────────────────────────────
+
+  @Get('transactions')
+  @ApiOperation({ summary: 'List all transactions (paginated, filterable)' })
+  @ApiResponse({ status: 200, description: 'Transactions retrieved' })
+  async getTransactions(
+    @Query('userId') userId?: string,
+    @Query('category') category?: string,
+    @Query('gateway') gateway?: string,
+    @Query('status') status?: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.transactionLog.adminList({
+      userId,
+      category,
+      gateway,
+      status,
+      from,
+      to,
+      page: page ? Number(page) : undefined,
+      limit: limit ? Number(limit) : undefined,
+    });
+  }
+
+  @Get('transactions/stats')
+  @ApiOperation({ summary: 'Transaction totals grouped by category/direction' })
+  @ApiResponse({ status: 200, description: 'Transaction stats retrieved' })
+  async getTransactionStats(
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+  ) {
+    return this.transactionLog.adminSummary({ from, to });
+  }
 
   @Get('dashboard/stats')
   @ApiOperation({ summary: 'Get dashboard statistics' })
@@ -349,17 +390,18 @@ export class AdminController {
     return this.adminService.rejectWithdrawal(id, remarks);
   }
 
-  // ─── RazorpayX Payout Webhook (no auth — verified by HMAC) ──────────────
+  // ─── Cashfree Payouts Webhook (no auth — verified by HMAC) ──────────────
 
   @Public()
-  @Post('webhooks/razorpay-payout')
-  @ApiOperation({ summary: 'RazorpayX payout webhook — do not call manually' })
-  async razorpayPayoutWebhook(
+  @Post('webhooks/cashfree-payout')
+  @ApiOperation({ summary: 'Cashfree Payouts webhook — do not call manually' })
+  async cashfreePayoutWebhook(
     @Req() req: RawBodyRequest<Request>,
-    @Headers('x-razorpay-signature') signature: string,
+    @Headers('x-webhook-signature') signature: string,
+    @Headers('x-webhook-timestamp') timestamp: string,
   ) {
     const rawBody = req.rawBody ?? Buffer.from(JSON.stringify(req.body));
-    await this.adminService.handlePayoutWebhook(rawBody, signature ?? '');
+    await this.adminService.handlePayoutWebhook(rawBody, signature ?? '', timestamp ?? '');
     return { received: true };
   }
 

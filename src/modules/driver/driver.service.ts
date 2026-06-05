@@ -30,6 +30,7 @@ import { RedisService } from '../../services/redis.service';
 import { DriverWalletService } from './driver-wallet.service';
 import { RazorpayXService } from '../../services/razorpayx.service';
 import { CashfreeService } from '../../services/cashfree.service';
+import { CashfreePayoutService } from '../../services/cashfree-payout.service';
 
 /** GPS ping TTL: if a driver stops sending location for 20 min during an active delivery,
  *  the cron guard treats them as a ghost. */
@@ -63,6 +64,7 @@ export class DriverService {
     private readonly configService: ConfigService,
     private readonly razorpayXService: RazorpayXService,
     private readonly cashfreeService: CashfreeService,
+    private readonly cashfreePayoutService: CashfreePayoutService,
   ) {}
 
   /**
@@ -652,16 +654,51 @@ export class DriverService {
       ifsc_code: dto.ifsc_code.toUpperCase(),
       driver_profile_id: driverProfileId,
       is_primary: existingCount === 0,
-      razorpay_sync_status: 'pending',
+      cashfree_sync_status: 'pending',
     });
     const saved = await this.bankAccountRepository.save(account);
 
-    // Fire-and-forget RazorpayX sync so the API response is instant
-    this.syncBankAccountToRazorpay(userId, saved).catch(err =>
-      this.logger.warn(`[RazorpayX] Sync failed for bank_account=${saved.id}: ${err?.message}`)
+    // Fire-and-forget Cashfree beneficiary sync so the API response is instant
+    this.syncBankAccountToCashfree(userId, saved).catch(err =>
+      this.logger.warn(`[CashfreePayout] Sync failed for bank_account=${saved.id}: ${err?.message}`)
     );
 
     return saved;
+  }
+
+  /**
+   * Register the driver's bank account as a Cashfree Payouts beneficiary so we
+   * can push automated withdrawals to it. Idempotent — Cashfree treats an
+   * existing beneficiary_id as success. Stores the beneficiary id on the row.
+   */
+  private async syncBankAccountToCashfree(userId: string, bankAccount: BankAccount): Promise<void> {
+    if (!this.cashfreePayoutService.isConfigured) return;
+
+    const user = await this.userRepository.findOne({ where: { id: userId } });
+    if (!user) return;
+
+    // One beneficiary per bank account (account number can differ per row).
+    const beneficiaryId = this.cashfreePayoutService.generateBeneficiaryId(bankAccount.id);
+
+    try {
+      const beneId = await this.cashfreePayoutService.createBeneficiary({
+        beneficiaryId,
+        name: bankAccount.account_holder_name || user.name || 'Zipto Driver',
+        phone: user.phone ?? '',
+        email: user.email || undefined,
+        ifsc: bankAccount.ifsc_code,
+        accountNumber: bankAccount.account_number,
+      });
+
+      await this.bankAccountRepository.update(bankAccount.id, {
+        cashfree_beneficiary_id: beneId,
+        cashfree_sync_status: 'synced',
+      });
+      this.logger.log(`[CashfreePayout] Bank account synced: ${bankAccount.id} → beneficiary=${beneId}`);
+    } catch (err: any) {
+      await this.bankAccountRepository.update(bankAccount.id, { cashfree_sync_status: 'failed' });
+      throw err;
+    }
   }
 
   private async syncBankAccountToRazorpay(userId: string, bankAccount: BankAccount): Promise<void> {
@@ -981,52 +1018,57 @@ export class DriverService {
       throw err;
     }
 
-    // ── Auto-trigger RazorpayX payout immediately (no admin approval needed) ──
-    if (this.razorpayXService.isConfigured && bankAccountId) {
+    // ── Auto-trigger Cashfree payout immediately (no admin approval needed) ──
+    if (this.cashfreePayoutService.isConfigured && bankAccountId) {
       const bankAccount = await this.bankAccountRepository.findOne({
         where: { id: bankAccountId },
       });
 
       if (bankAccount) {
-        // Ensure fund account is synced — sync now if it hasn't been yet
-        if (!bankAccount.razorpay_fund_account_id) {
-          await this.syncBankAccountToRazorpay(userId, bankAccount).catch(err =>
-            this.logger.warn(`[RazorpayX] Fund account sync failed before payout: ${err?.message}`),
+        // Ensure the beneficiary is registered — sync now if it hasn't been yet
+        if (!bankAccount.cashfree_beneficiary_id) {
+          await this.syncBankAccountToCashfree(userId, bankAccount).catch(err =>
+            this.logger.warn(`[CashfreePayout] Beneficiary sync failed before payout: ${err?.message}`),
           );
-          // Reload after sync attempt
           const refreshed = await this.bankAccountRepository.findOne({ where: { id: bankAccountId } });
-          if (refreshed?.razorpay_fund_account_id) {
-            bankAccount.razorpay_fund_account_id = refreshed.razorpay_fund_account_id;
+          if (refreshed?.cashfree_beneficiary_id) {
+            bankAccount.cashfree_beneficiary_id = refreshed.cashfree_beneficiary_id;
           }
         }
 
-        if (bankAccount.razorpay_fund_account_id) {
+        if (bankAccount.cashfree_beneficiary_id) {
           try {
-            const payout = await this.razorpayXService.createPayout({
-              fundAccountId: bankAccount.razorpay_fund_account_id,
-              amountPaise:   Math.round(amount * 100),
-              referenceId:   `WD_${saved.id.slice(-32)}`,
-              narration:     'Zipto Payout',
-              mode:          'IMPS',
+            const transfer = await this.cashfreePayoutService.createTransfer({
+              transferId:    this.cashfreePayoutService.generateTransferId(saved.id),
+              beneficiaryId: bankAccount.cashfree_beneficiary_id,
+              amount,
+              remarks:       'Zipto driver payout',
+              mode:          'imps',
             });
 
-            await this.withdrawalRepository.update(saved.id, {
-              status:    WithdrawalStatus.PROCESSING,
-              payout_id: payout.id,
-            });
+            // FAILED/REJECTED right away → refund and void; else mark PROCESSING.
+            if (this.isFailedTransferStatus(transfer.status)) {
+              await this.failWithdrawalAndRefund(saved.id, userId, amount, transfer.message ?? transfer.status);
+            } else {
+              await this.withdrawalRepository.update(saved.id, {
+                status:    WithdrawalStatus.PROCESSING,
+                payout_id: transfer.transferId,
+                ...(transfer.utr ? { payout_reference: transfer.utr } : {}),
+              });
 
-            this.logger.log(`[RazorpayX] Auto-payout triggered: withdrawal=${saved.id}, payout=${payout.id}`);
+              this.logger.log(`[CashfreePayout] Auto-payout triggered: withdrawal=${saved.id}, transfer=${transfer.transferId}, status=${transfer.status}`);
 
-            this.notificationService.sendPushNotification({
-              user_id: userId,
-              title: '💸 Payout Initiated!',
-              body: `₹${amount.toLocaleString('en-IN')} is being transferred to ${bankAccount.bank_name ?? 'your bank account'}${bankAccount.account_number ? ` (••••${bankAccount.account_number.slice(-4)})` : ''}. Expect credit within 30 minutes via IMPS.`,
-              data: { type: 'withdrawal_processing', amount: String(amount), withdrawal_id: saved.id },
-            }).catch(() => {});
+              this.notificationService.sendPushNotification({
+                user_id: userId,
+                title: '💸 Payout Initiated!',
+                body: `₹${amount.toLocaleString('en-IN')} is being transferred to ${bankAccount.bank_name ?? 'your bank account'}${bankAccount.account_number ? ` (••••${bankAccount.account_number.slice(-4)})` : ''}. Expect credit within 30 minutes via IMPS.`,
+                data: { type: 'withdrawal_processing', amount: String(amount), withdrawal_id: saved.id },
+              }).catch(() => {});
+            }
           } catch (err: any) {
             // Payout failed to initiate — leave as PENDING so admin can manually approve
             this.logger.error(
-              `[RazorpayX] Auto-payout initiation failed for withdrawal=${saved.id}: ${err?.error?.description ?? err?.message}. Stays PENDING for admin review.`,
+              `[CashfreePayout] Auto-payout initiation failed for withdrawal=${saved.id}: ${err?.response?.data?.message ?? err?.message}. Stays PENDING for admin review.`,
             );
           }
         }
@@ -1042,6 +1084,39 @@ export class DriverService {
       amount: saved.amount,
       remaining_balance: parseFloat(remainingBalance.toFixed(2)),
     };
+  }
+
+  /** Cashfree payout statuses that mean the money will NOT move — refund the wallet. */
+  private isFailedTransferStatus(status: string): boolean {
+    return ['FAILED', 'REJECTED', 'REVERSED', 'ERROR', 'CANCELLED'].includes(
+      (status || '').toUpperCase(),
+    );
+  }
+
+  /**
+   * Mark a withdrawal REJECTED and refund the debited amount to the driver wallet.
+   * Idempotent via withdrawalRefund's reference guard.
+   */
+  private async failWithdrawalAndRefund(
+    withdrawalId: string,
+    driverUserId: string,
+    amount: number,
+    reason: string,
+  ): Promise<void> {
+    await this.withdrawalRepository.update(withdrawalId, {
+      status: WithdrawalStatus.REJECTED,
+      failure_reason: reason,
+    });
+    await this.driverWalletService.withdrawalRefund(driverUserId, amount, withdrawalId);
+    this.logger.warn(
+      `[CashfreePayout] Payout failed at initiation for withdrawal=${withdrawalId}: ${reason}. Wallet refunded ₹${amount}.`,
+    );
+    this.notificationService.sendPushNotification({
+      user_id: driverUserId,
+      title: '⚠️ Payout Failed',
+      body: `Your ₹${amount.toLocaleString('en-IN')} withdrawal could not be processed and has been refunded to your Zipto wallet. Please try again.`,
+      data: { type: 'payout_failed', amount: String(amount), withdrawal_id: withdrawalId },
+    }).catch(() => {});
   }
 
   /**

@@ -14,6 +14,7 @@ import {
 } from './entities/wallet-transaction.entity';
 import { UpdateCustomerDto, SavedLocationDto } from './dto/customer.dto';
 import { HdfcPaymentService } from '../../services/hdfc-payment.service';
+import { TransactionLogService } from '../transaction-log/transaction-log.service';
 
 @Injectable()
 export class CustomerService {
@@ -26,6 +27,7 @@ export class CustomerService {
     private walletTxnRepository: Repository<WalletTransaction>,
     private dataSource: DataSource,
     private hdfcService: HdfcPaymentService,
+    private readonly transactionLog: TransactionLogService,
   ) {}
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -197,6 +199,18 @@ export class CustomerService {
       });
       await manager.save(txn);
 
+      this.transactionLog.record({
+        userId,
+        category: 'wallet_payment',
+        direction: 'debit',
+        amount,
+        gateway: 'wallet',
+        gatewayRef: referenceId,
+        bookingId: referenceId,
+        balanceAfter: newBalance,
+        description,
+      }).catch(() => {});
+
       return { balance: newBalance, transaction: txn };
     });
   }
@@ -235,6 +249,18 @@ export class CustomerService {
         reference_id: referenceId ?? null,
       });
       await manager.save(txn);
+
+      this.transactionLog.record({
+        userId,
+        category: source === WalletTxnSource.REFUND ? 'wallet_refund' : 'wallet_credit',
+        direction: 'credit',
+        amount,
+        gateway: 'wallet',
+        gatewayRef: referenceId,
+        bookingId: referenceId,
+        balanceAfter: newBalance,
+        description,
+      }).catch(() => {});
 
       return { balance: newBalance, transaction: txn };
     });

@@ -19,6 +19,7 @@ import {
 } from '../booking/constants/default-pricing-rules';
 import { DriverWalletService } from '../driver/driver-wallet.service';
 import { RazorpayXService } from '../../services/razorpayx.service';
+import { CashfreePayoutService } from '../../services/cashfree-payout.service';
 
 @Injectable()
 export class AdminService {
@@ -47,6 +48,7 @@ export class AdminService {
     private dataSource: DataSource,
     private driverWalletService: DriverWalletService,
     private razorpayXService: RazorpayXService,
+    private cashfreePayoutService: CashfreePayoutService,
   ) {}
 
   /**
@@ -1209,7 +1211,7 @@ export class AdminService {
     // Auto-payout already triggered at request time — payout is in flight, webhook will finalize
     if (withdrawal.status === WithdrawalStatus.PROCESSING && withdrawal.payout_id) {
       throw new BadRequestException(
-        `Payout already in progress (payout_id: ${withdrawal.payout_id}). Status will update automatically via webhook when IMPS settles.`,
+        `Payout already in progress (transfer: ${withdrawal.payout_id}). Status will update automatically via webhook when IMPS settles.`,
       );
     }
 
@@ -1217,24 +1219,25 @@ export class AdminService {
     const amount       = Number(withdrawal.amount);
     const bankAccount  = withdrawal.bank_account;
 
-    // ── Attempt automated payout via RazorpayX ────────────────────────────
-    if (this.razorpayXService.isConfigured && bankAccount?.razorpay_fund_account_id) {
+    // ── Attempt automated payout via Cashfree Payouts ─────────────────────
+    if (this.cashfreePayoutService.isConfigured && bankAccount?.cashfree_beneficiary_id) {
       try {
-        const payout = await this.razorpayXService.createPayout({
-          fundAccountId: bankAccount.razorpay_fund_account_id,
-          amountPaise:   Math.round(amount * 100),
-          referenceId:   `WD_${withdrawalId.slice(-32)}`,
-          narration:     `Zipto Payout`,
-          mode:          'IMPS',
+        const transfer = await this.cashfreePayoutService.createTransfer({
+          transferId:    this.cashfreePayoutService.generateTransferId(withdrawalId),
+          beneficiaryId: bankAccount.cashfree_beneficiary_id,
+          amount,
+          remarks:       'Zipto driver payout',
+          mode:          'imps',
         });
 
         // Mark as PROCESSING — final status comes via webhook
         withdrawal.status     = WithdrawalStatus.PROCESSING;
-        withdrawal.payout_id  = payout.id;
+        withdrawal.payout_id  = transfer.transferId;
+        if (transfer.utr) withdrawal.payout_reference = transfer.utr;
         if (remarks) withdrawal.remarks = remarks;
         const saved = await this.withdrawalRepository.save(withdrawal);
 
-        this.logger.log(`[RazorpayX] Payout queued: withdrawal=${withdrawalId}, payout=${payout.id}`);
+        this.logger.log(`[CashfreePayout] Payout queued: withdrawal=${withdrawalId}, transfer=${transfer.transferId}, status=${transfer.status}`);
 
         if (driverUserId) {
           const bankName = bankAccount.bank_name ?? 'your bank account';
@@ -1248,15 +1251,15 @@ export class AdminService {
         }
         return saved;
       } catch (err: any) {
-        // RazorpayX call failed — fall through to manual-approve path
+        // Cashfree call failed — fall through to manual-approve path
         this.logger.error(
-          `[RazorpayX] Automated payout failed for withdrawal=${withdrawalId}: ${err?.error?.description ?? err?.message}. Falling back to manual.`,
+          `[CashfreePayout] Automated payout failed for withdrawal=${withdrawalId}: ${err?.response?.data?.message ?? err?.message}. Falling back to manual.`,
         );
       }
-    } else if (this.razorpayXService.isConfigured && !bankAccount?.razorpay_fund_account_id) {
-      // Bank account not yet synced — try syncing now and proceed manually
+    } else if (this.cashfreePayoutService.isConfigured && !bankAccount?.cashfree_beneficiary_id) {
+      // Bank account not yet synced — proceed manually
       this.logger.warn(
-        `[RazorpayX] Bank account ${bankAccount?.id ?? 'unknown'} has no fund_account_id — payout will be manual.`,
+        `[CashfreePayout] Bank account ${bankAccount?.id ?? 'unknown'} has no beneficiary_id — payout will be manual.`,
       );
     }
 
@@ -1280,46 +1283,61 @@ export class AdminService {
   }
 
   /**
-   * Handle Razorpay payout webhook events.
-   * Called from the webhook endpoint after signature verification.
+   * Handle Cashfree Payouts webhook events (TRANSFER_SUCCESS / TRANSFER_FAILED /
+   * TRANSFER_REVERSED). Called from the webhook endpoint; verifies the HMAC
+   * signature, then finalizes or refunds the withdrawal. Idempotent.
    */
-  async handlePayoutWebhook(rawBody: Buffer, signature: string): Promise<void> {
-    if (!this.razorpayXService.validateWebhookSignature(rawBody, signature)) {
-      this.logger.warn('[RazorpayX] Webhook signature invalid — ignored');
+  async handlePayoutWebhook(rawBody: Buffer, signature: string, timestamp: string): Promise<void> {
+    const raw = rawBody.toString('utf8');
+    if (!this.cashfreePayoutService.verifyWebhookSignature(raw, signature, timestamp)) {
+      this.logger.warn('[CashfreePayout] Webhook signature invalid — ignored');
       return;
     }
 
     let event: any;
-    try { event = JSON.parse(rawBody.toString('utf8')); } catch {
-      this.logger.warn('[RazorpayX] Webhook: invalid JSON');
+    try { event = JSON.parse(raw); } catch {
+      this.logger.warn('[CashfreePayout] Webhook: invalid JSON');
       return;
     }
 
-    const payoutId: string = event?.payload?.payout?.entity?.id;
-    if (!payoutId) return;
+    // V2 payload: { type, data: { transfer_id, cf_transfer_id, status, transfer_utr, status_description } }
+    const eventType: string = (event?.type ?? event?.event ?? '').toUpperCase();
+    const data = event?.data ?? event?.payload ?? {};
+    const transferId: string = data?.transfer_id ?? data?.transfer?.transfer_id;
+    const status: string = (data?.status ?? data?.transfer?.status ?? '').toUpperCase();
+    if (!transferId) {
+      this.logger.warn('[CashfreePayout] Webhook: no transfer_id in payload');
+      return;
+    }
 
-    this.logger.log(`[RazorpayX] Webhook event=${event.event}, payout=${payoutId}`);
+    this.logger.log(`[CashfreePayout] Webhook type=${eventType}, transfer=${transferId}, status=${status}`);
 
     const withdrawal = await this.withdrawalRepository.findOne({
-      where: { payout_id: payoutId },
+      where: { payout_id: transferId },
       relations: ['driver_profile'],
     });
     if (!withdrawal) {
-      this.logger.warn(`[RazorpayX] No withdrawal found for payout_id=${payoutId}`);
+      this.logger.warn(`[CashfreePayout] No withdrawal found for transfer_id=${transferId}`);
       return;
     }
 
     const driverUserId = withdrawal.driver_profile?.user_id;
     const amount       = Number(withdrawal.amount);
 
-    if (event.event === 'payout.processed') {
+    const isSuccess = eventType === 'TRANSFER_SUCCESS' || status === 'SUCCESS';
+    const isFailure =
+      eventType === 'TRANSFER_FAILED' ||
+      eventType === 'TRANSFER_REVERSED' ||
+      ['FAILED', 'REJECTED', 'REVERSED', 'ERROR', 'CANCELLED'].includes(status);
+
+    if (isSuccess) {
       // ── Success: finalize ──────────────────────────────────────────────
       if (withdrawal.status === WithdrawalStatus.COMPLETED) return; // idempotent
-      const utr: string = event?.payload?.payout?.entity?.utr ?? '';
-      withdrawal.status          = WithdrawalStatus.COMPLETED;
+      const utr: string = data?.transfer_utr ?? data?.transfer?.transfer_utr ?? '';
+      withdrawal.status           = WithdrawalStatus.COMPLETED;
       withdrawal.payout_reference = utr || withdrawal.payout_reference;
       await this.withdrawalRepository.save(withdrawal);
-      this.logger.log(`[RazorpayX] Payout processed: withdrawal=${withdrawal.id}, UTR=${utr}`);
+      this.logger.log(`[CashfreePayout] Payout processed: withdrawal=${withdrawal.id}, UTR=${utr}`);
 
       if (driverUserId) {
         this.notificationService.sendPushNotification({
@@ -1330,22 +1348,22 @@ export class AdminService {
         }).catch(() => {});
       }
 
-    } else if (event.event === 'payout.failed' || event.event === 'payout.reversed') {
+    } else if (isFailure) {
       // ── Failure: refund wallet ─────────────────────────────────────────
       if (withdrawal.status === WithdrawalStatus.REJECTED) return; // idempotent
       const failureReason: string =
-        event?.payload?.payout?.entity?.failure_reason ??
-        event?.payload?.payout?.entity?.status_details?.description ??
-        event.event;
+        data?.status_description ??
+        data?.transfer?.status_description ??
+        (eventType || 'Payout failed');
 
       withdrawal.status         = WithdrawalStatus.REJECTED;
       withdrawal.failure_reason = failureReason;
       await this.withdrawalRepository.save(withdrawal);
 
-      // Refund driver wallet
+      // Refund driver wallet (idempotent)
       if (driverUserId) {
         await this.driverWalletService.withdrawalRefund(driverUserId, amount, withdrawal.id);
-        this.logger.log(`[RazorpayX] Payout ${event.event}: wallet refunded ₹${amount} for driver=${driverUserId}`);
+        this.logger.log(`[CashfreePayout] Payout ${eventType}: wallet refunded ₹${amount} for driver=${driverUserId}`);
         this.notificationService.sendPushNotification({
           user_id: driverUserId,
           title: '⚠️ Payout Failed',
