@@ -163,10 +163,24 @@ export class AuthService {
 
     this.logger.log(`[verifyOtp] phone=${this.mask(formattedPhone)}`);
 
-    // Delegates expiry/attempt tracking to SmsService; throws on failure
-    const isValid = await this.smsService.verifyOTP(formattedPhone, otp);
+    // Demo/review accounts (Play Store & Cashfree app reviewers): the real OTP is
+    // still sent, but a fixed code also logs them in. Config-driven via env, with
+    // the known review numbers as a fallback. Keep this list tiny — anyone with the
+    // number + demo code can sign in as that account.
+    const demoPhones = (process.env.DEMO_LOGIN_PHONES || '6371171553,7735416582')
+      .split(',')
+      .map((p) => formatPhoneNumber(p.trim()))
+      .filter(Boolean);
+    const demoOtp = process.env.DEMO_LOGIN_OTP || '123456';
+    const isDemoLogin = demoPhones.includes(formattedPhone) && otp === demoOtp;
+
+    // Demo code short-circuits; the real OTP still validates normally otherwise.
+    const isValid = isDemoLogin || (await this.smsService.verifyOTP(formattedPhone, otp));
     if (!isValid) {
       throw new BadRequestException('Invalid OTP. Please check the code and try again.');
+    }
+    if (isDemoLogin) {
+      this.logger.log(`[verifyOtp] demo login accepted for ${this.mask(formattedPhone)}`);
     }
 
     // Find or create user
