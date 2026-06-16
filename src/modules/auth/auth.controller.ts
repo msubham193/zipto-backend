@@ -88,7 +88,6 @@ export class AuthController {
     return this.authService.refreshToken(refreshTokenDto);
   }
 
-  @Public()
   @Delete('account')
   @HttpCode(HttpStatus.OK)
   @ApiBearerAuth()
