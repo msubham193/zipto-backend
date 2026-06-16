@@ -29,6 +29,7 @@ import { formatPhoneNumber, generateRandomUsername } from '../../common/utils/he
 import { SmsService } from '../../services/sms.service';
 import { DriverProfile, AvailabilityStatus, VerificationStatus } from '../driver/entities/driver-profile.entity';
 import { ReferralService } from '../referral/referral.service';
+import { S3Service } from '../../services/s3.service';
 
 @Injectable()
 export class AuthService {
@@ -45,6 +46,7 @@ export class AuthService {
     private readonly configService: ConfigService,
     private readonly smsService: SmsService,
     private readonly referralService: ReferralService,
+    private readonly s3Service: S3Service,
   ) {}
 
   // ─── OTP Send Flows ──────────────────────────────────────────────────────────
@@ -436,17 +438,85 @@ export class AuthService {
 
   // ─── Account Management ──────────────────────────────────────────────────────
 
-  async deleteAccount(dto: DeleteAccountDto) {
-    const { email } = dto;
-    const user = await this.userRepository.findOne({ where: { email } });
-    if (!user) throw new NotFoundException('No account found with this email address');
+  /**
+   * Self-service account deletion for the authenticated user.
+   *
+   * Soft-deletes + anonymizes rather than hard-deleting: bookings, payments and
+   * the transaction ledger reference this user and must be retained for
+   * accounting/legal, so we scrub all PII, free the phone/email for re-use, and
+   * mark the account deleted + inactive (which immediately invalidates any live
+   * JWT, since JwtStrategy requires is_active=true). Driver KYC documents are
+   * purged from R2. Blocked while a booking is in flight.
+   */
+  async deleteAccount(userId: string) {
+    const user = await this.userRepository.findOne({ where: { id: userId } });
+    if (!user) throw new NotFoundException('Account not found');
+    if (user.is_deleted) return { message: 'Account already deleted' };
 
-    if (user.phone) await this.otpRepository.delete({ phone: user.phone });
-    if (user.role === UserRole.DRIVER) {
-      await this.driverProfileRepository.delete({ user_id: user.id });
+    // Block deletion while a trip is active (money/delivery in flight).
+    const active: unknown[] = await this.userRepository.manager.query(
+      `SELECT 1 FROM bookings
+        WHERE (customer_id = $1 OR driver_id = $1)
+          AND status IN ('pending','accepted','driver_assigned','ongoing')
+        LIMIT 1`,
+      [userId],
+    );
+    if (active.length) {
+      throw new BadRequestException(
+        'You have an active booking. Please complete or cancel it before deleting your account.',
+      );
     }
-    await this.userRepository.delete(user.id);
 
+    const originalPhone = user.phone;
+
+    // Driver: purge KYC documents from R2 (best-effort) and scrub the profile.
+    if (user.role === UserRole.DRIVER) {
+      const profile = await this.driverProfileRepository.findOne({ where: { user_id: userId } });
+      if (profile) {
+        for (const ref of [
+          profile.aadhar_front_image,
+          profile.aadhar_back_image,
+          profile.driving_license_image,
+          profile.vehicle_rc_image,
+          profile.profile_image,
+        ]) {
+          if (ref) await this.s3Service.deleteFile(ref).catch(() => {});
+        }
+        await this.driverProfileRepository.manager.query(
+          `UPDATE driver_profiles
+              SET availability_status = 'offline', license_number = NULL,
+                  aadhar_front_image = NULL, aadhar_back_image = NULL,
+                  driving_license_image = NULL, vehicle_rc_image = NULL, profile_image = NULL
+            WHERE user_id = $1`,
+          [userId],
+        );
+      }
+    }
+
+    // Customer: scrub saved locations / address PII (best-effort).
+    await this.userRepository.manager
+      .query(
+        `UPDATE customer_profiles SET saved_locations = '[]'::jsonb, address = NULL WHERE user_id = $1`,
+        [userId],
+      )
+      .catch(() => {});
+
+    // Invalidate any pending OTPs for the freed number.
+    if (originalPhone) await this.otpRepository.delete({ phone: originalPhone });
+
+    // Anonymize the account: scrub PII, free phone/email/referral_code so the
+    // person can sign up fresh later, kill sessions, and mark deleted+inactive.
+    await this.userRepository.manager.query(
+      `UPDATE users
+          SET is_deleted = true, deleted_at = now(), is_active = false,
+              phone = NULL, email = NULL, name = 'Deleted User',
+              password_hash = NULL, fcm_token = NULL, refresh_token = NULL,
+              referral_code = NULL
+        WHERE id = $1`,
+      [userId],
+    );
+
+    this.logger.log(`[deleteAccount] account ${userId} deleted & anonymized`);
     return { message: 'Account deleted successfully' };
   }
 

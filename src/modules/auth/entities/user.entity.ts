@@ -47,6 +47,16 @@ export class User {
   @Column({ type: 'boolean', default: true })
   is_active: boolean;
 
+  // Self-service account deletion (soft delete + PII scrub). The row is kept so
+  // bookings/payments/ledger references stay valid for accounting & legal, but
+  // PII is anonymized and the account can no longer log in.
+  @Column({ type: 'boolean', default: false })
+  @Index()
+  is_deleted: boolean;
+
+  @Column({ type: 'timestamp', nullable: true })
+  deleted_at: Date | null;
+
   @Column({ type: 'boolean', default: false })
   is_profile_complete: boolean;
 

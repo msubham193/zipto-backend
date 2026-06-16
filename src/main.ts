@@ -12,7 +12,15 @@ import { TransformInterceptor } from './common/interceptors/transform.intercepto
 import { RolesGuard } from './common/guards/roles.guard';
 
 async function bootstrap() {
-  const app = await NestFactory.create<NestExpressApplication>(AppModule, { rawBody: true });
+  // In production, drop debug/verbose logs to keep the event loop and disk free
+  // under load; keep them in development for debuggability.
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, {
+    rawBody: true,
+    logger:
+      process.env.NODE_ENV === 'production'
+        ? ['error', 'warn', 'log']
+        : ['error', 'warn', 'log', 'debug', 'verbose'],
+  });
 
   // Get configuration
   const configService = app.get(ConfigService);

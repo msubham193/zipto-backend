@@ -219,5 +219,30 @@ ALTER TABLE driver_bank_accounts
 CREATE INDEX IF NOT EXISTS idx_bank_accounts_cf_beneficiary
   ON driver_bank_accounts (cashfree_beneficiary_id);
 
+-- ── 11. Performance indexes for dispatch at scale (100+ concurrent) ──
+-- Normally created by TypeORM synchronize, but pinned here so the schema stays
+-- correct even with synchronize=false. The GIST index is critical: without it
+-- every "nearby drivers" search does a full table scan.
+
+-- Spatial index powering the ST_DWithin nearby-driver search.
+CREATE INDEX IF NOT EXISTS idx_driver_location_gist
+  ON driver_profiles USING GIST (current_location);
+
+-- Filter online drivers quickly before the spatial test.
+CREATE INDEX IF NOT EXISTS idx_driver_availability
+  ON driver_profiles (availability_status);
+
+-- The NOT EXISTS busy-driver check joins bookings by driver + status.
+CREATE INDEX IF NOT EXISTS idx_bookings_driver_status
+  ON bookings (driver_id, status);
+
+-- ── 12. Self-service account deletion (soft delete + PII scrub) ──
+
+ALTER TABLE users
+  ADD COLUMN IF NOT EXISTS is_deleted BOOLEAN NOT NULL DEFAULT FALSE,
+  ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP NULL;
+
+CREATE INDEX IF NOT EXISTS idx_users_is_deleted ON users (is_deleted);
+
 -- ── Done ──────────────────────────────────────────────────────
 SELECT 'Migration complete' AS result;

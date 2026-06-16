@@ -171,14 +171,14 @@ export class DriverService {
   async updateLocation(userId: string, updateLocationDto: UpdateLocationDto) {
     const { latitude, longitude } = updateLocationDto;
 
-    await this.driverProfileRepository
-      .createQueryBuilder()
-      .update(DriverProfile)
-      .set({
-        current_location: () => `ST_SetSRID(ST_MakePoint(${longitude}, ${latitude}), 4326)`,
-      })
-      .where('user_id = :userId', { userId })
-      .execute();
+    // Parameterized — never interpolate coordinates into SQL even though the DTO
+    // validates them as lat/lng.
+    await this.driverProfileRepository.manager.query(
+      `UPDATE driver_profiles
+         SET current_location = ST_SetSRID(ST_MakePoint($1, $2), 4326)
+       WHERE user_id = $3`,
+      [longitude, latitude, userId],
+    );
 
     // Heartbeat for ghost-driver detection: key expires in 20 min
     // If the cron finds an ongoing booking without this key, the driver has gone dark.

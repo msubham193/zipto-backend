@@ -8,7 +8,6 @@ import {
   AdminLoginDto,
   RefreshTokenDto,
   ResendOTPDto,
-  DeleteAccountDto,
 } from './dto/auth.dto';
 import { Public } from '../../common/decorators/public.decorator';
 import { GetUser } from '../../common/decorators/get-user.decorator';
@@ -92,11 +91,12 @@ export class AuthController {
   @Public()
   @Delete('account')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Permanently delete an account by email' })
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Permanently delete the authenticated user\'s account' })
   @ApiResponse({ status: 200, description: 'Account deleted successfully' })
-  @ApiResponse({ status: 404, description: 'Account not found' })
-  async deleteAccount(@Body() dto: DeleteAccountDto) {
-    return this.authService.deleteAccount(dto);
+  @ApiResponse({ status: 400, description: 'Active booking in progress' })
+  async deleteAccount(@GetUser() user: User) {
+    return this.authService.deleteAccount(user.id);
   }
 
   @Public()
