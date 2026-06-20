@@ -488,9 +488,21 @@ export class AdminService {
       profile_image: driver.profile_image,
     });
 
+    // Decode the PostGIS geography Point into plain lat/lng for the map.
+    const loc: any[] = await this.dataSource.query(
+      `SELECT ST_Y(current_location::geometry) AS lat,
+              ST_X(current_location::geometry) AS lng
+         FROM driver_profiles WHERE id = $1`,
+      [driverId],
+    );
+    const current_lat = loc?.[0]?.lat != null ? Number(loc[0].lat) : null;
+    const current_lng = loc?.[0]?.lng != null ? Number(loc[0].lng) : null;
+
     return {
       ...driver,
       ...signedDocs,
+      current_lat,
+      current_lng,
       statistics: {
         total_bookings: totalBookings,
         completed_bookings: completedBookings,
@@ -1728,7 +1740,7 @@ export class AdminService {
         LEFT JOIN vehicles v ON v.id = dp.vehicle_id
         LEFT JOIN LATERAL (
           SELECT id, status FROM bookings
-           WHERE driver_id = dp.id
+           WHERE driver_id = dp.user_id
              AND status IN ('accepted','driver_assigned','ongoing')
            ORDER BY created_at DESC
            LIMIT 1
@@ -1774,51 +1786,58 @@ export class AdminService {
     const userId = profile.user_id;
     const cleared: Record<string, number> = {};
 
-    // Bookings driven by this driver. Many tables reference these rows via a
-    // booking_id FK (driver_fraud_incidents, customer_reports, payments, …), so
-    // every child row MUST be cleared before the bookings themselves — otherwise
-    // the final DELETE fails with a foreign-key violation. Run it all in one
-    // transaction so a partial failure rolls back cleanly.
-    const scope = `(SELECT id FROM bookings WHERE driver_id = $1)`;
+    // Many tables reference this driver's bookings via a booking_id FK
+    // (driver_fraud_incidents, customer_reports, payments, …), so every child
+    // row MUST be cleared before the bookings themselves — otherwise the final
+    // DELETE fails with a foreign-key violation. Run it all in one transaction.
+    //
+    // Two gotchas handled here:
+    //  • bookings.driver_id / ratings.driver_id store the USER id, not the
+    //    driver_profile id — so we match on EITHER id ($1 = userId, $2 = profileId).
+    //  • some booking_id columns are varchar (e.g. support_tickets) while
+    //    bookings.id is uuid, so everything is compared as ::text to avoid
+    //    "operator does not exist: character varying = uuid".
+    const bScope = `(SELECT id::text FROM bookings WHERE driver_id::text IN ($1, $2))`;
 
     const runner = this.dataSource.createQueryRunner();
     await runner.connect();
     await runner.startTransaction();
     try {
+      // Every statement takes the same two params ($1=userId, $2=profileId);
       // RETURNING 1 → the result array length is the affected-row count.
-      const del = async (label: string, sql: string, params: any[]) => {
-        const rows = await runner.query(`${sql} RETURNING 1`, params);
+      const del = async (label: string, sql: string) => {
+        const rows = await runner.query(`${sql} RETURNING 1`, [userId, driverProfileId]);
         cleared[label] = Array.isArray(rows) ? rows.length : 0;
       };
 
       // ── 1. Rows hanging off this driver's bookings (FK children first) ──
-      await del('payments',                  `DELETE FROM payments WHERE booking_id IN ${scope}`, [driverProfileId]);
-      await del('ratings',                   `DELETE FROM ratings WHERE driver_id = $1 OR booking_id IN ${scope}`, [driverProfileId]);
-      await del('transaction_logs',          `DELETE FROM transaction_logs WHERE user_id = $2 OR counterparty_user_id = $2 OR booking_id IN ${scope}`, [driverProfileId, userId]);
-      await del('coin_transactions',         `DELETE FROM coin_transactions WHERE booking_id IN ${scope}`, [driverProfileId]);
-      await del('zipto_shield_transactions', `DELETE FROM zipto_shield_transactions WHERE booking_id IN ${scope}`, [driverProfileId]);
-      await del('driver_fraud_incidents',    `DELETE FROM driver_fraud_incidents WHERE driver_id = $1 OR booking_id IN ${scope}`, [driverProfileId]);
-      await del('customer_reports',          `DELETE FROM customer_reports WHERE booking_id IN ${scope}`, [driverProfileId]);
-      await del('support_tickets',           `DELETE FROM support_tickets WHERE booking_id IN ${scope}`, [driverProfileId]);
-      await del('coupon_usages',             `DELETE FROM coupon_usages WHERE booking_id IN ${scope}`, [driverProfileId]);
+      await del('payments',                  `DELETE FROM payments WHERE booking_id::text IN ${bScope}`);
+      await del('ratings',                   `DELETE FROM ratings WHERE driver_id::text IN ($1, $2) OR booking_id::text IN ${bScope}`);
+      await del('transaction_logs',          `DELETE FROM transaction_logs WHERE user_id::text IN ($1, $2) OR counterparty_user_id::text IN ($1, $2) OR booking_id::text IN ${bScope}`);
+      await del('coin_transactions',         `DELETE FROM coin_transactions WHERE booking_id::text IN ${bScope}`);
+      await del('zipto_shield_transactions', `DELETE FROM zipto_shield_transactions WHERE booking_id::text IN ${bScope}`);
+      await del('driver_fraud_incidents',    `DELETE FROM driver_fraud_incidents WHERE driver_id::text IN ($1, $2) OR booking_id::text IN ${bScope}`);
+      await del('customer_reports',          `DELETE FROM customer_reports WHERE booking_id::text IN ${bScope}`);
+      await del('support_tickets',           `DELETE FROM support_tickets WHERE booking_id::text IN ${bScope}`);
+      await del('coupon_usages',             `DELETE FROM coupon_usages WHERE booking_id::text IN ${bScope}`);
       // Referrals are kept (they record a relationship); just unlink the booking.
-      await del('referrals_unlinked',        `UPDATE referrals SET qualifying_booking_id = NULL WHERE qualifying_booking_id IN ${scope}`, [driverProfileId]);
+      await del('referrals_unlinked',        `UPDATE referrals SET qualifying_booking_id = NULL WHERE qualifying_booking_id::text IN ${bScope}`);
 
       // ── 2. Driver-scoped money tables ──
-      await del('driver_wallet_transactions', `DELETE FROM driver_wallet_transactions WHERE driver_user_id = $1`, [userId]);
-      await del('driver_topup_requests',      `DELETE FROM driver_topup_requests WHERE driver_user_id = $1`, [userId]);
-      await del('driver_withdrawal_requests', `DELETE FROM driver_withdrawal_requests WHERE driver_profile_id = $1`, [driverProfileId]);
+      await del('driver_wallet_transactions', `DELETE FROM driver_wallet_transactions WHERE driver_user_id::text IN ($1, $2)`);
+      await del('driver_topup_requests',      `DELETE FROM driver_topup_requests WHERE driver_user_id::text IN ($1, $2)`);
+      await del('driver_withdrawal_requests', `DELETE FROM driver_withdrawal_requests WHERE driver_profile_id::text IN ($1, $2)`);
 
       // ── 3. The bookings themselves ──
-      await del('bookings', `DELETE FROM bookings WHERE driver_id = $1`, [driverProfileId]);
+      await del('bookings', `DELETE FROM bookings WHERE driver_id::text IN ($1, $2)`);
 
       // ── 4. Reset profile counters ──
       await runner.query(
         `UPDATE driver_profiles
             SET wallet_balance = 0, total_trips = 0, average_rating = NULL,
                 wallet_frozen = false, wallet_freeze_reason = NULL
-          WHERE id = $1`,
-        [driverProfileId],
+          WHERE id::text IN ($1, $2)`,
+        [userId, driverProfileId],
       );
 
       await runner.commitTransaction();
