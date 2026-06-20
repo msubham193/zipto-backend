@@ -266,6 +266,25 @@ export class AdminController {
     return this.adminService.getRevenueReports(query);
   }
 
+  @Get('reports/gst')
+  @ApiOperation({ summary: 'GST collected report — per-booking GST mapped to GSTIN + customer' })
+  @ApiResponse({ status: 200, description: 'GST report retrieved' })
+  async getGstReport(
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+    @Query('gstin') gstin?: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.adminService.getGstReport({
+      from,
+      to,
+      gstin,
+      page: page ? Number(page) : undefined,
+      limit: limit ? Number(limit) : undefined,
+    });
+  }
+
   @Get('reports/drivers')
   @ApiOperation({ summary: 'Get driver performance reports' })
   @ApiResponse({ status: 200, description: 'Driver reports retrieved' })

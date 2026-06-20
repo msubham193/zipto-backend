@@ -741,6 +741,89 @@ export class AdminService {
   }
 
   /**
+   * GST report: GST actually collected (completed payments) per booking, with
+   * the customer's GSTIN + name + CGST/SGST breakdown, plus running totals.
+   * Filterable by date range and GSTIN.
+   */
+  async getGstReport(params: {
+    from?: string;
+    to?: string;
+    gstin?: string;
+    page?: number;
+    limit?: number;
+  }) {
+    const page = Math.max(1, Number(params.page) || 1);
+    const limit = Math.min(200, Math.max(1, Number(params.limit) || 50));
+    const offset = (page - 1) * limit;
+
+    const conds: string[] = [
+      `p.payment_status = 'completed'`,
+      `(b.fare_breakdown->>'gst_amount') IS NOT NULL`,
+      `(b.fare_breakdown->>'gst_amount')::numeric > 0`,
+    ];
+    const args: any[] = [];
+    if (params.from && params.to) {
+      args.push(params.from, `${params.to}T23:59:59.999Z`);
+      conds.push(`b.created_at BETWEEN $${args.length - 1} AND $${args.length}`);
+    }
+    if (params.gstin) {
+      args.push(params.gstin.trim().toUpperCase());
+      conds.push(`b.customer_gstin = $${args.length}`);
+    }
+    const where = conds.join(' AND ');
+
+    const transactions = await this.bookingRepository.manager.query(
+      `SELECT b.id AS booking_id, b.created_at, b.customer_gstin,
+              COALESCE(u.name, b.name) AS customer_name,
+              COALESCE(u.phone, b.mobile_number) AS customer_phone,
+              (b.fare_breakdown->>'delivery_charge')::numeric AS delivery_charge,
+              (b.fare_breakdown->>'gst_percent')::numeric  AS gst_percent,
+              (b.fare_breakdown->>'cgst_amount')::numeric   AS cgst_amount,
+              (b.fare_breakdown->>'sgst_amount')::numeric   AS sgst_amount,
+              (b.fare_breakdown->>'gst_amount')::numeric    AS gst_amount,
+              b.estimated_fare::numeric AS total,
+              p.payment_method, p.payment_status
+         FROM bookings b
+         JOIN payments p ON p.booking_id = b.id
+         LEFT JOIN users u ON u.id = b.customer_id
+        WHERE ${where}
+        ORDER BY b.created_at DESC
+        LIMIT ${limit} OFFSET ${offset}`,
+      args,
+    );
+
+    const [summary] = await this.bookingRepository.manager.query(
+      `SELECT COUNT(*)::int AS count,
+              COALESCE(SUM((b.fare_breakdown->>'gst_amount')::numeric),0)    AS total_gst,
+              COALESCE(SUM((b.fare_breakdown->>'cgst_amount')::numeric),0)   AS total_cgst,
+              COALESCE(SUM((b.fare_breakdown->>'sgst_amount')::numeric),0)   AS total_sgst,
+              COALESCE(SUM((b.fare_breakdown->>'delivery_charge')::numeric),0) AS total_taxable,
+              COUNT(*) FILTER (WHERE b.customer_gstin IS NOT NULL)::int AS b2b_count
+         FROM bookings b
+         JOIN payments p ON p.booking_id = b.id
+        WHERE ${where}`,
+      args,
+    );
+
+    const total = Number(summary?.count) || 0;
+    return {
+      summary: {
+        total_gst: Number(summary?.total_gst) || 0,
+        total_cgst: Number(summary?.total_cgst) || 0,
+        total_sgst: Number(summary?.total_sgst) || 0,
+        total_taxable: Number(summary?.total_taxable) || 0,
+        invoice_count: total,
+        b2b_count: Number(summary?.b2b_count) || 0,
+      },
+      transactions,
+      total,
+      page,
+      limit,
+      total_pages: Math.max(1, Math.ceil(total / limit)),
+    };
+  }
+
+  /**
    * Get booking live tracking info (status + driver current location)
    */
   async getBookingTracking(bookingId: string) {
