@@ -389,6 +389,21 @@ export class AdminController {
     return this.adminService.getWithdrawals(status);
   }
 
+  @Get('driver-earnings')
+  @ApiOperation({ summary: 'Per-driver earnings overview (earnings, wallet, withdrawals)' })
+  @ApiResponse({ status: 200, description: 'Driver earnings retrieved' })
+  async getDriverEarnings(
+    @Query('search') search?: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.adminService.getDriverEarnings({
+      search,
+      page: page ? Number(page) : undefined,
+      limit: limit ? Number(limit) : undefined,
+    });
+  }
+
   @Put('withdrawals/:id/approve')
   @ApiOperation({ summary: 'Approve a withdrawal request' })
   @ApiResponse({ status: 200, description: 'Withdrawal approved' })

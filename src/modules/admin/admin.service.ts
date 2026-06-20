@@ -824,6 +824,72 @@ export class AdminService {
   }
 
   /**
+   * Driver earnings overview: per-driver lifetime earnings (from completed
+   * payments), current wallet balance, trips, and withdrawal totals.
+   */
+  async getDriverEarnings(params: { search?: string; page?: number; limit?: number }) {
+    const page = Math.max(1, Number(params.page) || 1);
+    const limit = Math.min(200, Math.max(1, Number(params.limit) || 50));
+    const offset = (page - 1) * limit;
+
+    const args: any[] = [];
+    let searchCond = '';
+    if (params.search) {
+      args.push(`%${params.search.trim()}%`);
+      searchCond = `WHERE (u.name ILIKE $${args.length} OR u.phone ILIKE $${args.length})`;
+    }
+
+    const drivers = await this.driverProfileRepository.manager.query(
+      `SELECT dp.id AS driver_profile_id, dp.user_id,
+              u.name, u.phone,
+              dp.wallet_balance::numeric AS wallet_balance,
+              dp.total_trips,
+              dp.average_rating::numeric AS average_rating,
+              COALESCE(e.total_earnings, 0)::numeric      AS total_earnings,
+              COALESCE(w.total_withdrawn, 0)::numeric     AS total_withdrawn,
+              COALESCE(w.pending_withdrawals, 0)::numeric AS pending_withdrawals
+         FROM driver_profiles dp
+         JOIN users u ON u.id = dp.user_id
+         LEFT JOIN (
+           SELECT b.driver_id, SUM(p.driver_earnings) AS total_earnings
+             FROM bookings b
+             JOIN payments p ON p.booking_id = b.id AND p.payment_status = 'completed'
+            GROUP BY b.driver_id
+         ) e ON e.driver_id = dp.user_id
+         LEFT JOIN (
+           SELECT driver_profile_id,
+                  SUM(amount) FILTER (WHERE status = 'completed') AS total_withdrawn,
+                  SUM(amount) FILTER (WHERE status IN ('pending','processing')) AS pending_withdrawals
+             FROM driver_withdrawal_requests
+            GROUP BY driver_profile_id
+         ) w ON w.driver_profile_id = dp.id
+         ${searchCond}
+        ORDER BY total_earnings DESC NULLS LAST
+        LIMIT ${limit} OFFSET ${offset}`,
+      args,
+    );
+
+    const [cnt] = await this.driverProfileRepository.manager.query(
+      `SELECT COUNT(*)::int AS count FROM driver_profiles dp JOIN users u ON u.id = dp.user_id ${searchCond}`,
+      args,
+    );
+    const [tot] = await this.driverProfileRepository.manager.query(
+      `SELECT COALESCE(SUM(p.driver_earnings),0)::numeric AS total_earnings
+         FROM payments p WHERE p.payment_status = 'completed'`,
+    );
+    const total = Number(cnt?.count) || 0;
+
+    return {
+      summary: { total_driver_earnings: Number(tot?.total_earnings) || 0, driver_count: total },
+      drivers,
+      total,
+      page,
+      limit,
+      total_pages: Math.max(1, Math.ceil(total / limit)),
+    };
+  }
+
+  /**
    * Get booking live tracking info (status + driver current location)
    */
   async getBookingTracking(bookingId: string) {
