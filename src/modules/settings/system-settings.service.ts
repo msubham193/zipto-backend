@@ -23,7 +23,25 @@ const DEFAULTS: Array<{ key: string; value: string; description: string }> = [
   { key: 'referral_share_base_url', value: 'https://api.ridezipto.com/refer', description: 'Base URL for referral share links (code is appended: /refer/CODE)' },
   { key: 'referral_banner_url',     value: 'https://api.ridezipto.com/referral-banner.jpeg', description: 'Banner image shown as the WhatsApp/social link preview (og:image)' },
   { key: 'referral_play_store_url', value: 'https://play.google.com/store/apps/details?id=com.ridezipto.customer', description: 'Play Store URL the referral landing page redirects to' },
+  { key: 'platform_fee', value: '5', description: 'Flat platform fee (₹) added to every fare. Admin-configurable; shown on the customer fare estimate.' },
+  { key: 'gst_percent',  value: '0', description: 'GST percentage applied on the delivery charge. Admin-configurable; shown on the customer fare estimate.' },
+  { key: 'zipto_gstin',        value: '', description: 'Zipto\'s own GSTIN, printed on B2B tax invoices.' },
+  { key: 'zipto_legal_name',   value: 'Zipto Hyperlogistics Pvt. Ltd.', description: 'Legal entity name printed on tax invoices.' },
+  { key: 'zipto_gst_state',    value: 'Odisha', description: 'Zipto place-of-supply state (drives CGST+SGST vs IGST on invoices).' },
+  { key: 'zipto_invoice_address', value: '781, Saheed Nagar, Maharishi College Road, Bhubaneswar, Odisha 751007', description: 'Registered address printed on tax invoices.' },
 ];
+
+export interface FareSettings {
+  platform_fee: number;
+  gst_percent: number;
+}
+
+export interface TaxSettings {
+  zipto_gstin: string;
+  zipto_legal_name: string;
+  zipto_gst_state: string;
+  zipto_invoice_address: string;
+}
 
 export interface ReferralSettings {
   enabled: boolean;
@@ -41,6 +59,8 @@ export class SystemSettingsService implements OnModuleInit {
   private readonly logger = new Logger(SystemSettingsService.name);
   private cache: DispatchSettings | null = null;
   private cacheAt = 0;
+  private fareCache: FareSettings | null = null;
+  private fareCacheAt = 0;
 
   constructor(
     @InjectRepository(SystemSetting)
@@ -85,6 +105,50 @@ export class SystemSettingsService implements OnModuleInit {
       this.cache = { search_radius_km: 4, broadcast_radius_km: 10, offer_timeout_seconds: 15, max_search_attempts: 10 };
     }
     return this.cache!;
+  }
+
+  /**
+   * Platform fee + GST settings (admin-configurable), 30-second cached.
+   * GST is applied on the platform fee and shown on the customer fare estimate.
+   */
+  async getFareSettings(): Promise<FareSettings> {
+    if (this.fareCache && Date.now() - this.fareCacheAt < CACHE_TTL_MS) {
+      return this.fareCache;
+    }
+    try {
+      const rows = await this.repo.find({ where: [{ key: 'platform_fee' }, { key: 'gst_percent' }] });
+      const map: Record<string, string> = {};
+      for (const r of rows) { map[r.key] = r.value; }
+      this.fareCache = {
+        platform_fee: Math.max(0, parseFloat(map.platform_fee ?? '5') || 0),
+        gst_percent:  Math.max(0, parseFloat(map.gst_percent ?? '0') || 0),
+      };
+      this.fareCacheAt = Date.now();
+    } catch (err) {
+      this.logger.error('Failed to read fare settings, using defaults', err);
+      this.fareCache = { platform_fee: 5, gst_percent: 0 };
+    }
+    return this.fareCache!;
+  }
+
+  /** Zipto's GST identity for B2B tax invoices (admin-configurable). */
+  async getTaxSettings(): Promise<TaxSettings> {
+    const rows = await this.repo.find({
+      where: [
+        { key: 'zipto_gstin' },
+        { key: 'zipto_legal_name' },
+        { key: 'zipto_gst_state' },
+        { key: 'zipto_invoice_address' },
+      ],
+    });
+    const map: Record<string, string> = {};
+    for (const r of rows) { map[r.key] = r.value; }
+    return {
+      zipto_gstin: map.zipto_gstin ?? '',
+      zipto_legal_name: map.zipto_legal_name ?? 'Zipto Hyperlogistics Pvt. Ltd.',
+      zipto_gst_state: map.zipto_gst_state ?? 'Odisha',
+      zipto_invoice_address: map.zipto_invoice_address ?? '',
+    };
   }
 
   /** Referral program settings (admin-configurable). Falls back to defaults. */
@@ -134,12 +198,12 @@ export class SystemSettingsService implements OnModuleInit {
       // Allow creating unknown keys so future settings can be added live
       const created = this.repo.create({ key, value });
       const saved = await this.repo.save(created);
-      this.cache = null; // invalidate
+      this.cache = null; this.fareCache = null; // invalidate
       return saved;
     }
     setting.value = String(value);
     const saved = await this.repo.save(setting);
-    this.cache = null; // invalidate
+    this.cache = null; this.fareCache = null; // invalidate
     return saved;
   }
 }

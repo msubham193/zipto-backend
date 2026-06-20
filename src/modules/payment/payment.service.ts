@@ -15,6 +15,7 @@ import { CashfreeService } from '../../services/cashfree.service';
 import { NotificationService } from '../notification/notification.service';
 import { TransactionLogService } from '../transaction-log/transaction-log.service';
 import { BookingGateway } from '../booking/booking.gateway';
+import { SystemSettingsService } from '../settings/system-settings.service';
 import { getPaginationMeta } from '../../common/utils/helpers.util';
 
 @Injectable()
@@ -32,6 +33,7 @@ export class PaymentService {
     private notificationService: NotificationService,
     private bookingGateway: BookingGateway,
     private transactionLog: TransactionLogService,
+    private systemSettings: SystemSettingsService,
   ) {}
 
   /** Public backend base (incl. /api) used for Cashfree return/notify URLs. */
@@ -610,12 +612,47 @@ export class PaymentService {
     if (payment.booking.customer_id !== userId && payment.booking.driver_id !== userId) {
       throw new BadRequestException('Access denied');
     }
+
+    const booking = payment.booking;
+    const bd = (booking.fare_breakdown || {}) as any;
+    const tax = await this.systemSettings.getTaxSettings();
+    const customerGstin = booking.customer_gstin || null;
+    // A B2B tax invoice requires both the buyer's GSTIN and Zipto's GSTIN.
+    const isTaxInvoice = !!customerGstin && !!tax.zipto_gstin;
+
     return {
-      message: 'Invoice generation coming soon',
-      payment_id: payment.id,
+      invoice_number: `ZPT-${bookingId.slice(0, 8).toUpperCase()}`,
+      invoice_date: payment.created_at ?? new Date(),
+      is_tax_invoice: isTaxInvoice,
+      seller: {
+        name: tax.zipto_legal_name,
+        gstin: tax.zipto_gstin || null,
+        address: tax.zipto_invoice_address || null,
+        state: tax.zipto_gst_state,
+      },
+      buyer: {
+        name: booking.name || booking.customer?.name || null,
+        phone: booking.mobile_number || booking.customer?.phone || null,
+        gstin: customerGstin,
+      },
       booking_id: bookingId,
-      amount: payment.amount,
-      status: payment.payment_status,
+      payment_id: payment.id,
+      description: `Delivery service${booking.pickup_address ? ` (${booking.pickup_address} → ${booking.drop_address})` : ''}`,
+      charges: {
+        delivery_charge: bd.delivery_charge ?? null,
+        platform_fee: bd.platform_fee ?? 0,
+        gst_percent: bd.gst_percent ?? 0,
+        cgst_amount: bd.cgst_amount ?? 0,
+        sgst_amount: bd.sgst_amount ?? 0,
+        gst_amount: bd.gst_amount ?? 0,
+      },
+      total: Number(payment.amount),
+      payment_method: payment.payment_method,
+      payment_status: payment.payment_status,
+      note:
+        customerGstin && !tax.zipto_gstin
+          ? 'Zipto GSTIN not yet configured — set it in Admin → GST settings to issue a valid tax invoice.'
+          : undefined,
     };
   }
 

@@ -163,11 +163,14 @@ export class BookingService {
       throw new NotFoundException(`Pricing rule not found for vehicle type: ${vehicle_type}`);
     }
 
-    // --- Constants ---
-    const PLATFORM_FEE = 5;
-    const PLATFORM_FEE_GST_RATE = 0.18;
-    const platformFeeGst = this.round(PLATFORM_FEE * PLATFORM_FEE_GST_RATE);
-    const totalPlatformFee = PLATFORM_FEE + platformFeeGst;
+    // --- Platform fee + GST (admin-configurable) ---
+    // GST applies to the DELIVERY CHARGE only (the ride) — a pass-through tax
+    // collected on top of the fare. The flat platform fee is added separately
+    // and is NOT taxed. Commission/driver earnings are on the pre-GST delivery
+    // charge (GST is remitted to the government, not platform/driver revenue).
+    const fareSettings = await this.systemSettings.getFareSettings();
+    const platformFee = this.round(fareSettings.platform_fee);
+    const gstPercent = fareSettings.gst_percent;
 
     // --- Calculate fare breakdown ---
     const baseFare = Number(pricingRule.base_fare);
@@ -183,24 +186,30 @@ export class BookingService {
     // 2. Multi-stop charge
     const multiStopCharge = this.round(extra_stops * multiStopFee);
 
-    // 3. fare = baseFare + distanceCharge + multiStopCharge + platformFee(incl. GST)
-    const fareBeforeSurge = baseFare + distanceCharge + multiStopCharge + totalPlatformFee;
-
-    // 4. Dynamic surge multiplier (peak hours + demand)
+    // 3. Delivery charge (driver's service) = (base + distance + multi-stop) × surge
+    const deliveryBeforeSurge = baseFare + distanceCharge + multiStopCharge;
     const surgeMultiplier = await this.calculateSurgeMultiplier();
+    let deliveryCharge = this.round(deliveryBeforeSurge * surgeMultiplier);
 
-    // 5. finalFare = fare * surgeMultiplier
-    let estimatedFare = this.round(fareBeforeSurge * surgeMultiplier);
-
-    // 6. Apply minimum fare floor
+    // 4. Minimum fare floor (applies to the delivery charge)
     const minimumFare = pricingRule.minimum_fare ? Number(pricingRule.minimum_fare) : null;
-    if (minimumFare && estimatedFare < minimumFare) {
-      estimatedFare = minimumFare;
+    const minimumFareApplied = !!(minimumFare && deliveryCharge < minimumFare);
+    if (minimumFareApplied) {
+      deliveryCharge = minimumFare as number;
     }
 
-    // 7. Commission split
-    const skidoCommission = this.round(estimatedFare * (commissionPercent / 100));
-    const driverEarnings = this.round(estimatedFare - skidoCommission);
+    // 5. GST on the delivery charge. Intra-state supply → split CGST + SGST
+    //    (each = gst%/2); used for the B2B tax invoice.
+    const gstAmount = this.round(deliveryCharge * (gstPercent / 100));
+    const cgstAmount = this.round(gstAmount / 2);
+    const sgstAmount = this.round(gstAmount - cgstAmount);
+
+    // 6. Total the customer pays = delivery charge + GST + platform fee
+    const estimatedFare = this.round(deliveryCharge + gstAmount + platformFee);
+
+    // 7. Commission split on the delivery charge (pre-GST, excl. platform fee)
+    const skidoCommission = this.round(deliveryCharge * (commissionPercent / 100));
+    const driverEarnings = this.round(deliveryCharge - skidoCommission);
 
     // 8. Driver availability — parallel check at search radius (does not block fare calc)
     let nearbyDriverCount = 0;
@@ -230,11 +239,17 @@ export class BookingService {
         distance_charge: distanceCharge,
         time_charge: 0,
         multi_stop_charge: multiStopCharge,
-        platform_fee: PLATFORM_FEE,
-        platform_fee_gst: platformFeeGst,
+        delivery_charge: deliveryCharge,
+        platform_fee: platformFee,
+        gst_percent: gstPercent,
+        gst_amount: gstAmount,
+        cgst_amount: cgstAmount,
+        sgst_amount: sgstAmount,
+        platform_fee_gst: gstAmount, // backward-compat alias (now = GST on delivery)
         surge_multiplier: surgeMultiplier,
-        subtotal: this.round(fareBeforeSurge),
-        minimum_fare_applied: minimumFare ? estimatedFare === minimumFare : false,
+        subtotal: deliveryCharge,
+        total_payable: estimatedFare,
+        minimum_fare_applied: minimumFareApplied,
         skido_commission: skidoCommission,
         driver_earnings: driverEarnings,
       },
@@ -299,6 +314,7 @@ export class BookingService {
       paid_by = 'sender',
       coins_to_redeem = 0,
       coupon_code,
+      gstin,
     } = createBookingDto;
 
     // Diagnostic log — remove after confirming receiver_phone flows correctly
@@ -390,6 +406,7 @@ export class BookingService {
       receiver_phone,
       alternative_phone,
       paid_by,
+      customer_gstin:   (gstin || '').trim().toUpperCase() || null,
       distance:         fareEstimate.distance,
       duration:         fareEstimate.duration,
       estimated_fare:   discountedFare,
@@ -1162,6 +1179,7 @@ export class BookingService {
         receiver_phone:  offerData.receiver_phone,
         alternative_phone: offerData.alternative_phone,
         paid_by:         offerData.paid_by || 'sender',
+        customer_gstin:  offerData.customer_gstin ?? null,
         pickup_otp:      offerData.pickup_otp,
         pickup_otp_verified: false,
         delivery_otp:    offerData.delivery_otp,

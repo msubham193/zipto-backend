@@ -100,6 +100,11 @@ export class Booking {
   @Column({ type: 'varchar', length: 15, nullable: true })
   alternative_phone: string;
 
+  // B2B: business client's GSTIN for Input Tax Credit. When present, a tax
+  // invoice with Zipto's + the client's GSTIN (CGST+SGST split) is generated.
+  @Column({ type: 'varchar', length: 15, nullable: true })
+  customer_gstin: string | null;
+
   @Column({
     type: 'enum',
     enum: PaidBy,

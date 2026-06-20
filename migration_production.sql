@@ -244,5 +244,10 @@ ALTER TABLE users
 
 CREATE INDEX IF NOT EXISTS idx_users_is_deleted ON users (is_deleted);
 
+-- ── 13. B2B tax invoice: business client's GSTIN on bookings ──
+
+ALTER TABLE bookings
+  ADD COLUMN IF NOT EXISTS customer_gstin VARCHAR(15) NULL;
+
 -- ── Done ──────────────────────────────────────────────────────
 SELECT 'Migration complete' AS result;

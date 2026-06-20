@@ -165,6 +165,12 @@ export class CreateBookingDto {
   @IsString()
   @MaxLength(50)
   coupon_code?: string;
+
+  @ApiPropertyOptional({ example: '22AAAAA0000A1Z5', description: 'Business GSTIN for a B2B tax invoice (Input Tax Credit). 15 chars.' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(15)
+  gstin?: string;
 }
 
 export class StartTripDto {

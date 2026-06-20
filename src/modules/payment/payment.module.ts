@@ -7,9 +7,10 @@ import { Booking } from '../booking/entities/booking.entity';
 import { AuthModule } from '../auth/auth.module';
 import { NotificationModule } from '../notification/notification.module';
 import { BookingModule } from '../booking/booking.module';
+import { SettingsModule } from '../settings/settings.module';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Payment, Booking]), AuthModule, NotificationModule, BookingModule],
+  imports: [TypeOrmModule.forFeature([Payment, Booking]), AuthModule, NotificationModule, BookingModule, SettingsModule],
   controllers: [PaymentController],
   providers: [PaymentService],
   exports: [PaymentService],

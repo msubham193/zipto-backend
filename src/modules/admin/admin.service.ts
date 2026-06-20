@@ -157,11 +157,25 @@ export class AdminService {
    * Get pending driver verifications
    */
   async getPendingDriverVerifications() {
-    return this.driverProfileRepository.find({
+    const profiles = await this.driverProfileRepository.find({
       where: { verification_status: VerificationStatus.PENDING },
       relations: ['user'],
       order: { created_at: 'ASC' },
     });
+    // Documents are stored as private R2 keys → presign so the admin KYC page
+    // can render them (same as getDriverById / getDriverKyc).
+    return Promise.all(
+      profiles.map(async (p) => ({
+        ...p,
+        ...(await this.s3Service.signFields({
+          aadhar_front_image: p.aadhar_front_image,
+          aadhar_back_image: p.aadhar_back_image,
+          driving_license_image: p.driving_license_image,
+          vehicle_rc_image: p.vehicle_rc_image,
+          profile_image: p.profile_image,
+        })),
+      })),
+    );
   }
 
   /**
