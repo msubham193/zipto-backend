@@ -342,6 +342,13 @@ export class AdminController {
     });
   }
 
+  @Get('reports/gst/invoice/:bookingId')
+  @ApiOperation({ summary: 'Generate the GST/tax invoice for a single booking' })
+  @ApiResponse({ status: 200, description: 'Invoice generated' })
+  async getGstInvoice(@Param('bookingId') bookingId: string) {
+    return this.adminService.getGstInvoice(bookingId);
+  }
+
   @Get('reports/drivers')
   @ApiOperation({ summary: 'Get driver performance reports' })
   @ApiResponse({ status: 200, description: 'Driver reports retrieved' })

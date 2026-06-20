@@ -1,4 +1,4 @@
-import { Controller, Post, Delete, Body, Get, Param, HttpCode, HttpStatus, ForbiddenException } from '@nestjs/common';
+import { Controller, Post, Put, Delete, Body, Get, Param, HttpCode, HttpStatus, ForbiddenException } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { AuthService } from './auth.service';
 import {
@@ -8,6 +8,7 @@ import {
   AdminLoginDto,
   RefreshTokenDto,
   ResendOTPDto,
+  UpdateProfileDto,
 } from './dto/auth.dto';
 import { Public } from '../../common/decorators/public.decorator';
 import { GetUser } from '../../common/decorators/get-user.decorator';
@@ -136,5 +137,21 @@ export class AuthController {
   async getCurrentUser(@GetUser() user: User) {
     const { password_hash, refresh_token, ...sanitizedUser } = user;
     return sanitizedUser;
+  }
+
+  @Get('profile')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Get the authenticated user profile' })
+  async getProfile(@GetUser() user: User) {
+    const { password_hash, refresh_token, ...sanitizedUser } = user;
+    return sanitizedUser;
+  }
+
+  @Put('profile')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Update the authenticated user profile (name/email/phone)' })
+  @ApiResponse({ status: 200, description: 'Profile updated' })
+  async updateProfile(@GetUser() user: User, @Body() dto: UpdateProfileDto) {
+    return this.authService.updateProfile(user.id, dto);
   }
 }

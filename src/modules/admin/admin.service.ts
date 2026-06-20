@@ -21,6 +21,7 @@ import { DriverWalletService } from '../driver/driver-wallet.service';
 import { RazorpayXService } from '../../services/razorpayx.service';
 import { CashfreePayoutService } from '../../services/cashfree-payout.service';
 import { S3Service } from '../../services/s3.service';
+import { SystemSettingsService } from '../settings/system-settings.service';
 
 @Injectable()
 export class AdminService {
@@ -51,6 +52,7 @@ export class AdminService {
     private razorpayXService: RazorpayXService,
     private cashfreePayoutService: CashfreePayoutService,
     private s3Service: S3Service,
+    private systemSettings: SystemSettingsService,
   ) {}
 
   /**
@@ -832,6 +834,62 @@ export class AdminService {
       page,
       limit,
       total_pages: Math.max(1, Math.ceil(total / limit)),
+    };
+  }
+
+  /**
+   * Build a GST/tax invoice for a single booking (admin view — no access check).
+   * Mirrors PaymentService.generateInvoice so the report and the customer app
+   * issue identical invoices. A valid B2B tax invoice needs both GSTINs.
+   */
+  async getGstInvoice(bookingId: string) {
+    const payment = await this.paymentRepository.findOne({
+      where: { booking_id: bookingId },
+      relations: ['booking', 'booking.customer'],
+    });
+    if (!payment || !payment.booking) {
+      throw new NotFoundException('Payment not found for this booking');
+    }
+
+    const booking = payment.booking;
+    const bd = (booking.fare_breakdown || {}) as any;
+    const tax = await this.systemSettings.getTaxSettings();
+    const customerGstin = booking.customer_gstin || null;
+    const isTaxInvoice = !!customerGstin && !!tax.zipto_gstin;
+
+    return {
+      invoice_number: `ZPT-${bookingId.slice(0, 8).toUpperCase()}`,
+      invoice_date: payment.created_at ?? new Date(),
+      is_tax_invoice: isTaxInvoice,
+      seller: {
+        name: tax.zipto_legal_name,
+        gstin: tax.zipto_gstin || null,
+        address: tax.zipto_invoice_address || null,
+        state: tax.zipto_gst_state,
+      },
+      buyer: {
+        name: booking.name || booking.customer?.name || null,
+        phone: booking.mobile_number || booking.customer?.phone || null,
+        gstin: customerGstin,
+      },
+      booking_id: bookingId,
+      payment_id: payment.id,
+      description: `Delivery service${booking.pickup_address ? ` (${booking.pickup_address} → ${booking.drop_address})` : ''}`,
+      charges: {
+        delivery_charge: bd.delivery_charge ?? null,
+        platform_fee: bd.platform_fee ?? 0,
+        gst_percent: bd.gst_percent ?? 0,
+        cgst_amount: bd.cgst_amount ?? 0,
+        sgst_amount: bd.sgst_amount ?? 0,
+        gst_amount: bd.gst_amount ?? 0,
+      },
+      total: Number(payment.amount),
+      payment_method: payment.payment_method,
+      payment_status: payment.payment_status,
+      note:
+        customerGstin && !tax.zipto_gstin
+          ? 'Zipto GSTIN not yet configured — set it in Admin → GST settings to issue a valid tax invoice.'
+          : undefined,
     };
   }
 

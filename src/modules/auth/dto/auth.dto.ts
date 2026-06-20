@@ -182,3 +182,24 @@ export class DeleteAccountDto {
   @IsNotEmpty()
   email: string;
 }
+
+export class UpdateProfileDto {
+  @ApiProperty({ example: 'Ashwini', required: false })
+  @IsOptional()
+  @IsString()
+  @MinLength(2)
+  @MaxLength(100)
+  name?: string;
+
+  @ApiProperty({ example: 'ashwini@ridezipto.com', required: false })
+  @IsOptional()
+  @IsEmail()
+  @MaxLength(100)
+  email?: string;
+
+  @ApiProperty({ example: '9999999999', required: false })
+  @IsOptional()
+  @IsString()
+  @MaxLength(15)
+  phone?: string;
+}

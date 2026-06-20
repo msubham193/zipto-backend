@@ -520,6 +520,37 @@ export class AuthService {
     return { message: 'Account deleted successfully' };
   }
 
+  /**
+   * Update the authenticated user's own profile (name / phone / email).
+   * Email changes are guarded for uniqueness so an admin can't collide with
+   * another account.
+   */
+  async updateProfile(
+    userId: string,
+    dto: { name?: string; email?: string; phone?: string },
+  ) {
+    const user = await this.userRepository.findOne({ where: { id: userId } });
+    if (!user) throw new NotFoundException('User not found');
+
+    if (dto.email && dto.email.trim().toLowerCase() !== (user.email || '').toLowerCase()) {
+      const email = dto.email.trim().toLowerCase();
+      const exists = await this.userRepository.findOne({ where: { email } });
+      if (exists && exists.id !== userId) {
+        throw new ConflictException('That email is already in use by another account.');
+      }
+      user.email = email;
+    }
+    if (typeof dto.name === 'string' && dto.name.trim()) {
+      user.name = dto.name.trim();
+    }
+    if (typeof dto.phone === 'string' && dto.phone.trim()) {
+      user.phone = dto.phone.trim();
+    }
+
+    await this.userRepository.save(user);
+    return this.sanitizeUser(user);
+  }
+
   async refreshToken(refreshTokenDto: RefreshTokenDto) {
     const { refresh_token } = refreshTokenDto;
     try {
