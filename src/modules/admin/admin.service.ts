@@ -763,6 +763,7 @@ export class AdminService {
     from?: string;
     to?: string;
     gstin?: string;
+    type?: string; // 'b2b' | 'b2c' | undefined (all)
     page?: number;
     limit?: number;
   }) {
@@ -784,6 +785,10 @@ export class AdminService {
       args.push(params.gstin.trim().toUpperCase());
       conds.push(`b.customer_gstin = $${args.length}`);
     }
+    // B2B = has a customer GSTIN; B2C = no GSTIN.
+    const type = (params.type || '').toLowerCase();
+    if (type === 'b2b') conds.push(`b.customer_gstin IS NOT NULL`);
+    else if (type === 'b2c') conds.push(`b.customer_gstin IS NULL`);
     const where = conds.join(' AND ');
 
     const transactions = await this.bookingRepository.manager.query(
@@ -812,7 +817,10 @@ export class AdminService {
               COALESCE(SUM((b.fare_breakdown->>'cgst_amount')::numeric),0)   AS total_cgst,
               COALESCE(SUM((b.fare_breakdown->>'sgst_amount')::numeric),0)   AS total_sgst,
               COALESCE(SUM((b.fare_breakdown->>'delivery_charge')::numeric),0) AS total_taxable,
-              COUNT(*) FILTER (WHERE b.customer_gstin IS NOT NULL)::int AS b2b_count
+              COUNT(*) FILTER (WHERE b.customer_gstin IS NOT NULL)::int AS b2b_count,
+              COUNT(*) FILTER (WHERE b.customer_gstin IS NULL)::int     AS b2c_count,
+              COALESCE(SUM((b.fare_breakdown->>'gst_amount')::numeric) FILTER (WHERE b.customer_gstin IS NOT NULL),0) AS b2b_gst,
+              COALESCE(SUM((b.fare_breakdown->>'gst_amount')::numeric) FILTER (WHERE b.customer_gstin IS NULL),0)     AS b2c_gst
          FROM bookings b
          JOIN payments p ON p.booking_id = b.id
         WHERE ${where}`,
@@ -828,6 +836,9 @@ export class AdminService {
         total_taxable: Number(summary?.total_taxable) || 0,
         invoice_count: total,
         b2b_count: Number(summary?.b2b_count) || 0,
+        b2c_count: Number(summary?.b2c_count) || 0,
+        b2b_gst: Number(summary?.b2b_gst) || 0,
+        b2c_gst: Number(summary?.b2c_gst) || 0,
       },
       transactions,
       total,

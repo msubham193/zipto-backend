@@ -330,6 +330,7 @@ export class AdminController {
     @Query('from') from?: string,
     @Query('to') to?: string,
     @Query('gstin') gstin?: string,
+    @Query('type') type?: string,
     @Query('page') page?: string,
     @Query('limit') limit?: string,
   ) {
@@ -337,6 +338,7 @@ export class AdminController {
       from,
       to,
       gstin,
+      type,
       page: page ? Number(page) : undefined,
       limit: limit ? Number(limit) : undefined,
     });
