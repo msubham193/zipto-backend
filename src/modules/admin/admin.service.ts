@@ -1702,6 +1702,68 @@ export class AdminService {
    * Reset a single driver's earnings, wallet, trips and ride history.
    * Deletes only records belonging to this driver — no other driver is affected.
    */
+  /**
+   * Live map feed: every driver currently online or busy, with their last known
+   * GPS location, vehicle, and active trip (if any). Powers the dashboard map.
+   */
+  async getLiveDrivers() {
+    const rows: any[] = await this.dataSource.query(
+      `SELECT
+          dp.id                                AS driver_profile_id,
+          dp.user_id                           AS user_id,
+          u.name                               AS name,
+          u.phone                              AS phone,
+          dp.availability_status               AS status,
+          dp.average_rating                    AS rating,
+          dp.updated_at                        AS updated_at,
+          ST_Y(dp.current_location::geometry)  AS lat,
+          ST_X(dp.current_location::geometry)  AS lng,
+          v.registration_number                AS vehicle_number,
+          v.vehicle_type                        AS vehicle_type,
+          b.id                                 AS active_booking_id,
+          b.status                             AS active_booking_status
+        FROM driver_profiles dp
+        JOIN users u
+          ON u.id = dp.user_id AND u.is_active = true AND u.is_deleted = false
+        LEFT JOIN vehicles v ON v.id = dp.vehicle_id
+        LEFT JOIN LATERAL (
+          SELECT id, status FROM bookings
+           WHERE driver_id = dp.id
+             AND status IN ('accepted','driver_assigned','ongoing')
+           ORDER BY created_at DESC
+           LIMIT 1
+        ) b ON true
+        WHERE dp.availability_status IN ('online','busy')
+          AND dp.current_location IS NOT NULL
+        ORDER BY dp.availability_status, u.name`,
+    );
+
+    const drivers = rows
+      .map((r) => ({
+        driver_profile_id: r.driver_profile_id,
+        user_id: r.user_id,
+        name: r.name,
+        phone: r.phone,
+        status: r.status as 'online' | 'busy',
+        rating: r.rating != null ? Number(r.rating) : null,
+        lat: r.lat != null ? Number(r.lat) : null,
+        lng: r.lng != null ? Number(r.lng) : null,
+        vehicle_number: r.vehicle_number ?? null,
+        vehicle_type: r.vehicle_type ?? null,
+        active_booking_id: r.active_booking_id ?? null,
+        active_booking_status: r.active_booking_status ?? null,
+        last_updated: r.updated_at,
+      }))
+      .filter((d) => d.lat != null && d.lng != null);
+
+    return {
+      total: drivers.length,
+      online: drivers.filter((d) => d.status === 'online').length,
+      busy: drivers.filter((d) => d.status === 'busy').length,
+      drivers,
+    };
+  }
+
   async resetDriverData(driverProfileId: string) {
     const profile = await this.driverProfileRepository.findOne({
       where: { id: driverProfileId },
@@ -1710,56 +1772,71 @@ export class AdminService {
     if (!profile) throw new NotFoundException('Driver profile not found');
 
     const userId = profile.user_id;
-    const q = this.dataSource.query.bind(this.dataSource);
+    const cleared: Record<string, number> = {};
 
-    // 1. Wallet transactions
-    const [, walletDeleted] = await q(
-      `DELETE FROM driver_wallet_transactions WHERE driver_user_id = $1`, [userId],
-    );
-    // 2. Topup requests
-    const [, topupDeleted] = await q(
-      `DELETE FROM driver_topup_requests WHERE driver_user_id = $1`, [userId],
-    );
-    // 3. Withdrawal requests
-    const [, withdrawalDeleted] = await q(
-      `DELETE FROM driver_withdrawal_requests WHERE driver_profile_id = $1`, [driverProfileId],
-    );
-    // 4. Payments tied to bookings driven by this driver
-    const [, paymentDeleted] = await q(
-      `DELETE FROM payments WHERE booking_id IN (
-         SELECT id FROM bookings WHERE driver_id = $1
-       )`, [driverProfileId],
-    );
-    // 5. Ratings given for this driver
-    const [, ratingDeleted] = await q(
-      `DELETE FROM ratings WHERE driver_id = $1`, [driverProfileId],
-    );
-    // 6. Bookings assigned to this driver
-    const [, bookingDeleted] = await q(
-      `DELETE FROM bookings WHERE driver_id = $1`, [driverProfileId],
-    );
-    // 7. Reset counters on driver profile
-    await q(
-      `UPDATE driver_profiles
-       SET wallet_balance = 0, total_trips = 0, average_rating = NULL,
-           wallet_frozen = false, wallet_freeze_reason = NULL
-       WHERE id = $1`, [driverProfileId],
-    );
+    // Bookings driven by this driver. Many tables reference these rows via a
+    // booking_id FK (driver_fraud_incidents, customer_reports, payments, …), so
+    // every child row MUST be cleared before the bookings themselves — otherwise
+    // the final DELETE fails with a foreign-key violation. Run it all in one
+    // transaction so a partial failure rolls back cleanly.
+    const scope = `(SELECT id FROM bookings WHERE driver_id = $1)`;
+
+    const runner = this.dataSource.createQueryRunner();
+    await runner.connect();
+    await runner.startTransaction();
+    try {
+      // RETURNING 1 → the result array length is the affected-row count.
+      const del = async (label: string, sql: string, params: any[]) => {
+        const rows = await runner.query(`${sql} RETURNING 1`, params);
+        cleared[label] = Array.isArray(rows) ? rows.length : 0;
+      };
+
+      // ── 1. Rows hanging off this driver's bookings (FK children first) ──
+      await del('payments',                  `DELETE FROM payments WHERE booking_id IN ${scope}`, [driverProfileId]);
+      await del('ratings',                   `DELETE FROM ratings WHERE driver_id = $1 OR booking_id IN ${scope}`, [driverProfileId]);
+      await del('transaction_logs',          `DELETE FROM transaction_logs WHERE user_id = $2 OR counterparty_user_id = $2 OR booking_id IN ${scope}`, [driverProfileId, userId]);
+      await del('coin_transactions',         `DELETE FROM coin_transactions WHERE booking_id IN ${scope}`, [driverProfileId]);
+      await del('zipto_shield_transactions', `DELETE FROM zipto_shield_transactions WHERE booking_id IN ${scope}`, [driverProfileId]);
+      await del('driver_fraud_incidents',    `DELETE FROM driver_fraud_incidents WHERE driver_id = $1 OR booking_id IN ${scope}`, [driverProfileId]);
+      await del('customer_reports',          `DELETE FROM customer_reports WHERE booking_id IN ${scope}`, [driverProfileId]);
+      await del('support_tickets',           `DELETE FROM support_tickets WHERE booking_id IN ${scope}`, [driverProfileId]);
+      await del('coupon_usages',             `DELETE FROM coupon_usages WHERE booking_id IN ${scope}`, [driverProfileId]);
+      // Referrals are kept (they record a relationship); just unlink the booking.
+      await del('referrals_unlinked',        `UPDATE referrals SET qualifying_booking_id = NULL WHERE qualifying_booking_id IN ${scope}`, [driverProfileId]);
+
+      // ── 2. Driver-scoped money tables ──
+      await del('driver_wallet_transactions', `DELETE FROM driver_wallet_transactions WHERE driver_user_id = $1`, [userId]);
+      await del('driver_topup_requests',      `DELETE FROM driver_topup_requests WHERE driver_user_id = $1`, [userId]);
+      await del('driver_withdrawal_requests', `DELETE FROM driver_withdrawal_requests WHERE driver_profile_id = $1`, [driverProfileId]);
+
+      // ── 3. The bookings themselves ──
+      await del('bookings', `DELETE FROM bookings WHERE driver_id = $1`, [driverProfileId]);
+
+      // ── 4. Reset profile counters ──
+      await runner.query(
+        `UPDATE driver_profiles
+            SET wallet_balance = 0, total_trips = 0, average_rating = NULL,
+                wallet_frozen = false, wallet_freeze_reason = NULL
+          WHERE id = $1`,
+        [driverProfileId],
+      );
+
+      await runner.commitTransaction();
+    } catch (err: any) {
+      await runner.rollbackTransaction();
+      this.logger.error(`[Admin] resetDriverData failed for ${driverProfileId}: ${err?.message ?? err}`);
+      throw new BadRequestException(`Failed to reset driver data: ${err?.message ?? 'unknown error'}`);
+    } finally {
+      await runner.release();
+    }
 
     this.logger.log(
-      `[Admin] Driver data reset: driver=${driverProfileId} (${profile.user?.name ?? userId})`,
+      `[Admin] Driver data reset: driver=${driverProfileId} (${profile.user?.name ?? userId}) — ${JSON.stringify(cleared)}`,
     );
 
     return {
       message: `All earnings, wallet, and ride data cleared for driver ${profile.user?.name ?? userId}.`,
-      cleared: {
-        wallet_transactions: walletDeleted ?? 0,
-        topup_requests:      topupDeleted  ?? 0,
-        withdrawals:         withdrawalDeleted ?? 0,
-        payments:            paymentDeleted ?? 0,
-        ratings:             ratingDeleted  ?? 0,
-        bookings:            bookingDeleted ?? 0,
-      },
+      cleared,
     };
   }
 

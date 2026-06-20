@@ -285,6 +285,14 @@ export class AdminController {
     return this.adminService.getAllDrivers(query);
   }
 
+  // NOTE: must be declared before 'drivers/:id' so 'live' isn't matched as an id.
+  @Get('drivers/live')
+  @ApiOperation({ summary: 'Live feed of online/busy drivers with GPS location' })
+  @ApiResponse({ status: 200, description: 'Live drivers retrieved' })
+  async getLiveDrivers() {
+    return this.adminService.getLiveDrivers();
+  }
+
   @Get('drivers/:id')
   @ApiOperation({ summary: 'Get driver details by ID' })
   @ApiResponse({ status: 200, description: 'Driver details retrieved' })
