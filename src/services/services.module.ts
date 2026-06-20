@@ -10,10 +10,11 @@ import { FcmService } from './fcm.service';
 import { S3Service } from './s3.service';
 import { RedisService } from './redis.service';
 import { ExotelService } from './exotel.service';
+import { EmailService } from './email.service';
 
 @Global()
 @Module({
-  providers: [MapboxService, RazorpayService, RazorpayXService, HdfcPaymentService, CashfreeService, CashfreePayoutService, SmsService, FcmService, S3Service, RedisService, ExotelService],
-  exports: [MapboxService, RazorpayService, RazorpayXService, HdfcPaymentService, CashfreeService, CashfreePayoutService, SmsService, FcmService, S3Service, RedisService, ExotelService],
+  providers: [MapboxService, RazorpayService, RazorpayXService, HdfcPaymentService, CashfreeService, CashfreePayoutService, SmsService, FcmService, S3Service, RedisService, ExotelService, EmailService],
+  exports: [MapboxService, RazorpayService, RazorpayXService, HdfcPaymentService, CashfreeService, CashfreePayoutService, SmsService, FcmService, S3Service, RedisService, ExotelService, EmailService],
 })
 export class ServicesModule {}

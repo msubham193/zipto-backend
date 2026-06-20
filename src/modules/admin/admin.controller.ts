@@ -3,7 +3,11 @@ import { RawBodyRequest } from '@nestjs/common';
 import { Request } from 'express';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { Public } from '../../common/decorators/public.decorator';
+import { GetUser } from '../../common/decorators/get-user.decorator';
+import { User } from '../auth/entities/user.entity';
 import { AdminService } from './admin.service';
+import { AdminAccountService } from './admin-account.service';
+import { ChangePasswordDto, CreateAdminDto, UpdateAdminStatusDto } from './dto/admin-account.dto';
 import { BookingService } from '../booking/booking.service';
 import { NotificationService } from '../notification/notification.service';
 import { Roles } from '../../common/decorators/roles.decorator';
@@ -25,6 +29,7 @@ import { TransactionLogService } from '../transaction-log/transaction-log.servic
 export class AdminController {
   constructor(
     private readonly adminService: AdminService,
+    private readonly adminAccountService: AdminAccountService,
     private readonly bookingService: BookingService,
     private readonly notificationService: NotificationService,
     private readonly systemSettings: SystemSettingsService,
@@ -32,6 +37,50 @@ export class AdminController {
     private readonly referralService: ReferralService,
     private readonly transactionLog: TransactionLogService,
   ) {}
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Account & team management (profile password change + super-admin team mgmt)
+  // ─────────────────────────────────────────────────────────────────────────
+
+  @Post('profile/change-password/send-otp')
+  @ApiOperation({ summary: 'Email a verification code to confirm a password change' })
+  async sendPasswordChangeOtp(@GetUser() user: User) {
+    return this.adminAccountService.requestPasswordChangeOtp(user);
+  }
+
+  @Post('profile/change-password')
+  @ApiOperation({ summary: 'Change own password (current password + email OTP)' })
+  async changePassword(@GetUser() user: User, @Body() dto: ChangePasswordDto) {
+    return this.adminAccountService.changePassword(user.id, dto);
+  }
+
+  @Get('team')
+  @ApiOperation({ summary: 'List admin team members (super-admin only)' })
+  async listAdmins(@GetUser() user: User) {
+    return this.adminAccountService.listAdmins(user);
+  }
+
+  @Post('team')
+  @ApiOperation({ summary: 'Create a new admin and email a temp password (super-admin only)' })
+  async createAdmin(@GetUser() user: User, @Body() dto: CreateAdminDto) {
+    return this.adminAccountService.createAdmin(user, dto);
+  }
+
+  @Put('team/:id/status')
+  @ApiOperation({ summary: 'Enable/disable an admin (super-admin only)' })
+  async setAdminStatus(
+    @GetUser() user: User,
+    @Param('id') id: string,
+    @Body() dto: UpdateAdminStatusDto,
+  ) {
+    return this.adminAccountService.setAdminStatus(user, id, dto.is_active);
+  }
+
+  @Post('team/:id/reset-password')
+  @ApiOperation({ summary: 'Reset an admin password and email a new temp one (super-admin only)' })
+  async resetAdminPassword(@GetUser() user: User, @Param('id') id: string) {
+    return this.adminAccountService.resetAdminPassword(user, id);
+  }
 
   // ─────────────────────────────────────────────────────────────────────────
   // Transaction ledger (unified audit log of every money/coin movement)

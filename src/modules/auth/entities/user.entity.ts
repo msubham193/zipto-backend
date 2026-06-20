@@ -47,6 +47,16 @@ export class User {
   @Column({ type: 'boolean', default: true })
   is_active: boolean;
 
+  // Root super-admin. Only this account may create/manage other admins.
+  // Seeded for the configured SUPER_ADMIN_EMAIL on boot.
+  @Column({ type: 'boolean', default: false })
+  is_super_admin: boolean;
+
+  // Forces a password reset on next login (set for freshly-invited admins who
+  // received a temporary password). Cleared once they set their own password.
+  @Column({ type: 'boolean', default: false })
+  must_change_password: boolean;
+
   // Self-service account deletion (soft delete + PII scrub). The row is kept so
   // bookings/payments/ledger references stay valid for accounting & legal, but
   // PII is anonymized and the account can no longer log in.

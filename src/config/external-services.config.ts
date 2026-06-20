@@ -30,6 +30,31 @@ export default registerAs('externalServices', () => ({
     peId         : '1101559440000094860',
     ctId         : '1107177908307247477',
   },
+  smtp: {
+    // Transactional email (admin OTP, admin invites). Gmail SMTP with an
+    // App Password (NOT the account password) — generated at
+    // https://myaccount.google.com/apppasswords with 2FA enabled.
+    host  : process.env.SMTP_HOST || 'smtp.gmail.com',
+    port  : parseInt(process.env.SMTP_PORT || '465', 10),
+    secure: (process.env.SMTP_SECURE ?? 'true') === 'true', // true for 465, false for 587
+    user  : process.env.SMTP_USER || '',
+    pass  : (process.env.SMTP_PASS || '').replace(/\s+/g, ''), // app passwords are shown space-separated
+    from  : process.env.SMTP_FROM || 'Zipto <ride.zipto@gmail.com>',
+  },
+  admin: {
+    // Public URL of the admin panel — used in invite/notification emails.
+    panelUrl       : process.env.ADMIN_PANEL_URL || 'https://admin.ridezipto.com',
+    // The single root super-admin who may create/manage other admins.
+    superAdminEmail: (process.env.SUPER_ADMIN_EMAIL || 'ashwini@ridezipto.com').trim().toLowerCase(),
+    // Initial password seeded for the super-admin if the account doesn't exist yet.
+    superAdminPassword: process.env.SUPER_ADMIN_PASSWORD || 'Admin@123',
+    superAdminName : process.env.SUPER_ADMIN_NAME || 'Ashwini',
+    // Legacy/default admin logins to retire (disabled on boot). Comma-separated.
+    legacyAdminEmails: (process.env.LEGACY_ADMIN_EMAILS || 'admin@skido.com,admin@zipto.in')
+      .split(',')
+      .map((e) => e.trim().toLowerCase())
+      .filter(Boolean),
+  },
   exotel: {
     sid:      process.env.EXOTEL_SID || '',
     apiKey:   process.env.EXOTEL_API_KEY || '',

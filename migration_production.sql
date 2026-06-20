@@ -249,5 +249,28 @@ CREATE INDEX IF NOT EXISTS idx_users_is_deleted ON users (is_deleted);
 ALTER TABLE bookings
   ADD COLUMN IF NOT EXISTS customer_gstin VARCHAR(15) NULL;
 
+-- ── 14. Admin team management (super-admin + forced password reset) ──
+-- New admin flags. The root super-admin row itself is created/reconciled at
+-- app boot by AdminAccountService (it hashes the seed password with bcrypt),
+-- so we only add columns here and promote the row if it already exists.
+
+ALTER TABLE users
+  ADD COLUMN IF NOT EXISTS is_super_admin BOOLEAN NOT NULL DEFAULT FALSE,
+  ADD COLUMN IF NOT EXISTS must_change_password BOOLEAN NOT NULL DEFAULT FALSE;
+
+-- Promote the configured super-admin if the account already exists. (If it
+-- doesn't exist yet, the boot seeder creates it with the seed password.)
+UPDATE users
+   SET is_super_admin = TRUE, role = 'admin', is_active = TRUE
+ WHERE lower(email) = 'ashwini@ridezipto.com';
+
+-- Retire legacy/default admin logins so only the super-admin (and panel-created
+-- admins) can sign in. The boot seeder also enforces this on every start.
+UPDATE users
+   SET is_active = FALSE, refresh_token = NULL
+ WHERE role = 'admin'
+   AND is_super_admin = FALSE
+   AND lower(email) IN ('admin@skido.com', 'admin@zipto.in');
+
 -- ── Done ──────────────────────────────────────────────────────
 SELECT 'Migration complete' AS result;
