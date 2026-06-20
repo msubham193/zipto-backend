@@ -16,6 +16,7 @@ import { NotificationService } from '../notification/notification.service';
 import { TransactionLogService } from '../transaction-log/transaction-log.service';
 import { BookingGateway } from '../booking/booking.gateway';
 import { SystemSettingsService } from '../settings/system-settings.service';
+import { DriverService } from '../driver/driver.service';
 import { getPaginationMeta } from '../../common/utils/helpers.util';
 
 @Injectable()
@@ -34,6 +35,7 @@ export class PaymentService {
     private bookingGateway: BookingGateway,
     private transactionLog: TransactionLogService,
     private systemSettings: SystemSettingsService,
+    private driverService: DriverService,
   ) {}
 
   /** Public backend base (incl. /api) used for Cashfree return/notify URLs. */
@@ -419,8 +421,13 @@ export class PaymentService {
         await this.creditWalletForCashfreeOrder(customerId, orderId, orderAmount);
         return;
       }
-      // Driver wallet top-up is confirmed by the rider app's verify call.
-      if (purpose === 'driver_topup') return;
+      // Driver wallet top-up. Normally confirmed by the rider app's verify call,
+      // but we credit here too as an authoritative fallback so a paid top-up is
+      // never stranded if the app closed before verifying (idempotent).
+      if (purpose === 'driver_topup') {
+        await this.driverService.creditCashfreeTopupFromWebhook(orderId);
+        return;
+      }
       // Otherwise it's a booking payment.
       await this.markCashfreePaymentComplete(orderId, paymentId ? String(paymentId) : undefined, orderAmount);
     } else if (paymentStatus === 'FAILED' || type === 'PAYMENT_FAILED_WEBHOOK') {

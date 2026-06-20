@@ -27,7 +27,7 @@ import {
   ApiBody,
 } from '@nestjs/swagger';
 import { DriverService } from './driver.service';
-import { DriverWalletService } from './driver-wallet.service';
+import { DriverWalletService, WALLET_SUSPENSION_THRESHOLD } from './driver-wallet.service';
 import { SystemSettingsService } from '../settings/system-settings.service';
 import {
   UpdateDriverDto,
@@ -472,9 +472,9 @@ export class DriverController {
       await this.driverWalletService.getTransactions(user.id, page, limit);
     return {
       balance,
-      suspension_threshold: -300,
+      suspension_threshold: WALLET_SUSPENSION_THRESHOLD,
       low_balance_threshold: 100,
-      is_suspended: balance < -500,
+      is_suspended: balance < WALLET_SUSPENSION_THRESHOLD,
       transactions: {
         items,
         total,

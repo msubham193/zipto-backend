@@ -1433,33 +1433,66 @@ export class DriverService {
    * wallet exactly once.
    */
   async verifyCashfreeTopup(userId: string, orderId: string): Promise<{ new_balance: number; status: string }> {
+    return this.creditCashfreeTopup(orderId, userId);
+  }
+
+  /**
+   * Webhook-driven fallback for driver wallet top-ups. The PG server-to-server
+   * webhook calls this so a top-up is still credited even if the rider app
+   * never calls verify (e.g. the driver force-closed the app after paying).
+   * Safe to race with verifyCashfreeTopup — the conditional status flip in
+   * creditCashfreeTopup guarantees the wallet is credited at most once.
+   */
+  async creditCashfreeTopupFromWebhook(orderId: string): Promise<void> {
+    try {
+      await this.creditCashfreeTopup(orderId);
+    } catch (err: any) {
+      this.logger.warn(`[Topup] Webhook credit skipped for order=${orderId}: ${err?.message ?? err}`);
+    }
+  }
+
+  /**
+   * Verify a Cashfree top-up order is PAID and credit the driver's wallet
+   * exactly once. Shared by the app's verify call and the PG webhook fallback.
+   * @param expectedUserId when provided (app path), scopes the lookup to that
+   *        driver so one driver can't confirm another's order.
+   */
+  private async creditCashfreeTopup(
+    orderId: string,
+    expectedUserId?: string,
+  ): Promise<{ new_balance: number; status: string }> {
     const request = await this.topupRequestRepository.findOne({
-      where: { utr_number: orderId, driver_user_id: userId },
+      where: expectedUserId
+        ? { utr_number: orderId, driver_user_id: expectedUserId }
+        : { utr_number: orderId },
     });
     if (!request) throw new NotFoundException('Top-up request not found');
 
+    const driverUserId = request.driver_user_id;
+
     if (request.status === TopupRequestStatus.APPROVED) {
-      return { new_balance: await this.driverWalletService.getWalletBalance(userId), status: 'approved' };
+      return { new_balance: await this.driverWalletService.getWalletBalance(driverUserId), status: 'approved' };
     }
 
     const order = await this.cashfreeService.getOrder(orderId);
     if (!order.isPaid) {
       return {
-        new_balance: await this.driverWalletService.getWalletBalance(userId),
+        new_balance: await this.driverWalletService.getWalletBalance(driverUserId),
         status: order.orderStatus,
       };
     }
 
+    // Single-flight: only the caller that flips PENDING→APPROVED credits the wallet.
     const updated = await this.topupRequestRepository.update(
       { id: request.id, status: TopupRequestStatus.PENDING },
       { status: TopupRequestStatus.APPROVED, remarks: `Cashfree paid: ${orderId}` },
     );
     if (!updated.affected) {
-      return { new_balance: await this.driverWalletService.getWalletBalance(userId), status: 'approved' };
+      return { new_balance: await this.driverWalletService.getWalletBalance(driverUserId), status: 'approved' };
     }
 
-    const new_balance = await this.driverWalletService.topUp(userId, Number(request.amount), orderId);
-    this.logger.log(`[Topup] Cashfree wallet credit ₹${request.amount} for driver=${userId} order=${orderId}`);
+    const new_balance = await this.driverWalletService.topUp(driverUserId, Number(request.amount), orderId);
+    this.logger.log(`[Topup] Cashfree wallet credit ₹${request.amount} for driver=${driverUserId} order=${orderId}`);
     return { new_balance, status: 'approved' };
   }
 

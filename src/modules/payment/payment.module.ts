@@ -8,9 +8,10 @@ import { AuthModule } from '../auth/auth.module';
 import { NotificationModule } from '../notification/notification.module';
 import { BookingModule } from '../booking/booking.module';
 import { SettingsModule } from '../settings/settings.module';
+import { DriverModule } from '../driver/driver.module';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Payment, Booking]), AuthModule, NotificationModule, BookingModule, SettingsModule],
+  imports: [TypeOrmModule.forFeature([Payment, Booking]), AuthModule, NotificationModule, BookingModule, SettingsModule, DriverModule],
   controllers: [PaymentController],
   providers: [PaymentService],
   exports: [PaymentService],
