@@ -571,6 +571,13 @@ export class AuthService {
 
   async logout(userId: string) {
     await this.userRepository.update(userId, { refresh_token: undefined });
+    // Take drivers offline on logout so dispatch immediately stops matching them.
+    // (Affects 0 rows for non-drivers.) Without this a logged-out driver stays
+    // 'online' with a stale location and keeps receiving booking offers.
+    await this.driverProfileRepository.update(
+      { user_id: userId },
+      { availability_status: AvailabilityStatus.OFFLINE },
+    );
     return { message: 'Logged out successfully' };
   }
 

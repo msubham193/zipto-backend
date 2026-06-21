@@ -824,12 +824,20 @@ export class BookingService {
       return [];
     }
 
-    const params: any[] = [lng, lat, radiusKm * 1000];
+    // Only match drivers whose GPS is fresh. A driver who logged out / closed the
+    // app / drove away stops pinging, so their location goes stale — without this
+    // a 100 km-away (or logged-out) driver could still be offered a nearby ride.
+    const maxAgeMin = Math.max(
+      1,
+      parseInt(process.env.DISPATCH_LOCATION_MAX_AGE_MINUTES || '5', 10) || 5,
+    );
+
+    const params: any[] = [lng, lat, radiusKm * 1000, maxAgeMin];
     let vehicleFilter = '';
 
     if (vehicleType) {
       params.push(vehicleType);
-      vehicleFilter = `AND v.vehicle_type = $4`;
+      vehicleFilter = `AND v.vehicle_type = $5`;
     }
 
     try {
@@ -846,6 +854,8 @@ export class BookingService {
           ${vehicleFilter}
         WHERE dp.availability_status = 'online'
           AND dp.current_location IS NOT NULL
+          AND dp.last_location_at IS NOT NULL
+          AND dp.last_location_at > NOW() - ($4 * INTERVAL '1 minute')
           AND ST_DWithin(
             dp.current_location,
             ST_SetSRID(ST_MakePoint($1, $2), 4326)::geography,

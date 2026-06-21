@@ -175,7 +175,8 @@ export class DriverService {
     // validates them as lat/lng.
     await this.driverProfileRepository.manager.query(
       `UPDATE driver_profiles
-         SET current_location = ST_SetSRID(ST_MakePoint($1, $2), 4326)
+         SET current_location = ST_SetSRID(ST_MakePoint($1, $2), 4326),
+             last_location_at = NOW()
        WHERE user_id = $3`,
       [longitude, latitude, userId],
     );

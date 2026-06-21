@@ -85,6 +85,13 @@ export class DriverProfile {
   @Index({ spatial: true })
   current_location: string; // Will store as GeoJSON Point
 
+  // Timestamp of the last GPS ping. Dispatch only matches drivers whose location
+  // is fresh, so a driver who logged out / killed the app / drove away (and
+  // stopped pinging) is never offered a booking on a stale location.
+  @Column({ type: 'timestamp', nullable: true })
+  @Index()
+  last_location_at: Date | null;
+
   @Column({ type: 'decimal', precision: 10, scale: 2, default: 0 })
   wallet_balance: number;
 

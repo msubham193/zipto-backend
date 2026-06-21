@@ -272,5 +272,21 @@ UPDATE users
    AND is_super_admin = FALSE
    AND lower(email) IN ('admin@skido.com', 'admin@zipto.in');
 
+-- ── 15. Dispatch location freshness (stop stale/logged-out drivers matching) ──
+-- Drivers who log out / kill the app / drive away stop sending GPS. Dispatch now
+-- only matches drivers whose last ping is recent, so a stale-location driver
+-- (100 km away, or logged out) is never offered a nearby booking.
+
+ALTER TABLE driver_profiles
+  ADD COLUMN IF NOT EXISTS last_location_at TIMESTAMP NULL;
+
+CREATE INDEX IF NOT EXISTS idx_driver_last_location_at
+  ON driver_profiles (last_location_at);
+
+-- Take any currently-stuck 'online' drivers offline once; they'll come back
+-- online (and set last_location_at) on their next ping/toggle.
+UPDATE driver_profiles SET availability_status = 'offline'
+ WHERE availability_status = 'online' AND last_location_at IS NULL;
+
 -- ── Done ──────────────────────────────────────────────────────
 SELECT 'Migration complete' AS result;
