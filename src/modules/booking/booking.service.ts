@@ -1585,12 +1585,19 @@ export class BookingService {
     const skidoCommission = this.round(finalFare * (commissionPercent / 100));
     const driverEarnings = this.round(finalFare - skidoCommission - PLATFORM_FEE - SHIELD_FEE);
 
+    // Customer-facing platform fee that was actually charged on this order
+    // (config-driven, already baked into estimated_fare). Keep it on the
+    // breakdown so the invoice line items foot to the total — do NOT overwrite
+    // it with the ₹2 internal driver-side cut above.
+    const fareSettings = await this.systemSettings.getFareSettings();
+    const customerPlatformFee = this.round(fareSettings.platform_fee);
+
     // Update fare breakdown
     const fareBreakdown = booking.fare_breakdown || ({} as any);
     fareBreakdown.waiting_charge = waitingCharge;
     fareBreakdown.toll_amount = tollAmount;
     fareBreakdown.skido_commission = skidoCommission;
-    fareBreakdown.platform_fee = PLATFORM_FEE;
+    fareBreakdown.platform_fee = customerPlatformFee;
     fareBreakdown.shield_fee = SHIELD_FEE;
     fareBreakdown.driver_earnings = driverEarnings;
 

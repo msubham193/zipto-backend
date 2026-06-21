@@ -33,14 +33,17 @@ SET fare_breakdown = b.fare_breakdown || jsonb_build_object(
       'sgst_amount',      round(s.tx * s.gp / 2 / 100, 2),
       'gst_amount',       round(s.tx * s.gp / 2 / 100, 2) * 2,
       'platform_fee_gst', round(s.tx * s.gp / 2 / 100, 2) * 2,
+      'platform_fee',     s.pf,
       'total_payable',    s.tx + round(s.tx * s.gp / 2 / 100, 2) * 2 + s.pf
     ),
     estimated_fare = s.tx + round(s.tx * s.gp / 2 / 100, 2) * 2 + s.pf
 FROM (
   SELECT id,
-         (fare_breakdown->>'delivery_charge')::numeric            AS tx,
-         (fare_breakdown->>'gst_percent')::numeric                AS gp,
-         COALESCE((fare_breakdown->>'platform_fee')::numeric, 0)  AS pf
+         (fare_breakdown->>'delivery_charge')::numeric AS tx,
+         (fare_breakdown->>'gst_percent')::numeric     AS gp,
+         -- Customer-facing platform fee from config (existing rows may have had
+         -- it overwritten with the ₹2 internal driver cut on completion).
+         COALESCE((SELECT value::numeric FROM system_settings WHERE key = 'platform_fee' LIMIT 1), 5) AS pf
     FROM bookings
    WHERE (fare_breakdown->>'gst_amount')::numeric > 0
 ) s
@@ -55,6 +58,8 @@ WHERE p.booking_id = b.id
 
 \echo '--- AFTER ---'
 SELECT b.id,
+       b.fare_breakdown->>'delivery_charge' AS taxable,
+       b.fare_breakdown->>'platform_fee'  AS platform_fee,
        b.fare_breakdown->>'cgst_amount'  AS cgst,
        b.fare_breakdown->>'sgst_amount'  AS sgst,
        b.fare_breakdown->>'gst_amount'   AS gst,
