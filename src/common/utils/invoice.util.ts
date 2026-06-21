@@ -117,7 +117,7 @@ export function renderInvoiceHtml(inv: InvoiceData): string {
   .total td{padding:12px;background:#f0fdf4;font-weight:800;font-size:15px}
   .note{margin-top:16px;font-size:12px;color:#b45309;background:#fffbeb;border:1px solid #fde68a;padding:10px;border-radius:8px}
   .foot{margin-top:28px;text-align:center;color:#94a3b8;font-size:11px}
-  .btn{display:inline-block;background:#16a34a;color:#fff;border:0;padding:11px 26px;border-radius:8px;font-size:14px;cursor:pointer;text-decoration:none}
+  .btn{display:inline-block;background:#16a34a;color:#fff;border:0;padding:11px 26px;border-radius:8px;font-size:14px;font-family:inherit;font-weight:600;cursor:pointer;text-decoration:none}
   @media print{body{padding:0;background:#fff}.wrap{border:0;border-radius:0}.noprint{display:none}}
 </style></head>
 <body><div class="wrap">
@@ -166,8 +166,16 @@ export function renderInvoiceHtml(inv: InvoiceData): string {
   ${inv.note ? `<div class="note">${esc(inv.note)}</div>` : ''}
 
   <div class="noprint" style="text-align:center;margin-top:22px">
-    <a class="btn" href="javascript:window.print()">Download / Print PDF</a>
+    <button type="button" class="btn" onclick="window.print()">Download / Print PDF</button>
+    <p class="muted" style="margin-top:10px">Tip: choose “Save as PDF” in the print dialog. On phones, you can also use your browser menu → Print / Share.</p>
   </div>
   <div class="foot">This is a computer-generated invoice and does not require a signature.<br/>© ${new Date().getFullYear()} Zipto Hyperlogistics Pvt. Ltd.</div>
+  <script>
+    // Some in-app browsers strip inline handlers; bind defensively too.
+    document.addEventListener('DOMContentLoaded', function () {
+      var b = document.querySelector('.btn');
+      if (b) b.addEventListener('click', function () { try { window.print(); } catch (e) {} });
+    });
+  </script>
 </div></body></html>`;
 }
