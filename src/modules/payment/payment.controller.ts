@@ -205,8 +205,29 @@ export class PaymentController {
 
   @Get('invoice/:bookingId')
   @Roles('customer', 'driver')
-  @ApiOperation({ summary: 'Generate invoice' })
+  @ApiOperation({ summary: 'Generate invoice (JSON)' })
   async generateInvoice(@Param('bookingId') bookingId: string, @GetUser() user: User) {
     return this.paymentService.generateInvoice(bookingId, user.id);
+  }
+
+  // Print-ready HTML invoice opened in the device browser from the app's
+  // "Download Invoice" button. Public route; auth is the JWT in `?token=`.
+  @Public()
+  @Get('invoice/:bookingId/view')
+  @Header('Content-Type', 'text/html; charset=utf-8')
+  @ApiOperation({ summary: 'Render the invoice as a downloadable HTML page' })
+  async viewInvoice(
+    @Param('bookingId') bookingId: string,
+    @Query('token') token: string,
+    @Res() res: Response,
+  ) {
+    try {
+      const html = await this.paymentService.getInvoiceHtmlByToken(bookingId, token);
+      res.send(html);
+    } catch (err: any) {
+      res
+        .status(err?.status || 400)
+        .send(`<!doctype html><meta charset="utf-8"><body style="font-family:sans-serif;padding:40px;text-align:center;color:#b91c1c">${err?.message || 'Could not load invoice.'}</body>`);
+    }
   }
 }

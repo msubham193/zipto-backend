@@ -17,7 +17,9 @@ import { TransactionLogService } from '../transaction-log/transaction-log.servic
 import { BookingGateway } from '../booking/booking.gateway';
 import { SystemSettingsService } from '../settings/system-settings.service';
 import { DriverService } from '../driver/driver.service';
+import { JwtService } from '@nestjs/jwt';
 import { getPaginationMeta } from '../../common/utils/helpers.util';
+import { buildInvoiceData, renderInvoiceHtml } from '../../common/utils/invoice.util';
 
 @Injectable()
 export class PaymentService {
@@ -36,6 +38,7 @@ export class PaymentService {
     private transactionLog: TransactionLogService,
     private systemSettings: SystemSettingsService,
     private driverService: DriverService,
+    private jwtService: JwtService,
   ) {}
 
   /** Public backend base (incl. /api) used for Cashfree return/notify URLs. */
@@ -620,47 +623,40 @@ export class PaymentService {
       throw new BadRequestException('Access denied');
     }
 
-    const booking = payment.booking;
-    const bd = (booking.fare_breakdown || {}) as any;
     const tax = await this.systemSettings.getTaxSettings();
-    const customerGstin = booking.customer_gstin || null;
-    // A B2B tax invoice requires both the buyer's GSTIN and Zipto's GSTIN.
-    const isTaxInvoice = !!customerGstin && !!tax.zipto_gstin;
+    return buildInvoiceData(payment.booking, payment, tax as any);
+  }
 
-    return {
-      invoice_number: `ZPT-${bookingId.slice(0, 8).toUpperCase()}`,
-      invoice_date: payment.created_at ?? new Date(),
-      is_tax_invoice: isTaxInvoice,
-      seller: {
-        name: tax.zipto_legal_name,
-        gstin: tax.zipto_gstin || null,
-        address: tax.zipto_invoice_address || null,
-        state: tax.zipto_gst_state,
-      },
-      buyer: {
-        name: booking.name || booking.customer?.name || null,
-        phone: booking.mobile_number || booking.customer?.phone || null,
-        gstin: customerGstin,
-      },
-      booking_id: bookingId,
-      payment_id: payment.id,
-      description: `Delivery service${booking.pickup_address ? ` (${booking.pickup_address} → ${booking.drop_address})` : ''}`,
-      charges: {
-        delivery_charge: bd.delivery_charge ?? null,
-        platform_fee: bd.platform_fee ?? 0,
-        gst_percent: bd.gst_percent ?? 0,
-        cgst_amount: bd.cgst_amount ?? 0,
-        sgst_amount: bd.sgst_amount ?? 0,
-        gst_amount: bd.gst_amount ?? 0,
-      },
-      total: Number(payment.amount),
-      payment_method: payment.payment_method,
-      payment_status: payment.payment_status,
-      note:
-        customerGstin && !tax.zipto_gstin
-          ? 'Zipto GSTIN not yet configured — set it in Admin → GST settings to issue a valid tax invoice.'
-          : undefined,
-    };
+  /**
+   * Render the invoice as a print-ready HTML page for the in-app "Download
+   * Invoice" link. Auth is via a short JWT passed in the URL (`token`) because
+   * the page is opened in the device browser, which can't send the bearer
+   * header. The token's user must own the booking (customer or driver).
+   */
+  async getInvoiceHtmlByToken(bookingId: string, token: string): Promise<string> {
+    if (!token) throw new BadRequestException('Missing token');
+    let userId: string;
+    try {
+      const payload = this.jwtService.verify(token, {
+        secret: this.configService.get<string>('jwt.secret'),
+      });
+      userId = payload?.sub;
+    } catch {
+      throw new BadRequestException('Invalid or expired link');
+    }
+    if (!userId) throw new BadRequestException('Invalid link');
+
+    const payment = await this.paymentRepository.findOne({
+      where: { booking_id: bookingId },
+      relations: ['booking', 'booking.customer', 'booking.driver'],
+    });
+    if (!payment || !payment.booking) throw new NotFoundException('Invoice not found');
+    if (payment.booking.customer_id !== userId && payment.booking.driver_id !== userId) {
+      throw new BadRequestException('Access denied');
+    }
+
+    const tax = await this.systemSettings.getTaxSettings();
+    return renderInvoiceHtml(buildInvoiceData(payment.booking, payment, tax as any));
   }
 
   // ─────────────────────────────────────────────────────────────────────────

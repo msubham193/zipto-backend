@@ -43,6 +43,8 @@ import { NotificationService } from '../notification/notification.service';
 import { ZiptoShieldService } from '../zipto-shield/zipto-shield.service';
 import { DriverWalletService } from '../driver/driver-wallet.service';
 import { CouponService } from '../coupon/coupon.service';
+import { EmailService } from '../../services/email.service';
+import { buildInvoiceData, renderInvoiceHtml } from '../../common/utils/invoice.util';
 
 @Injectable()
 export class BookingService {
@@ -74,7 +76,38 @@ export class BookingService {
     private ziptoShieldService: ZiptoShieldService,
     private driverWalletService: DriverWalletService,
     private couponService: CouponService,
+    private emailService: EmailService,
   ) {}
+
+  /**
+   * Email the GST/tax invoice to the customer once a delivery is completed.
+   * Fire-and-forget — never blocks or fails trip completion. Skips silently if
+   * the customer has no email on file.
+   */
+  private async emailInvoiceOnDelivery(bookingId: string): Promise<void> {
+    try {
+      const payment = await this.paymentRepository.findOne({
+        where: { booking_id: bookingId },
+        relations: ['booking', 'booking.customer'],
+        order: { created_at: 'DESC' },
+      });
+      if (!payment || !payment.booking) return;
+
+      const booking = payment.booking;
+      const email = booking.customer?.email;
+      if (!email) return; // phone-only customer — nothing to email
+
+      const tax = await this.systemSettings.getTaxSettings();
+      const invoice = buildInvoiceData(booking, payment, tax);
+      const html = renderInvoiceHtml(invoice);
+      const subject = `${invoice.is_tax_invoice ? 'Tax Invoice' : 'Invoice'} ${invoice.invoice_number} — Zipto`;
+
+      await this.emailService.sendMail(email, subject, html);
+      this.logger.log(`[Invoice] Emailed ${invoice.invoice_number} to ${email} for booking ${bookingId}`);
+    } catch (err: any) {
+      this.logger.warn(`[Invoice] Email-on-delivery failed for ${bookingId}: ${err?.message ?? err}`);
+    }
+  }
 
   private async ensureDefaultPricingRules() {
     if (this.pricingRulesInitialized) {
@@ -1651,6 +1684,9 @@ export class BookingService {
 
     // Zipto Shield: ₹1 contributed per completed booking (fire-and-forget)
     this.ziptoShieldService.contribute(savedBooking.id).catch(() => {});
+
+    // Email the GST/tax invoice to the customer (fire-and-forget, no email = skip)
+    this.emailInvoiceOnDelivery(savedBooking.id).catch(() => {});
 
     // FCM: notify customer trip is complete
     this.notificationService.pushToCustomer(
