@@ -98,26 +98,30 @@ DELETE FROM referrals WHERE referrer_id NOT IN (SELECT id FROM keep_users)
 UPDATE referrals SET qualifying_booking_id = NULL
   WHERE qualifying_booking_id::text IN (SELECT id::text FROM rm_bookings);
 
--- ── 2. Driver-scoped tables ───────────────────────────────────────────────
-DELETE FROM driver_wallet_transactions  WHERE driver_user_id NOT IN (SELECT id FROM keep_users);
+-- ── 2. Driver-scoped tables (BEFORE bookings — some carry a booking_id) ───
+-- Includes a kept driver's (Anil's) wallet rows that point at a removable
+-- booking, so the bookings DELETE below isn't blocked by an FK.
+DELETE FROM driver_wallet_transactions  WHERE driver_user_id NOT IN (SELECT id FROM keep_users)
+                                           OR booking_id::text IN (SELECT id::text FROM rm_bookings);
 DELETE FROM driver_topup_requests       WHERE driver_user_id NOT IN (SELECT id FROM keep_users);
 DELETE FROM driver_withdrawal_requests  WHERE driver_profile_id IN (SELECT id FROM rm_profiles);
 DELETE FROM driver_bank_accounts        WHERE driver_profile_id IN (SELECT id FROM rm_profiles);
-DELETE FROM vehicles                    WHERE driver_id IN (SELECT id FROM rm_profiles);
 
 -- ── 3. Customer-scoped tables ─────────────────────────────────────────────
 DELETE FROM wallet_transactions WHERE user_id NOT IN (SELECT id FROM keep_users);
 DELETE FROM user_blocks         WHERE customer_id NOT IN (SELECT id FROM keep_users)
                                    OR blocked_by  NOT IN (SELECT id FROM keep_users);
 
--- ── 4. Bookings themselves ────────────────────────────────────────────────
+-- ── 4. Bookings themselves (after their children; BEFORE vehicles) ────────
 -- Detach any reassignment pointer to a removable driver on surviving bookings.
 UPDATE bookings SET original_driver_id = NULL
   WHERE original_driver_id IS NOT NULL
     AND original_driver_id NOT IN (SELECT id FROM keep_users);
 DELETE FROM bookings WHERE id IN (SELECT id FROM rm_bookings);
 
--- ── 5. Profiles ───────────────────────────────────────────────────────────
+-- ── 5. Vehicles + profiles ────────────────────────────────────────────────
+-- bookings.vehicle_id references vehicles, so vehicles must go AFTER bookings.
+DELETE FROM vehicles          WHERE driver_id IN (SELECT id FROM rm_profiles);
 DELETE FROM driver_profiles   WHERE user_id NOT IN (SELECT id FROM keep_users);
 DELETE FROM customer_profiles WHERE user_id NOT IN (SELECT id FROM keep_users);
 
