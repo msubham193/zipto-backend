@@ -129,6 +129,11 @@ export class BookingService {
     return Math.round(value);
   }
 
+  /** Round to 2 decimal places (money values like GST that aren't whole rupees). */
+  private round2(value: number): number {
+    return Math.round((Number(value) || 0) * 100) / 100;
+  }
+
   /**
    * Estimate fare for a trip
    */
@@ -198,14 +203,17 @@ export class BookingService {
       deliveryCharge = minimumFare as number;
     }
 
-    // 5. GST on the delivery charge. Intra-state supply → split CGST + SGST
-    //    (each = gst%/2); used for the B2B tax invoice.
-    const gstAmount = this.round(deliveryCharge * (gstPercent / 100));
-    const cgstAmount = this.round(gstAmount / 2);
-    const sgstAmount = this.round(gstAmount - cgstAmount);
+    // 5. GST on the delivery charge. Intra-state supply → CGST + SGST, each
+    //    computed INDEPENDENTLY at gst%/2 to 2 decimals. (Never round the total
+    //    then halve it — that skews 9%+9% into e.g. ₹4 + ₹3 instead of the
+    //    correct ₹3.60 + ₹3.60.) GST total is the sum so the invoice foots.
+    const halfRate = gstPercent / 2;
+    const cgstAmount = this.round2(deliveryCharge * (halfRate / 100));
+    const sgstAmount = this.round2(deliveryCharge * (halfRate / 100));
+    const gstAmount = this.round2(cgstAmount + sgstAmount);
 
     // 6. Total the customer pays = delivery charge + GST + platform fee
-    const estimatedFare = this.round(deliveryCharge + gstAmount + platformFee);
+    const estimatedFare = this.round2(deliveryCharge + gstAmount + platformFee);
 
     // 7. Commission split on the delivery charge (pre-GST, excl. platform fee)
     const skidoCommission = this.round(deliveryCharge * (commissionPercent / 100));
