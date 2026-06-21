@@ -562,8 +562,24 @@ export class AuthService {
       if (!user || user.refresh_token !== refresh_token) {
         throw new UnauthorizedException('Invalid refresh token');
       }
+      if (!user.is_active) {
+        throw new UnauthorizedException('Account is deactivated');
+      }
 
-      return this.generateTokens(user);
+      // Issue a NEW access token only — keep the SAME refresh token. Rotating it
+      // here caused random logouts: when several requests 401 at once (token just
+      // expired), the first refresh rotated the token and the rest failed with
+      // the now-stale one → forced logout. The refresh token stays valid for its
+      // full lifetime, so concurrent refreshes are all idempotent.
+      const accessToken = this.jwtService.sign(
+        { sub: user.id, phone: user.phone, role: user.role },
+        {
+          secret: this.configService.get<string>('jwt.secret'),
+          expiresIn: this.configService.get<string>('jwt.expiresIn'),
+        },
+      );
+
+      return { access_token: accessToken, refresh_token };
     } catch {
       throw new UnauthorizedException('Invalid or expired refresh token');
     }
