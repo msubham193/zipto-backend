@@ -4,7 +4,10 @@
  * the in-app "Download Invoice". One source of truth so every channel issues an
  * identical GST/tax invoice.
  */
-import PDFDocument from 'pdfkit';
+// pdfkit is CommonJS (`export =`) and the project has esModuleInterop off, so a
+// default import compiles to `pdfkit_1.default` (undefined at runtime). Use the
+// CommonJS import form so `new PDFDocument()` resolves to the real constructor.
+import PDFDocument = require('pdfkit');
 
 export interface InvoiceData {
   invoice_number: string;

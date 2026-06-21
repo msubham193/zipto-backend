@@ -44,6 +44,7 @@ import { ZiptoShieldService } from '../zipto-shield/zipto-shield.service';
 import { DriverWalletService } from '../driver/driver-wallet.service';
 import { CouponService } from '../coupon/coupon.service';
 import { EmailService } from '../../services/email.service';
+import { S3Service } from '../../services/s3.service';
 import { buildInvoiceData, renderInvoiceHtml, buildInvoicePdf, invoiceFileName } from '../../common/utils/invoice.util';
 
 @Injectable()
@@ -77,6 +78,7 @@ export class BookingService {
     private driverWalletService: DriverWalletService,
     private couponService: CouponService,
     private emailService: EmailService,
+    private s3Service: S3Service,
   ) {}
 
   /**
@@ -972,21 +974,30 @@ export class BookingService {
       throw new ForbiddenException('You do not have access to this booking');
     }
 
-    // Attach driver profile stats + live location if driver is assigned
-    let driverStats: { average_rating: number | null; total_trips: number } | null = null;
+    // Attach driver profile stats + photo + live location if driver is assigned
+    let driverStats: {
+      average_rating: number | null;
+      total_trips: number;
+      profile_image: string | null;
+    } | null = null;
     let driverLocation: { latitude: number; longitude: number } | null = null;
     if (booking.driver_id) {
       const [profile] = await this.bookingRepository.manager.query(
-        `SELECT average_rating, total_trips,
+        `SELECT average_rating, total_trips, profile_image,
                 ST_Y(current_location::geometry) AS lat,
                 ST_X(current_location::geometry) AS lng
          FROM driver_profiles WHERE user_id = $1 LIMIT 1`,
         [booking.driver_id],
       );
       if (profile) {
+        // R2/S3 keys are private — hand the app a presigned URL it can load.
+        const profileImage = await this.s3Service
+          .getSignedUrl(profile.profile_image)
+          .catch(() => null);
         driverStats = {
           average_rating: profile.average_rating ? parseFloat(profile.average_rating) : null,
           total_trips: parseInt(profile.total_trips, 10) || 0,
+          profile_image: profileImage,
         };
         if (profile.lat && profile.lng) {
           driverLocation = {
