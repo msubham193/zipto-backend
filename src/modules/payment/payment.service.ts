@@ -19,7 +19,7 @@ import { SystemSettingsService } from '../settings/system-settings.service';
 import { DriverService } from '../driver/driver.service';
 import { JwtService } from '@nestjs/jwt';
 import { getPaginationMeta } from '../../common/utils/helpers.util';
-import { buildInvoiceData, renderInvoiceHtml } from '../../common/utils/invoice.util';
+import { buildInvoiceData, renderInvoiceHtml, buildInvoicePdf, invoiceFileName } from '../../common/utils/invoice.util';
 
 @Injectable()
 export class PaymentService {
@@ -657,6 +657,40 @@ export class PaymentService {
 
     const tax = await this.systemSettings.getTaxSettings();
     return renderInvoiceHtml(buildInvoiceData(payment.booking, payment, tax as any));
+  }
+
+  /**
+   * Build the invoice as a downloadable PDF for the in-app "Download Invoice"
+   * button — served with Content-Disposition: attachment so it downloads
+   * reliably on every phone (no dependence on window.print). Auth via the JWT
+   * in the URL (browser can't send the bearer header).
+   */
+  async getInvoicePdfByToken(bookingId: string, token: string): Promise<{ buffer: Buffer; filename: string }> {
+    if (!token) throw new BadRequestException('Missing token');
+    let userId: string;
+    try {
+      const payload = this.jwtService.verify(token, {
+        secret: this.configService.get<string>('jwt.secret'),
+      });
+      userId = payload?.sub;
+    } catch {
+      throw new BadRequestException('Invalid or expired link');
+    }
+    if (!userId) throw new BadRequestException('Invalid link');
+
+    const payment = await this.paymentRepository.findOne({
+      where: { booking_id: bookingId },
+      relations: ['booking', 'booking.customer', 'booking.driver'],
+    });
+    if (!payment || !payment.booking) throw new NotFoundException('Invoice not found');
+    if (payment.booking.customer_id !== userId && payment.booking.driver_id !== userId) {
+      throw new BadRequestException('Access denied');
+    }
+
+    const tax = await this.systemSettings.getTaxSettings();
+    const invoice = buildInvoiceData(payment.booking, payment, tax as any);
+    const buffer = await buildInvoicePdf(invoice);
+    return { buffer, filename: invoiceFileName(invoice) };
   }
 
   // ─────────────────────────────────────────────────────────────────────────

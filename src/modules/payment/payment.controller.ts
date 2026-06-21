@@ -210,8 +210,34 @@ export class PaymentController {
     return this.paymentService.generateInvoice(bookingId, user.id);
   }
 
-  // Print-ready HTML invoice opened in the device browser from the app's
-  // "Download Invoice" button. Public route; auth is the JWT in `?token=`.
+  // Downloadable PDF invoice — the app's "Download Invoice" opens this; the phone
+  // downloads the file directly (no window.print needed). Auth via `?token=`.
+  @Public()
+  @Get('invoice/:bookingId/pdf')
+  @ApiOperation({ summary: 'Download the invoice as a PDF' })
+  async downloadInvoicePdf(
+    @Param('bookingId') bookingId: string,
+    @Query('token') token: string,
+    @Res() res: Response,
+  ) {
+    try {
+      const { buffer, filename } = await this.paymentService.getInvoicePdfByToken(bookingId, token);
+      res.set({
+        'Content-Type': 'application/pdf',
+        'Content-Disposition': `attachment; filename="${filename}"`,
+        'Content-Length': String(buffer.length),
+        'Cache-Control': 'no-store',
+      });
+      res.end(buffer);
+    } catch (err: any) {
+      res
+        .status(err?.status || 400)
+        .send(`Could not generate the invoice: ${err?.message || 'unknown error'}`);
+    }
+  }
+
+  // Print-ready HTML invoice opened in the device browser (fallback / preview).
+  // Public route; auth is the JWT in `?token=`.
   @Public()
   @Get('invoice/:bookingId/view')
   @Header('Content-Type', 'text/html; charset=utf-8')

@@ -44,7 +44,7 @@ import { ZiptoShieldService } from '../zipto-shield/zipto-shield.service';
 import { DriverWalletService } from '../driver/driver-wallet.service';
 import { CouponService } from '../coupon/coupon.service';
 import { EmailService } from '../../services/email.service';
-import { buildInvoiceData, renderInvoiceHtml } from '../../common/utils/invoice.util';
+import { buildInvoiceData, renderInvoiceHtml, buildInvoicePdf, invoiceFileName } from '../../common/utils/invoice.util';
 
 @Injectable()
 export class BookingService {
@@ -102,7 +102,16 @@ export class BookingService {
       const html = renderInvoiceHtml(invoice);
       const subject = `${invoice.is_tax_invoice ? 'Tax Invoice' : 'Invoice'} ${invoice.invoice_number} — Zipto`;
 
-      await this.emailService.sendMail(email, subject, html);
+      // Attach the invoice as a PDF so the customer has a filable copy.
+      let attachments: Array<{ filename: string; content: Buffer; contentType?: string }> | undefined;
+      try {
+        const pdf = await buildInvoicePdf(invoice);
+        attachments = [{ filename: invoiceFileName(invoice), content: pdf, contentType: 'application/pdf' }];
+      } catch (e: any) {
+        this.logger.warn(`[Invoice] PDF attach failed for ${bookingId} (sending without): ${e?.message ?? e}`);
+      }
+
+      await this.emailService.sendMail(email, subject, html, undefined, attachments);
       this.logger.log(`[Invoice] Emailed ${invoice.invoice_number} to ${email} for booking ${bookingId}`);
     } catch (err: any) {
       this.logger.warn(`[Invoice] Email-on-delivery failed for ${bookingId}: ${err?.message ?? err}`);

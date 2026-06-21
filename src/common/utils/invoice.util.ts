@@ -1,9 +1,10 @@
 /**
- * Shared invoice builder + print-ready HTML renderer.
+ * Shared invoice builder + renderers (HTML for preview, PDF for download/email).
  * Used by: the customer invoice JSON endpoint, the email-on-delivery flow, and
- * the in-app "Download Invoice" (browser view). One source of truth so every
- * channel issues an identical GST/tax invoice.
+ * the in-app "Download Invoice". One source of truth so every channel issues an
+ * identical GST/tax invoice.
  */
+import PDFDocument from 'pdfkit';
 
 export interface InvoiceData {
   invoice_number: string;
@@ -178,4 +179,117 @@ export function renderInvoiceHtml(inv: InvoiceData): string {
     });
   </script>
 </div></body></html>`;
+}
+
+// Standard PDF fonts don't carry the ₹ glyph, so use "Rs" in the PDF.
+const rs = (n: number | null | undefined) =>
+  `Rs ${(Number(n) || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+/** A filesystem-safe filename for the invoice PDF. */
+export function invoiceFileName(inv: InvoiceData): string {
+  return `${inv.invoice_number.replace(/[^A-Za-z0-9_-]/g, '')}.pdf`;
+}
+
+/**
+ * Render the invoice as a real PDF (Buffer) — used for the in-app download
+ * (served with Content-Disposition: attachment) and the email attachment.
+ * Reliable on every phone, unlike window.print() in an in-app browser.
+ */
+export function buildInvoicePdf(inv: InvoiceData): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    try {
+      const doc = new PDFDocument({ size: 'A4', margin: 40 });
+      const chunks: Buffer[] = [];
+      doc.on('data', (c: Buffer) => chunks.push(c));
+      doc.on('end', () => resolve(Buffer.concat(chunks)));
+      doc.on('error', reject);
+
+      const L = 40, R = 555; // content bounds (A4 width 595 − margins)
+      const W = R - L;
+      const GREEN = '#16a34a', DARK = '#0f172a', MUTED = '#64748b';
+      const c = inv.charges;
+
+      // ── Header ──
+      doc.fillColor(GREEN).font('Helvetica-Bold').fontSize(24).text('ZIPTO', L, 40);
+      const title = inv.is_tax_invoice ? 'TAX INVOICE' : 'INVOICE';
+      doc.fillColor(DARK).font('Helvetica-Bold').fontSize(16).text(title, L, 42, { width: W, align: 'right' });
+      doc.fillColor(MUTED).font('Helvetica').fontSize(9)
+        .text(`No: ${inv.invoice_number}`, L, 64, { width: W, align: 'right' })
+        .text(`Date: ${fmtDate(inv.invoice_date)}`, L, 76, { width: W, align: 'right' });
+
+      // ── Seller ──
+      doc.fillColor(MUTED).font('Helvetica').fontSize(9);
+      let y = 70;
+      const sline = (t?: string | null) => { if (t) { doc.text(t, L, y, { width: 300 }); y += doc.heightOfString(t, { width: 300 }); } };
+      sline(inv.seller.name || 'Zipto Hyperlogistics Pvt. Ltd.');
+      sline(inv.seller.address);
+      sline(inv.seller.state ? `State: ${inv.seller.state}` : null);
+      sline(inv.seller.gstin ? `GSTIN: ${inv.seller.gstin}` : null);
+
+      // ── Rule ──
+      y = Math.max(y, 120) + 8;
+      doc.moveTo(L, y).lineTo(R, y).lineWidth(2).strokeColor(GREEN).stroke();
+      y += 16;
+
+      // ── Billed To / Order ──
+      const colX = 320;
+      doc.fillColor(MUTED).font('Helvetica-Bold').fontSize(9).text('BILLED TO', L, y).text('ORDER', colX, y);
+      y += 14;
+      doc.fillColor(DARK).font('Helvetica-Bold').fontSize(11).text(inv.buyer.name || 'Customer', L, y, { width: 260 });
+      doc.font('Helvetica').fontSize(9).fillColor(DARK)
+        .text(`Booking: ${String(inv.booking_id).slice(0, 8).toUpperCase()}`, colX, y);
+      let yb = y + 14, yo = y + 14;
+      if (inv.buyer.phone) { doc.text(inv.buyer.phone, L, yb, { width: 260 }); yb += 12; }
+      doc.text(inv.buyer.gstin ? `GSTIN: ${inv.buyer.gstin}` : 'B2C (no GSTIN)', L, yb, { width: 260 }); yb += 12;
+      doc.text(`Payment: ${(inv.payment_method || '').toUpperCase()} - ${inv.payment_status || ''}`, colX, yo); yo += 12;
+      y = Math.max(yb, yo) + 12;
+
+      // ── Description ──
+      doc.fillColor(MUTED).font('Helvetica').fontSize(9).text(inv.description, L, y, { width: W });
+      y += doc.heightOfString(inv.description, { width: W }) + 10;
+
+      // ── Line items ──
+      doc.rect(L, y - 2, W, 18).fill('#f1f5f9');
+      doc.fillColor(DARK).font('Helvetica-Bold').fontSize(10)
+        .text('Description', L + 6, y + 2, { width: 360 })
+        .text('Amount', L, y + 2, { width: W - 6, align: 'right' });
+      y += 20;
+
+      const drawRow = (label: string, val: string) => {
+        doc.font('Helvetica').fontSize(10).fillColor(DARK)
+          .text(label, L + 6, y, { width: 360 })
+          .text(val, L, y, { width: W - 6, align: 'right' });
+        y += 17;
+        doc.moveTo(L, y - 3).lineTo(R, y - 3).lineWidth(0.5).strokeColor('#e5e7eb').stroke();
+      };
+
+      const half = (Number(c.gst_percent) || 0) / 2;
+      drawRow('Delivery charge (taxable value)', rs(c.delivery_charge));
+      if (Number(c.platform_fee) > 0) drawRow('Platform fee', rs(c.platform_fee));
+      if (Number(c.cgst_amount) > 0) drawRow(`CGST (${half}%)`, rs(c.cgst_amount));
+      if (Number(c.sgst_amount) > 0) drawRow(`SGST (${half}%)`, rs(c.sgst_amount));
+      if (Number(c.gst_amount) > 0 && !(Number(c.cgst_amount) > 0)) drawRow(`GST (${Number(c.gst_percent) || 0}%)`, rs(c.gst_amount));
+
+      // ── Total ──
+      y += 4;
+      doc.rect(L, y - 2, W, 24).fill('#f0fdf4');
+      doc.fillColor(DARK).font('Helvetica-Bold').fontSize(12)
+        .text('Total Paid', L + 6, y + 4, { width: 360 })
+        .text(rs(inv.total), L, y + 4, { width: W - 6, align: 'right' });
+      y += 34;
+
+      if (inv.note) {
+        doc.fillColor('#b45309').font('Helvetica').fontSize(9).text(inv.note, L, y, { width: W });
+      }
+
+      // ── Footer ──
+      doc.fillColor(MUTED).font('Helvetica').fontSize(8)
+        .text('This is a computer-generated invoice and does not require a signature.', L, 788, { width: W, align: 'center' })
+        .text(`© ${new Date().getFullYear()} Zipto Hyperlogistics Pvt. Ltd.`, L, 800, { width: W, align: 'center' });
+
+      doc.end();
+    } catch (e) {
+      reject(e);
+    }
+  });
 }

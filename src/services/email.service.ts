@@ -67,9 +67,15 @@ export class EmailService {
    * Send a transactional email. In dev / when SMTP is unconfigured, the email
    * is logged instead of dispatched so flows still work end-to-end locally.
    */
-  async sendMail(to: string, subject: string, html: string, text?: string): Promise<void> {
+  async sendMail(
+    to: string,
+    subject: string,
+    html: string,
+    text?: string,
+    attachments?: Array<{ filename: string; content: Buffer; contentType?: string }>,
+  ): Promise<void> {
     if (!this.transporter) {
-      this.logger.warn(`[EMAIL:LOGGED] to=${to} subject="${subject}"`);
+      this.logger.warn(`[EMAIL:LOGGED] to=${to} subject="${subject}"${attachments?.length ? ` (+${attachments.length} attachment)` : ''}`);
       if (this.isDev) this.logger.debug(text || this.stripHtml(html));
       return;
     }
@@ -81,6 +87,7 @@ export class EmailService {
         subject,
         html,
         text: text || this.stripHtml(html),
+        ...(attachments?.length ? { attachments } : {}),
       });
       this.logger.log(`Email sent to ${this.maskEmail(to)} — "${subject}"`);
     } catch (err: any) {
