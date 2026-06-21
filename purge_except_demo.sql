@@ -55,28 +55,28 @@ SELECT
   (SELECT count(*) FROM driver_profiles WHERE id IN  (SELECT id FROM rm_profiles)) AS driver_profiles_to_delete;
 
 -- ── 1. Rows hanging off removable bookings / users (FK children first) ─────
-DELETE FROM payments               WHERE booking_id IN (SELECT id FROM rm_bookings);
+DELETE FROM payments               WHERE booking_id::text IN (SELECT id::text FROM rm_bookings);
 
-DELETE FROM ratings                WHERE booking_id IN (SELECT id FROM rm_bookings)
+DELETE FROM ratings                WHERE booking_id::text IN (SELECT id::text FROM rm_bookings)
                                       OR customer_id NOT IN (SELECT id FROM keep_users)
                                       OR driver_id   NOT IN (SELECT id FROM keep_users);
 
-DELETE FROM coin_transactions      WHERE booking_id IN (SELECT id FROM rm_bookings)
+DELETE FROM coin_transactions      WHERE booking_id::text IN (SELECT id::text FROM rm_bookings)
                                       OR user_id NOT IN (SELECT id FROM keep_users);
 
-DELETE FROM zipto_shield_transactions WHERE booking_id IN (SELECT id FROM rm_bookings);
+DELETE FROM zipto_shield_transactions WHERE booking_id::text IN (SELECT id::text FROM rm_bookings);
 
-DELETE FROM driver_fraud_incidents WHERE booking_id IN (SELECT id FROM rm_bookings)
+DELETE FROM driver_fraud_incidents WHERE booking_id::text IN (SELECT id::text FROM rm_bookings)
                                       OR driver_id NOT IN (SELECT id FROM keep_users);
 
-DELETE FROM customer_reports       WHERE booking_id IN (SELECT id FROM rm_bookings)
+DELETE FROM customer_reports       WHERE booking_id::text IN (SELECT id::text FROM rm_bookings)
                                       OR customer_id  NOT IN (SELECT id FROM keep_users)
                                       OR reported_by  NOT IN (SELECT id FROM keep_users);
 
-DELETE FROM coupon_usages          WHERE booking_id IN (SELECT id FROM rm_bookings)
+DELETE FROM coupon_usages          WHERE booking_id::text IN (SELECT id::text FROM rm_bookings)
                                       OR user_id NOT IN (SELECT id FROM keep_users);
 
-DELETE FROM transaction_logs       WHERE booking_id IN (SELECT id FROM rm_bookings)
+DELETE FROM transaction_logs       WHERE booking_id::text IN (SELECT id::text FROM rm_bookings)
                                       OR user_id              NOT IN (SELECT id FROM keep_users)
                                       OR counterparty_user_id NOT IN (SELECT id FROM keep_users);
 
@@ -86,17 +86,17 @@ DELETE FROM ticket_messages
      OR ticket_id IN (
         SELECT id FROM support_tickets
          WHERE customer_id NOT IN (SELECT id FROM keep_users)
-            OR booking_id  IN (SELECT id FROM rm_bookings));
+            OR booking_id::text IN (SELECT id::text FROM rm_bookings));
 DELETE FROM support_tickets
   WHERE customer_id NOT IN (SELECT id FROM keep_users)
-     OR booking_id  IN (SELECT id FROM rm_bookings);
+     OR booking_id::text IN (SELECT id::text FROM rm_bookings);
 
 -- Referrals: drop those involving a removable user; unlink removable bookings
 -- from any surviving (demo↔demo) referral.
 DELETE FROM referrals WHERE referrer_id NOT IN (SELECT id FROM keep_users)
                          OR referee_id  NOT IN (SELECT id FROM keep_users);
 UPDATE referrals SET qualifying_booking_id = NULL
-  WHERE qualifying_booking_id IN (SELECT id FROM rm_bookings);
+  WHERE qualifying_booking_id::text IN (SELECT id::text FROM rm_bookings);
 
 -- ── 2. Driver-scoped tables ───────────────────────────────────────────────
 DELETE FROM driver_wallet_transactions  WHERE driver_user_id NOT IN (SELECT id FROM keep_users);
