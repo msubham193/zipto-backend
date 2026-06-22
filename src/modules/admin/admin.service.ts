@@ -197,6 +197,7 @@ export class AdminService {
 
     await this.driverProfileRepository.update(driverProfileId, {
       verification_status: VerificationStatus.APPROVED,
+      rejection_reason: null,
     });
 
     // Also mark the user as verified
@@ -213,7 +214,7 @@ export class AdminService {
   /**
    * Reject driver verification
    */
-  async rejectDriver(driverProfileId: string) {
+  async rejectDriver(driverProfileId: string, reason?: string) {
     const profile = await this.driverProfileRepository.findOne({
       where: { id: driverProfileId },
     });
@@ -222,8 +223,11 @@ export class AdminService {
       throw new Error('Driver profile not found');
     }
 
+    const cleanReason = (reason || '').trim() || null;
+
     await this.driverProfileRepository.update(driverProfileId, {
       verification_status: VerificationStatus.REJECTED,
+      rejection_reason: cleanReason,
     });
 
     // Also mark the user as not verified
@@ -231,8 +235,8 @@ export class AdminService {
       is_verified: false,
     });
 
-    // Notify driver
-    await this.notificationService.notifyDriverRejected(profile.user_id);
+    // Push the rejection (with the admin's reason) to the rider's device.
+    await this.notificationService.notifyDriverRejected(profile.user_id, cleanReason ?? undefined);
 
     return { message: 'Driver rejected' };
   }
@@ -600,11 +604,15 @@ export class AdminService {
     const profile = await this.driverProfileRepository.findOne({ where: { id: driverProfileId } });
     if (!profile) throw new NotFoundException('Driver not found');
     await this.userRepository.update(profile.user_id, { is_active: false });
+    const clean = (reason || '').trim();
     await this.notificationService.push(
       profile.user_id,
       'general',
       'Account Suspended',
-      reason || 'Your account has been suspended by admin.',
+      clean
+        ? `Your account has been suspended. Reason: ${clean}. Please contact support.`
+        : 'Your account has been suspended by admin. Please contact support.',
+      { type: 'account_suspended', ...(clean ? { reason: clean } : {}) },
     );
     return { message: 'Driver suspended successfully' };
   }

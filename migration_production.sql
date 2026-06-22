@@ -294,5 +294,10 @@ ALTER TABLE pricing_rules
   ADD COLUMN IF NOT EXISTS capacity_min NUMERIC(10,2) NULL,
   ADD COLUMN IF NOT EXISTS capacity_max NUMERIC(10,2) NULL;
 
+-- ── 17. KYC rejection reason (pushed to the rider + shown on KYC page) ──
+
+ALTER TABLE driver_profiles
+  ADD COLUMN IF NOT EXISTS rejection_reason TEXT NULL;
+
 -- ── Done ──────────────────────────────────────────────────────
 SELECT 'Migration complete' AS result;

@@ -68,6 +68,10 @@ export class DriverProfile {
   @Index()
   verification_status: VerificationStatus;
 
+  // Why the admin rejected KYC (shown to the rider + on the KYC page). Cleared on approval.
+  @Column({ type: 'text', nullable: true })
+  rejection_reason: string | null;
+
   @Column({
     type: 'enum',
     enum: AvailabilityStatus,

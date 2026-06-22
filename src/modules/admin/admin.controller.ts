@@ -145,8 +145,8 @@ export class AdminController {
   @Put('drivers/:id/reject')
   @ApiOperation({ summary: 'Reject driver verification' })
   @ApiResponse({ status: 200, description: 'Driver rejected' })
-  async rejectDriver(@Param('id') id: string) {
-    return this.adminService.rejectDriver(id);
+  async rejectDriver(@Param('id') id: string, @Body('reason') reason?: string) {
+    return this.adminService.rejectDriver(id, reason);
   }
 
   @Put('drivers/:id/suspend')
