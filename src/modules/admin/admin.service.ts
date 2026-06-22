@@ -85,7 +85,10 @@ export class AdminService {
     ] = await Promise.all([
       this.userRepository.count(),
       this.userRepository.count({ where: { role: UserRole.CUSTOMER } }),
-      this.userRepository.count({ where: { role: UserRole.DRIVER } }),
+      // Count driver PROFILES (not driver users) so the dashboard matches the
+      // "All Drivers" list — a user can have role=driver without having completed
+      // onboarding (no profile), which previously made the two counts disagree.
+      this.driverProfileRepository.count(),
       this.bookingRepository.count(),
       this.bookingRepository.count({ where: { status: BookingStatus.COMPLETED } }),
       this.bookingRepository.count({ where: { status: BookingStatus.ONGOING } }),
@@ -97,7 +100,7 @@ export class AdminService {
       this.driverProfileRepository.count({ where: { verification_status: VerificationStatus.PENDING } }),
       // Current period counts
       this.userRepository.count({ where: { role: UserRole.CUSTOMER, created_at: Between(thirtyDaysAgo, now) } }),
-      this.userRepository.count({ where: { role: UserRole.DRIVER, created_at: Between(thirtyDaysAgo, now) } }),
+      this.driverProfileRepository.count({ where: { created_at: Between(thirtyDaysAgo, now) } }),
       this.bookingRepository.count({ where: { created_at: Between(thirtyDaysAgo, now) } }),
       this.paymentRepository
         .createQueryBuilder('payment')
@@ -110,7 +113,7 @@ export class AdminService {
         .getRawOne(),
       // Previous period counts
       this.userRepository.count({ where: { role: UserRole.CUSTOMER, created_at: Between(sixtyDaysAgo, thirtyDaysAgo) } }),
-      this.userRepository.count({ where: { role: UserRole.DRIVER, created_at: Between(sixtyDaysAgo, thirtyDaysAgo) } }),
+      this.driverProfileRepository.count({ where: { created_at: Between(sixtyDaysAgo, thirtyDaysAgo) } }),
       this.bookingRepository.count({ where: { created_at: Between(sixtyDaysAgo, thirtyDaysAgo) } }),
       this.paymentRepository
         .createQueryBuilder('payment')
