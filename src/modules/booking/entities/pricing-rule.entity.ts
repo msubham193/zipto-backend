@@ -64,6 +64,14 @@ export class PricingRule {
   @Column({ type: 'decimal', precision: 10, scale: 2, default: 200.0 })
   helper_charge_per_person: number; // Loading/unloading per helper
 
+  // --- Capacity (kg) — supports decimals, e.g. 0.1 ---
+
+  @Column({ type: 'decimal', precision: 10, scale: 2, nullable: true })
+  capacity_min: number | null;
+
+  @Column({ type: 'decimal', precision: 10, scale: 2, nullable: true })
+  capacity_max: number | null;
+
   // --- Commission ---
 
   @Column({ type: 'decimal', precision: 5, scale: 2, default: 25.0 })

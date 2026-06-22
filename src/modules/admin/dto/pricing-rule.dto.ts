@@ -75,6 +75,25 @@ export class CreatePricingRuleDto {
   @Min(0)
   commission_percent?: number;
 
+  @ApiPropertyOptional({ example: 200 })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  helper_charge_per_person?: number;
+
+  // Capacity in kg — decimals allowed (e.g. 0.1).
+  @ApiPropertyOptional({ example: 0.1 })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  capacity_min?: number;
+
+  @ApiPropertyOptional({ example: 50 })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  capacity_max?: number;
+
   @ApiPropertyOptional({ example: 'Bhubaneswar' })
   @IsOptional()
   @IsString()
@@ -87,6 +106,10 @@ export class CreatePricingRuleDto {
 }
 
 export class UpdatePricingRuleDto {
+  @ApiPropertyOptional({ enum: VehicleType })
+  @IsOptional()
+  @IsEnum(VehicleType)
+  vehicle_type?: VehicleType;
   @ApiPropertyOptional({ example: 35 })
   @IsOptional()
   @IsNumber()
@@ -157,6 +180,30 @@ export class UpdatePricingRuleDto {
   @IsNumber()
   @Min(0)
   commission_percent?: number;
+
+  @ApiPropertyOptional({ example: 200 })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  helper_charge_per_person?: number;
+
+  // Capacity in kg — decimals allowed (e.g. 0.1).
+  @ApiPropertyOptional({ example: 0.1 })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  capacity_min?: number;
+
+  @ApiPropertyOptional({ example: 50 })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  capacity_max?: number;
+
+  @ApiPropertyOptional({ example: 'Bhubaneswar' })
+  @IsOptional()
+  @IsString()
+  city?: string;
 
   @ApiPropertyOptional({ example: true })
   @IsOptional()

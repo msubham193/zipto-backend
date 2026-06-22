@@ -341,13 +341,15 @@ export class NotificationService implements OnModuleInit {
     );
   }
 
-  async notifyDriverRejected(userId: string) {
-    return this.push(
-      userId,
-      'rejection',
-      'Verification Update',
-      'Your verification could not be approved. Please re-submit your documents or contact support.',
-    );
+  async notifyDriverRejected(userId: string, reason?: string) {
+    const clean = (reason || '').trim();
+    const message = clean
+      ? `Your documents were not approved. Reason: ${clean}. Please re-submit the correct documents or contact support.`
+      : 'Your verification could not be approved. Please re-submit your documents or contact support.';
+    return this.push(userId, 'rejection', 'Verification Update', message, {
+      type: 'kyc_rejected',
+      ...(clean ? { reason: clean } : {}),
+    });
   }
 
   async notifyPaymentReceived(userId: string, amount: number, bookingId: string) {

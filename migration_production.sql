@@ -288,5 +288,11 @@ CREATE INDEX IF NOT EXISTS idx_driver_last_location_at
 UPDATE driver_profiles SET availability_status = 'offline'
  WHERE availability_status = 'online' AND last_location_at IS NULL;
 
+-- ── 16. Pricing rule capacity (kg) — decimals allowed (e.g. 0.1) ──
+
+ALTER TABLE pricing_rules
+  ADD COLUMN IF NOT EXISTS capacity_min NUMERIC(10,2) NULL,
+  ADD COLUMN IF NOT EXISTS capacity_max NUMERIC(10,2) NULL;
+
 -- ── Done ──────────────────────────────────────────────────────
 SELECT 'Migration complete' AS result;
