@@ -84,7 +84,7 @@ export class AdminService {
       revenuePrevPeriod,
     ] = await Promise.all([
       this.userRepository.count(),
-      this.userRepository.count({ where: { role: UserRole.CUSTOMER } }),
+      this.userRepository.count({ where: { role: UserRole.CUSTOMER, is_deleted: false } }),
       // Count driver PROFILES (not driver users) so the dashboard matches the
       // "All Drivers" list — a user can have role=driver without having completed
       // onboarding (no profile), which previously made the two counts disagree.
@@ -99,7 +99,7 @@ export class AdminService {
         .getRawOne(),
       this.driverProfileRepository.count({ where: { verification_status: VerificationStatus.PENDING } }),
       // Current period counts
-      this.userRepository.count({ where: { role: UserRole.CUSTOMER, created_at: Between(thirtyDaysAgo, now) } }),
+      this.userRepository.count({ where: { role: UserRole.CUSTOMER, is_deleted: false, created_at: Between(thirtyDaysAgo, now) } }),
       this.driverProfileRepository.count({ where: { created_at: Between(thirtyDaysAgo, now) } }),
       this.bookingRepository.count({ where: { created_at: Between(thirtyDaysAgo, now) } }),
       this.paymentRepository
@@ -112,7 +112,7 @@ export class AdminService {
         })
         .getRawOne(),
       // Previous period counts
-      this.userRepository.count({ where: { role: UserRole.CUSTOMER, created_at: Between(sixtyDaysAgo, thirtyDaysAgo) } }),
+      this.userRepository.count({ where: { role: UserRole.CUSTOMER, is_deleted: false, created_at: Between(sixtyDaysAgo, thirtyDaysAgo) } }),
       this.driverProfileRepository.count({ where: { created_at: Between(sixtyDaysAgo, thirtyDaysAgo) } }),
       this.bookingRepository.count({ where: { created_at: Between(sixtyDaysAgo, thirtyDaysAgo) } }),
       this.paymentRepository
@@ -397,7 +397,8 @@ export class AdminService {
     const limit = Number(query.limit) || 20;
 
     const [customers, total] = await this.userRepository.findAndCount({
-      where: { role: UserRole.CUSTOMER },
+      // Hide self-deleted (anonymized) accounts from the admin list.
+      where: { role: UserRole.CUSTOMER, is_deleted: false },
       select: ['id', 'phone', 'email', 'name', 'is_verified', 'is_active', 'created_at'],
       order: { created_at: 'DESC' },
       skip: (page - 1) * limit,
