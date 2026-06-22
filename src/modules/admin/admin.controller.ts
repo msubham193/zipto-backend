@@ -511,8 +511,10 @@ export class AdminController {
   @ApiOperation({ summary: 'Get all system settings' })
   @ApiResponse({ status: 200, description: 'Settings retrieved' })
   async getSettings() {
-    const rows = await this.systemSettings.getAll();
-    return { success: true, data: rows };
+    // Return the raw array — the global TransformInterceptor wraps it as
+    // { success, data, timestamp }. Wrapping it here too would double-nest it
+    // ({ data: { data: [...] } }) and the admin UI would read an empty list.
+    return this.systemSettings.getAll();
   }
 
   @Put('settings/:key')
@@ -525,8 +527,7 @@ export class AdminController {
     if (value === undefined || value === null || String(value).trim() === '') {
       throw new BadRequestException('value is required');
     }
-    const updated = await this.systemSettings.update(key, String(value));
-    return { success: true, data: updated };
+    return this.systemSettings.update(key, String(value));
   }
 
   // ─── UPI Topup Requests ───────────────────────────────────────────────────
