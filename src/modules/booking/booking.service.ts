@@ -433,10 +433,11 @@ export class BookingService {
     const offerId = randomUUID();
     const OFFER_TTL_MS = 6 * 60 * 1000; // 6 minutes
 
-    // Apply coin + coupon discount to estimated fare (floor at 0)
+    // Apply coin + coupon discount to estimated fare (floor at 0). Keep 2-decimal
+    // precision — online charges this exact value; cash collects it rounded up.
     const discountedFare = Math.max(
       0,
-      Math.round(fareEstimate.estimated_fare - coinDiscount - couponDiscount),
+      this.round2(fareEstimate.estimated_fare - coinDiscount - couponDiscount),
     );
 
     // Store entire offer data in Redis — NO DB write yet
@@ -1627,9 +1628,12 @@ export class BookingService {
       waitingCharge = this.round(chargeableMinutes * waitingChargePerMinute);
     }
 
-    // Calculate final fare: estimated + waiting + toll
+    // Calculate final fare: estimated + waiting + toll. Keep 2-decimal precision
+    // (GST makes fares non-whole). Online charges this exact value; a CASH trip
+    // collects it rounded UP to the next whole rupee (see cashCollectAmount).
     const estimatedFare = Number(booking.estimated_fare);
-    const finalFare = this.round(estimatedFare + waitingCharge + tollAmount);
+    const finalFare = this.round2(estimatedFare + waitingCharge + tollAmount);
+    const cashCollectAmount = Math.ceil(finalFare); // whole rupees collected in cash
 
     // Calculate platform commission and driver earnings
     const commissionPercent = pricingRule ? Number(pricingRule.commission_percent) : 25;
@@ -1686,7 +1690,9 @@ export class BookingService {
       );
       const cashPayment = this.paymentRepository.create({
         booking_id: bookingId,
-        amount: finalFare,
+        // Cash is collected in whole rupees (rounded up) — the rider can't make
+        // change for paise. e.g. ₹52.20 fare → collect ₹53.
+        amount: cashCollectAmount,
         driver_earnings: driverEarnings,
         payment_method: PaymentMethod.CASH,
         payment_status: PaymentStatus.COMPLETED,
