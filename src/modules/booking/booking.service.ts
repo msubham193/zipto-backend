@@ -1635,17 +1635,21 @@ export class BookingService {
     const finalFare = this.round2(estimatedFare + waitingCharge + tollAmount);
     const cashCollectAmount = Math.ceil(finalFare); // whole rupees collected in cash
 
-    // Calculate platform commission and driver earnings
+    // Driver earnings are on the PRE-GST delivery charge — GST is tax (remitted to
+    // the government) and the platform fee is Zipto's revenue, so NEITHER belongs
+    // to the driver. This matches how the fare estimate quotes earnings. Waiting +
+    // toll go fully to the driver (their time / a reimbursement).
+    const bd = (booking.fare_breakdown || {}) as any;
+    const deliveryCharge = Number(bd.delivery_charge ?? estimatedFare) || 0;
     const commissionPercent = pricingRule ? Number(pricingRule.commission_percent) : 25;
-    const PLATFORM_FEE = 2;  // ₹2 flat per order
-    const SHIELD_FEE = 1;    // ₹1 per order to Zipto Shield fund
-    const skidoCommission = this.round(finalFare * (commissionPercent / 100));
-    const driverEarnings = this.round(finalFare - skidoCommission - PLATFORM_FEE - SHIELD_FEE);
+    const SHIELD_FEE = 1;    // ₹1 per order to the Zipto Shield fund (Zipto-funded)
+    const skidoCommission = this.round(deliveryCharge * (commissionPercent / 100));
+    const driverEarnings = this.round2(
+      deliveryCharge - skidoCommission + waitingCharge + tollAmount,
+    );
 
-    // Customer-facing platform fee that was actually charged on this order
-    // (config-driven, already baked into estimated_fare). Keep it on the
-    // breakdown so the invoice line items foot to the total — do NOT overwrite
-    // it with the ₹2 internal driver-side cut above.
+    // Customer-facing platform fee that was actually charged (config-driven,
+    // already baked into estimated_fare); kept on the breakdown for the invoice.
     const fareSettings = await this.systemSettings.getFareSettings();
     const customerPlatformFee = this.round(fareSettings.platform_fee);
 
@@ -1680,12 +1684,15 @@ export class BookingService {
 
     if (paymentMethod === 'cash' && !alreadyPaid) {
       // ── CASH TRIP ────────────────────────────────────────────────────────────
-      // Driver physically collected the full fare. Zipto recovers commission +
-      // platform fee + shield by debiting the driver's virtual wallet.
+      // Driver physically collected the whole-rupee cash. Zipto recovers
+      // everything that isn't the driver's earnings (commission + GST + platform
+      // fee + the cash round-up) from the driver's wallet, so the driver nets
+      // exactly their earnings regardless of cash vs online.
+      const cashRecovery = this.round2(cashCollectAmount - driverEarnings);
       await this.driverWalletService.deductCashCommission(
         driverId,
-        skidoCommission,
-        PLATFORM_FEE + SHIELD_FEE,
+        cashRecovery,
+        0,
         bookingId,
       );
       const cashPayment = this.paymentRepository.create({
@@ -1750,7 +1757,7 @@ export class BookingService {
         toll_amount: tollAmount,
         final_fare: finalFare,
         skido_commission: skidoCommission,
-        platform_fee: PLATFORM_FEE,
+        platform_fee: customerPlatformFee,
         shield_fee: SHIELD_FEE,
         driver_earnings: driverEarnings,
       },
