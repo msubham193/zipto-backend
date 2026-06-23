@@ -229,7 +229,9 @@ export class DriverService {
     const todayOrders = bookings.length;
 
     return {
-      today_earnings: todayEarnings,
+      // Round to 2 decimals — summing floats like 45.40 + 39.80 produces binary
+      // artifacts (e.g. 173.60000000000002) that must never reach the client.
+      today_earnings: Math.round(todayEarnings * 100) / 100,
       today_orders: todayOrders,
     };
   }

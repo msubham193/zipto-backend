@@ -86,7 +86,7 @@ export class User {
 
   @Column({ type: 'text', nullable: true })
   @Exclude()
-  refresh_token: string;
+  refresh_token: string | null;
 
   @Column({ type: 'text', nullable: true })
   fcm_token: string | null;

@@ -586,7 +586,13 @@ export class AuthService {
   }
 
   async logout(userId: string) {
-    await this.userRepository.update(userId, { refresh_token: undefined });
+    // Use null (not undefined — TypeORM skips undefined columns, so the token
+    // would never actually be cleared). Also clear the FCM token so no push
+    // booking-offer or notification can reach the device after logout.
+    await this.userRepository.update(userId, {
+      refresh_token: null,
+      fcm_token: null,
+    });
     // Take drivers offline on logout so dispatch immediately stops matching them.
     // (Affects 0 rows for non-drivers.) Without this a logged-out driver stays
     // 'online' with a stale location and keeps receiving booking offers.
