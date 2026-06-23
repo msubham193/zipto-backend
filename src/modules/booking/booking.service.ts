@@ -264,7 +264,7 @@ export class BookingService {
     //    pool), so the quoted earning matches what completeTrip actually pays.
     //      riderEarning = delivery − commission − shield
     //      ziptoRevenue = commission + platformFee + shield
-    const skidoCommission = this.round(deliveryCharge * (commissionPercent / 100));
+    const skidoCommission = this.round2(deliveryCharge * (commissionPercent / 100));
     const driverEarnings = this.round2(
       deliveryCharge - skidoCommission - SHIELD_CONTRIBUTION_PER_BOOKING,
     );
@@ -1653,7 +1653,7 @@ export class BookingService {
     const deliveryCharge = Number(bd.delivery_charge ?? estimatedFare) || 0;
     const commissionPercent = pricingRule ? Number(pricingRule.commission_percent) : 25;
     const SHIELD_FEE = SHIELD_CONTRIBUTION_PER_BOOKING; // ₹ per order → shield pool
-    const skidoCommission = this.round(deliveryCharge * (commissionPercent / 100));
+    const skidoCommission = this.round2(deliveryCharge * (commissionPercent / 100));
     const driverEarnings = this.round2(
       deliveryCharge - skidoCommission - SHIELD_FEE + waitingCharge + tollAmount,
     );
