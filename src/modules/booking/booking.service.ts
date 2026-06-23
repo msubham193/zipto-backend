@@ -40,7 +40,7 @@ import { FraudService } from '../fraud/fraud.service';
 import { SystemSettingsService } from '../settings/system-settings.service';
 import { DriverFraudService } from '../driver-fraud/driver-fraud.service';
 import { NotificationService } from '../notification/notification.service';
-import { ZiptoShieldService } from '../zipto-shield/zipto-shield.service';
+import { ZiptoShieldService, SHIELD_CONTRIBUTION_PER_BOOKING } from '../zipto-shield/zipto-shield.service';
 import { DriverWalletService } from '../driver/driver-wallet.service';
 import { CouponService } from '../coupon/coupon.service';
 import { EmailService } from '../../services/email.service';
@@ -259,9 +259,15 @@ export class BookingService {
     // 6. Total the customer pays = delivery charge + GST + platform fee
     const estimatedFare = this.round2(deliveryCharge + gstAmount + platformFee);
 
-    // 7. Commission split on the delivery charge (pre-GST, excl. platform fee)
+    // 7. Commission split on the delivery charge (pre-GST, excl. platform fee).
+    //    The Zipto Shield fee is also deducted from the driver (funds the shield
+    //    pool), so the quoted earning matches what completeTrip actually pays.
+    //      riderEarning = delivery − commission − shield
+    //      ziptoRevenue = commission + platformFee + shield
     const skidoCommission = this.round(deliveryCharge * (commissionPercent / 100));
-    const driverEarnings = this.round(deliveryCharge - skidoCommission);
+    const driverEarnings = this.round2(
+      deliveryCharge - skidoCommission - SHIELD_CONTRIBUTION_PER_BOOKING,
+    );
 
     // 8. Driver availability — parallel check at search radius (does not block fare calc)
     let nearbyDriverCount = 0;
@@ -303,6 +309,7 @@ export class BookingService {
         total_payable: estimatedFare,
         minimum_fare_applied: minimumFareApplied,
         skido_commission: skidoCommission,
+        shield_fee: SHIELD_CONTRIBUTION_PER_BOOKING,
         driver_earnings: driverEarnings,
       },
       pricing_info: {
@@ -1637,15 +1644,18 @@ export class BookingService {
 
     // Driver earnings are on the PRE-GST delivery charge — GST is tax (remitted to
     // the government) and the platform fee is Zipto's revenue, so NEITHER belongs
-    // to the driver. This matches how the fare estimate quotes earnings. Waiting +
-    // toll go fully to the driver (their time / a reimbursement).
+    // to the driver. The Zipto Shield fee is also deducted from the driver and
+    // funds the shield pool. This matches how the fare estimate quotes earnings.
+    // Waiting + toll go fully to the driver (their time / a reimbursement).
+    //   riderEarning = delivery − commission − shield (+ waiting + toll)
+    //   ziptoRevenue = commission + platformFee + shield
     const bd = (booking.fare_breakdown || {}) as any;
     const deliveryCharge = Number(bd.delivery_charge ?? estimatedFare) || 0;
     const commissionPercent = pricingRule ? Number(pricingRule.commission_percent) : 25;
-    const SHIELD_FEE = 1;    // ₹1 per order to the Zipto Shield fund (Zipto-funded)
+    const SHIELD_FEE = SHIELD_CONTRIBUTION_PER_BOOKING; // ₹ per order → shield pool
     const skidoCommission = this.round(deliveryCharge * (commissionPercent / 100));
     const driverEarnings = this.round2(
-      deliveryCharge - skidoCommission + waitingCharge + tollAmount,
+      deliveryCharge - skidoCommission - SHIELD_FEE + waitingCharge + tollAmount,
     );
 
     // Customer-facing platform fee that was actually charged (config-driven,

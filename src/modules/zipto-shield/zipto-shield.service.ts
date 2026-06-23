@@ -10,7 +10,10 @@ import { ZiptoShieldLedger } from './entities/zipto-shield-ledger.entity';
 import { ZiptoShieldTransaction, ShieldTransactionType } from './entities/zipto-shield-transaction.entity';
 
 const LEDGER_ID = 'zipto-shield';
-const SHIELD_CONTRIBUTION_PER_BOOKING = 1; // ₹1
+// Single source of truth for the per-booking Zipto Shield fee. Deducted from the
+// rider's earning at completion AND contributed to the shield pool here, so the
+// two MUST be the same number — hence exported and imported by BookingService.
+export const SHIELD_CONTRIBUTION_PER_BOOKING = 1; // ₹1
 
 @Injectable()
 export class ZiptoShieldService {
