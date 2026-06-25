@@ -246,6 +246,27 @@ export class AdminService {
       if (ref) await this.s3Service.deleteFile(ref).catch(() => {});
     }
 
+    // Detach bookings from this driver's vehicles BEFORE deleting them.
+    // bookings.vehicle_id has a FK to vehicles, so deleting a vehicle that a
+    // booking references — directly here, or via the driver-profile CASCADE below
+    // — violates the constraint and 500s the whole rejection. Null the reference
+    // instead; booking history is preserved (a booking's driver_id is the user,
+    // not the vehicle).
+    const driverVehicles = await this.vehicleRepository.find({
+      where: { driver_id: profile.id },
+      select: ['id'],
+    });
+    const vehicleIds = driverVehicles.map((v) => v.id);
+    if (vehicleIds.length) {
+      await this.bookingRepository
+        .createQueryBuilder()
+        .update(Booking)
+        .set({ vehicle_id: () => 'NULL' })
+        .where('vehicle_id IN (:...vehicleIds)', { vehicleIds })
+        .execute()
+        .catch(() => {});
+    }
+
     // Delete any vehicles linked to this driver profile.
     await this.vehicleRepository.delete({ driver_id: profile.id }).catch(() => {});
 
