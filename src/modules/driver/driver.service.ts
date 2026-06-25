@@ -419,9 +419,21 @@ export class DriverService {
       onboardDriverDto;
 
     if (vehicle_registration_number) {
+      // Resolve the vehicle row to write. Look up by this driver first; if they
+      // have none, fall back to the globally-UNIQUE registration number. Without
+      // this, a re-submission — or a number already on file from a prior/abandoned
+      // attempt or a re-registered account — would INSERT a second row with the
+      // same registration_number and violate the unique constraint (→ 500).
+      // Reusing + reassigning the existing row UPDATEs it instead.
       let vehicle = await this.vehicleRepository.findOne({
         where: { driver_id: profile.id },
       });
+
+      if (!vehicle) {
+        vehicle = await this.vehicleRepository.findOne({
+          where: { registration_number: vehicle_registration_number },
+        });
+      }
 
       if (!vehicle) {
         vehicle = this.vehicleRepository.create({
@@ -430,6 +442,7 @@ export class DriverService {
         });
       }
 
+      vehicle.driver_id = profile.id; // (re)assign to the current driver
       vehicle.registration_number = vehicle_registration_number;
       if (vehicle_type) vehicle.vehicle_type = vehicle_type as VehicleType;
       if (vehicle_model) vehicle.vehicle_model = vehicle_model;
