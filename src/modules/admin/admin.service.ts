@@ -58,6 +58,31 @@ export class AdminService {
   ) {}
 
   /**
+   * Zipto's actual revenue (NOT gross customer payments):
+   *   Zipto Revenue = commission + platform fee + Zipto Shield
+   * summed over completed bookings. GST is excluded (a pass-through tax remitted
+   * to the government) and so is the driver's earning. Commission uses each
+   * booking's stored skido_commission — computed from the admin-configured
+   * commission % at completion — so the rate is NEVER hardcoded here.
+   */
+  private async getZiptoRevenue(from?: Date, to?: Date): Promise<number> {
+    const qb = this.bookingRepository
+      .createQueryBuilder('b')
+      .select(
+        `COALESCE(SUM(b.skido_commission), 0)
+         + COALESCE(SUM((b.fare_breakdown->>'platform_fee')::numeric), 0)
+         + COALESCE(SUM((b.fare_breakdown->>'shield_fee')::numeric), 0)`,
+        'total',
+      )
+      .where('b.status = :status', { status: BookingStatus.COMPLETED });
+    if (from && to) {
+      qb.andWhere('b.completion_time BETWEEN :from AND :to', { from, to });
+    }
+    const row = await qb.getRawOne<{ total: string }>();
+    return Math.round(parseFloat(row?.total || '0') * 100) / 100;
+  }
+
+  /**
    * Get dashboard statistics with growth metrics (vs previous 30-day period)
    */
   async getDashboardStats() {
@@ -94,38 +119,18 @@ export class AdminService {
       this.bookingRepository.count(),
       this.bookingRepository.count({ where: { status: BookingStatus.COMPLETED } }),
       this.bookingRepository.count({ where: { status: BookingStatus.ONGOING } }),
-      this.paymentRepository
-        .createQueryBuilder('payment')
-        .select('SUM(payment.amount)', 'total')
-        .where('payment.payment_status = :status', { status: PaymentStatus.COMPLETED })
-        .getRawOne(),
+      this.getZiptoRevenue(),
       this.driverProfileRepository.count({ where: { verification_status: VerificationStatus.PENDING } }),
       // Current period counts
       this.userRepository.count({ where: { role: UserRole.CUSTOMER, is_deleted: false, created_at: Between(thirtyDaysAgo, now) } }),
       this.driverProfileRepository.count({ where: { created_at: Between(thirtyDaysAgo, now) } }),
       this.bookingRepository.count({ where: { created_at: Between(thirtyDaysAgo, now) } }),
-      this.paymentRepository
-        .createQueryBuilder('payment')
-        .select('SUM(payment.amount)', 'total')
-        .where('payment.payment_status = :status AND payment.created_at BETWEEN :from AND :to', {
-          status: PaymentStatus.COMPLETED,
-          from: thirtyDaysAgo,
-          to: now,
-        })
-        .getRawOne(),
+      this.getZiptoRevenue(thirtyDaysAgo, now),
       // Previous period counts
       this.userRepository.count({ where: { role: UserRole.CUSTOMER, is_deleted: false, created_at: Between(sixtyDaysAgo, thirtyDaysAgo) } }),
       this.driverProfileRepository.count({ where: { created_at: Between(sixtyDaysAgo, thirtyDaysAgo) } }),
       this.bookingRepository.count({ where: { created_at: Between(sixtyDaysAgo, thirtyDaysAgo) } }),
-      this.paymentRepository
-        .createQueryBuilder('payment')
-        .select('SUM(payment.amount)', 'total')
-        .where('payment.payment_status = :status AND payment.created_at BETWEEN :from AND :to', {
-          status: PaymentStatus.COMPLETED,
-          from: sixtyDaysAgo,
-          to: thirtyDaysAgo,
-        })
-        .getRawOne(),
+      this.getZiptoRevenue(sixtyDaysAgo, thirtyDaysAgo),
     ]);
 
     const calcGrowth = (current: number, previous: number): number => {
@@ -133,8 +138,8 @@ export class AdminService {
       return parseFloat((((current - previous) / previous) * 100).toFixed(1));
     };
 
-    const revCurrent = parseFloat(revenueThisPeriod?.total || '0');
-    const revPrev = parseFloat(revenuePrevPeriod?.total || '0');
+    const revCurrent = revenueThisPeriod;
+    const revPrev = revenuePrevPeriod;
 
     return {
       users: {
@@ -148,7 +153,7 @@ export class AdminService {
         ongoing: ongoingBookings,
       },
       revenue: {
-        total: parseFloat(totalRevenue?.total || '0'),
+        total: totalRevenue,
       },
       pending_kyc: pendingKYC,
       growth: {
