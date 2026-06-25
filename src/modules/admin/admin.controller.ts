@@ -128,6 +128,15 @@ export class AdminController {
     return this.adminService.getDashboardStats();
   }
 
+  @Get('revenue/breakdown')
+  @ApiOperation({ summary: 'Zipto revenue breakdown per completed order' })
+  @ApiResponse({ status: 200, description: 'Revenue breakdown retrieved' })
+  async getRevenueBreakdown(
+    @Query() query: { from?: string; to?: string; page?: number; limit?: number },
+  ) {
+    return this.adminService.getRevenueBreakdown(query);
+  }
+
   @Get('drivers/pending')
   @ApiOperation({ summary: 'Get pending driver verifications' })
   @ApiResponse({ status: 200, description: 'Pending drivers retrieved' })

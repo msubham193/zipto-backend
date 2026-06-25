@@ -83,6 +83,96 @@ export class AdminService {
   }
 
   /**
+   * Zipto revenue breakdown per completed order — powers the "Zipto Revenue"
+   * dashboard card drill-down. Per order: commission + platform fee + shield =
+   * Zipto's revenue (GST and the driver's earning are shown for context but are
+   * NOT Zipto revenue). Optional date range + pagination.
+   */
+  async getRevenueBreakdown(query: {
+    from?: string;
+    to?: string;
+    page?: number;
+    limit?: number;
+  }) {
+    const page = Math.max(1, Number(query.page) || 1);
+    const limit = Math.min(100, Math.max(1, Number(query.limit) || 20));
+    const offset = (page - 1) * limit;
+
+    const conds: string[] = [`b.status = 'completed'`];
+    const args: any[] = [];
+    if (query.from && query.to) {
+      args.push(query.from, `${query.to}T23:59:59.999Z`);
+      conds.push(`b.completion_time BETWEEN $${args.length - 1} AND $${args.length}`);
+    }
+    const where = conds.join(' AND ');
+
+    const [summaryRow] = await this.bookingRepository.manager.query(
+      `SELECT
+         COALESCE(SUM(b.skido_commission),0)                            AS commission,
+         COALESCE(SUM((b.fare_breakdown->>'platform_fee')::numeric),0)  AS platform_fee,
+         COALESCE(SUM((b.fare_breakdown->>'shield_fee')::numeric),0)    AS shield,
+         COALESCE(SUM((b.fare_breakdown->>'gst_amount')::numeric),0)    AS gst,
+         COALESCE(SUM(b.driver_earnings),0)                             AS driver_earnings,
+         COUNT(*)::int                                                  AS order_count
+       FROM bookings b WHERE ${where}`,
+      args,
+    );
+
+    const orders = await this.bookingRepository.manager.query(
+      `SELECT b.id AS booking_id, b.created_at, b.completion_time, b.final_fare,
+              COALESCE(u.name, b.name) AS customer_name,
+              b.skido_commission AS commission,
+              (b.fare_breakdown->>'platform_fee')::numeric AS platform_fee,
+              (b.fare_breakdown->>'shield_fee')::numeric   AS shield,
+              b.driver_earnings
+         FROM bookings b
+         LEFT JOIN users u ON u.id = b.customer_id
+        WHERE ${where}
+        ORDER BY b.completion_time DESC NULLS LAST
+        LIMIT ${limit} OFFSET ${offset}`,
+      args,
+    );
+
+    const r2 = (n: any) => Math.round((Number(n) || 0) * 100) / 100;
+    const commission = Number(summaryRow?.commission) || 0;
+    const platformFee = Number(summaryRow?.platform_fee) || 0;
+    const shield = Number(summaryRow?.shield) || 0;
+    const orderCount = Number(summaryRow?.order_count) || 0;
+
+    return {
+      summary: {
+        commission: r2(commission),
+        platform_fee: r2(platformFee),
+        shield: r2(shield),
+        total: r2(commission + platformFee + shield),
+        gst: r2(summaryRow?.gst),
+        driver_earnings: r2(summaryRow?.driver_earnings),
+        order_count: orderCount,
+      },
+      orders: orders.map((row: any) => {
+        const c = Number(row.commission) || 0;
+        const pf = Number(row.platform_fee) || 0;
+        const sh = Number(row.shield) || 0;
+        return {
+          booking_id: row.booking_id,
+          created_at: row.completion_time ?? row.created_at,
+          customer_name: row.customer_name,
+          final_fare: r2(row.final_fare),
+          commission: r2(c),
+          platform_fee: r2(pf),
+          shield: r2(sh),
+          zipto_revenue: r2(c + pf + sh),
+          driver_earnings: r2(row.driver_earnings),
+        };
+      }),
+      page,
+      limit,
+      total: orderCount,
+      total_pages: Math.ceil(orderCount / limit),
+    };
+  }
+
+  /**
    * Get dashboard statistics with growth metrics (vs previous 30-day period)
    */
   async getDashboardStats() {
@@ -1327,7 +1417,8 @@ export class AdminService {
       id: d.id,
       name: d.name,
       trips: parseInt(d.trips),
-      earnings: parseFloat(d.earnings),
+      riderRevenue: Math.round(parseFloat(d.riderRevenue) * 100) / 100,
+      platformRevenue: Math.round(parseFloat(d.platformRevenue) * 100) / 100,
       rating: driverRatingsMap[d.id] || 0,
     }));
 
