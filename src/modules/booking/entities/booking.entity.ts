@@ -78,7 +78,10 @@ export class Booking {
   @Column({ type: 'uuid', nullable: true })
   vehicle_id: string;
 
-  @ManyToOne(() => Vehicle)
+  // SET NULL on delete: when a vehicle is removed (e.g. a driver is rejected and
+  // their data is purged), the booking keeps its history with vehicle_id nulled
+  // instead of blocking the delete with a FK violation.
+  @ManyToOne(() => Vehicle, { onDelete: 'SET NULL' })
   @JoinColumn({ name: 'vehicle_id' })
   vehicle: Vehicle;
 

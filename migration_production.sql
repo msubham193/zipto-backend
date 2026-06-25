@@ -299,5 +299,31 @@ ALTER TABLE pricing_rules
 ALTER TABLE driver_profiles
   ADD COLUMN IF NOT EXISTS rejection_reason TEXT NULL;
 
+-- ── 18. bookings.vehicle_id → ON DELETE SET NULL ──────────────
+-- Deleting a vehicle (driver rejection / data purge) should null the booking's
+-- vehicle_id, not fail with a FK violation. Drop the existing FK and recreate it
+-- with ON DELETE SET NULL. Idempotent.
+DO $$
+DECLARE
+  fk_name text;
+BEGIN
+  SELECT conname INTO fk_name
+    FROM pg_constraint
+   WHERE conrelid = 'bookings'::regclass
+     AND contype = 'f'
+     AND confrelid = 'vehicles'::regclass
+   LIMIT 1;
+  IF fk_name IS NOT NULL THEN
+    EXECUTE format('ALTER TABLE bookings DROP CONSTRAINT %I', fk_name);
+  END IF;
+  BEGIN
+    ALTER TABLE bookings
+      ADD CONSTRAINT fk_bookings_vehicle
+      FOREIGN KEY (vehicle_id) REFERENCES vehicles(id) ON DELETE SET NULL;
+  EXCEPTION WHEN duplicate_object THEN
+    NULL; -- already recreated
+  END;
+END $$;
+
 -- ── Done ──────────────────────────────────────────────────────
 SELECT 'Migration complete' AS result;
