@@ -220,25 +220,40 @@ export class AdminService {
     });
 
     if (!profile) {
-      throw new Error('Driver profile not found');
+      throw new NotFoundException('Driver profile not found');
     }
 
-    const cleanReason = (reason || '').trim() || null;
+    const cleanReason = (reason || '').trim() || undefined;
 
-    await this.driverProfileRepository.update(driverProfileId, {
-      verification_status: VerificationStatus.REJECTED,
-      rejection_reason: cleanReason,
-    });
+    // Notify before wiping data so the FCM token is still valid.
+    await this.notificationService.notifyDriverRejected(profile.user_id, cleanReason).catch(() => {});
 
-    // Also mark the user as not verified
+    // Purge KYC documents from cloud storage (best-effort — never block the rejection).
+    for (const ref of [
+      profile.aadhar_front_image,
+      profile.aadhar_back_image,
+      profile.driving_license_image,
+      profile.vehicle_rc_image,
+      profile.profile_image,
+    ]) {
+      if (ref) await this.s3Service.deleteFile(ref).catch(() => {});
+    }
+
+    // Delete any vehicles linked to this driver profile.
+    await this.vehicleRepository.delete({ driver_id: profile.id }).catch(() => {});
+
+    // Delete the driver profile entirely so the driver can re-onboard fresh.
+    await this.driverProfileRepository.delete({ id: driverProfileId });
+
+    // Reset the user: clear verification + sessions so they land back at onboarding.
     await this.userRepository.update(profile.user_id, {
       is_verified: false,
+      refresh_token: null,
+      fcm_token: null,
     });
 
-    // Push the rejection (with the admin's reason) to the rider's device.
-    await this.notificationService.notifyDriverRejected(profile.user_id, cleanReason ?? undefined);
-
-    return { message: 'Driver rejected' };
+    this.logger.log(`[rejectDriver] profile ${driverProfileId} deleted, user ${profile.user_id} reset`);
+    return { message: 'Driver rejected and data cleared. Driver can re-register.' };
   }
 
   /**
