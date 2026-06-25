@@ -27,6 +27,7 @@ import {
 } from './dto/auth.dto';
 import { formatPhoneNumber, generateRandomUsername } from '../../common/utils/helpers.util';
 import { SmsService } from '../../services/sms.service';
+import { EmailService } from '../../services/email.service';
 import { DriverProfile, AvailabilityStatus, VerificationStatus } from '../driver/entities/driver-profile.entity';
 import { ReferralService } from '../referral/referral.service';
 import { S3Service } from '../../services/s3.service';
@@ -45,6 +46,7 @@ export class AuthService {
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
     private readonly smsService: SmsService,
+    private readonly emailService: EmailService,
     private readonly referralService: ReferralService,
     private readonly s3Service: S3Service,
   ) {}
@@ -601,6 +603,66 @@ export class AuthService {
       { availability_status: AvailabilityStatus.OFFLINE },
     );
     return { message: 'Logged out successfully' };
+  }
+
+  // ─── Admin forgot-password / OTP reset ──────────────────────────────────────
+
+  async forgotAdminPassword(email: string) {
+    const user = await this.userRepository.findOne({
+      where: { email: email.trim().toLowerCase(), role: UserRole.ADMIN },
+    });
+    // Always respond with success to avoid leaking whether the email exists.
+    if (user && user.is_active) {
+      await this.emailService.sendOtp(user.email!, user.name || 'Admin', 'password_reset');
+    }
+    return { message: 'If that email belongs to an admin account, an OTP has been sent.' };
+  }
+
+  async verifyAdminResetOtp(email: string, otp: string) {
+    const normalised = email.trim().toLowerCase();
+    const valid = await this.emailService.verifyOtp(normalised, 'password_reset', otp);
+    if (!valid) throw new BadRequestException('Invalid OTP. Please try again.');
+
+    const user = await this.userRepository.findOne({
+      where: { email: normalised, role: UserRole.ADMIN },
+    });
+    if (!user) throw new NotFoundException('Admin account not found.');
+
+    // Issue a short-lived reset token (15 min).
+    const resetToken = this.jwtService.sign(
+      { sub: user.id, purpose: 'password_reset' },
+      {
+        secret: this.configService.get<string>('jwt.secret'),
+        expiresIn: '15m',
+      },
+    );
+    return { reset_token: resetToken };
+  }
+
+  async resetAdminPassword(token: string, password: string) {
+    let payload: { sub: string; purpose: string };
+    try {
+      payload = this.jwtService.verify(token, {
+        secret: this.configService.get<string>('jwt.secret'),
+      });
+    } catch {
+      throw new BadRequestException('Reset token is invalid or expired.');
+    }
+
+    if (payload.purpose !== 'password_reset') {
+      throw new BadRequestException('Invalid reset token.');
+    }
+
+    const user = await this.userRepository.findOne({ where: { id: payload.sub } });
+    if (!user || user.role !== UserRole.ADMIN) {
+      throw new NotFoundException('Admin account not found.');
+    }
+
+    user.password_hash = await bcrypt.hash(password, 10);
+    user.refresh_token = null;
+    await this.userRepository.save(user);
+
+    return { message: 'Password reset successfully.' };
   }
 
   // ─── Internals ───────────────────────────────────────────────────────────────

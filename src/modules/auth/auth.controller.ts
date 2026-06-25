@@ -9,6 +9,9 @@ import {
   RefreshTokenDto,
   ResendOTPDto,
   UpdateProfileDto,
+  ForgotPasswordDto,
+  VerifyResetOtpDto,
+  ResetPasswordDto,
 } from './dto/auth.dto';
 import { Public } from '../../common/decorators/public.decorator';
 import { GetUser } from '../../common/decorators/get-user.decorator';
@@ -97,6 +100,35 @@ export class AuthController {
   @ApiResponse({ status: 400, description: 'Active booking in progress' })
   async deleteAccount(@GetUser() user: User) {
     return this.authService.deleteAccount(user.id);
+  }
+
+  @Public()
+  @Post('forgot-password')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Send password reset OTP to admin email' })
+  @ApiResponse({ status: 200, description: 'OTP sent (or silently skipped if email not found)' })
+  async forgotPassword(@Body() dto: ForgotPasswordDto) {
+    return this.authService.forgotAdminPassword(dto.email);
+  }
+
+  @Public()
+  @Post('verify-reset-otp')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Verify password reset OTP and receive a reset token' })
+  @ApiResponse({ status: 200, description: 'OTP verified, reset token returned' })
+  @ApiResponse({ status: 400, description: 'Invalid or expired OTP' })
+  async verifyResetOtp(@Body() dto: VerifyResetOtpDto) {
+    return this.authService.verifyAdminResetOtp(dto.email, dto.otp);
+  }
+
+  @Public()
+  @Post('reset-password')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Reset admin password using the reset token' })
+  @ApiResponse({ status: 200, description: 'Password reset successfully' })
+  @ApiResponse({ status: 400, description: 'Invalid or expired reset token' })
+  async resetPassword(@Body() dto: ResetPasswordDto) {
+    return this.authService.resetAdminPassword(dto.token, dto.password);
   }
 
   @Public()

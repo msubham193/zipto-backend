@@ -25,7 +25,7 @@ interface EmailOtpRecord {
   expiresAt: number; // epoch ms
 }
 
-export type OtpPurpose = 'password_change' | 'admin_verify';
+export type OtpPurpose = 'password_change' | 'admin_verify' | 'password_reset';
 
 @Injectable()
 export class EmailService {
@@ -207,6 +207,11 @@ export class EmailService {
         return {
           subject: 'Verify your Zipto Admin email',
           intro: 'Use the code below to verify your email address. It expires in 10 minutes.',
+        };
+      case 'password_reset':
+        return {
+          subject: 'Reset your Zipto Admin password',
+          intro: 'Use the code below to reset your admin password. It expires in 10 minutes.',
         };
     }
   }

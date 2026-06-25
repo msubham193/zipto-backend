@@ -183,6 +183,43 @@ export class DeleteAccountDto {
   email: string;
 }
 
+export class ForgotPasswordDto {
+  @ApiProperty({ example: 'admin@zipto.in' })
+  @IsEmail()
+  @IsNotEmpty()
+  @MaxLength(254)
+  email: string;
+}
+
+export class VerifyResetOtpDto {
+  @ApiProperty({ example: 'admin@zipto.in' })
+  @IsEmail()
+  @IsNotEmpty()
+  @MaxLength(254)
+  email: string;
+
+  @ApiProperty({ example: '482916' })
+  @IsString()
+  @IsNotEmpty()
+  @MinLength(6)
+  @MaxLength(6)
+  otp: string;
+}
+
+export class ResetPasswordDto {
+  @ApiProperty({ example: 'eyJhbGc...' })
+  @IsString()
+  @IsNotEmpty()
+  token: string;
+
+  @ApiProperty({ example: 'NewPass@123' })
+  @IsString()
+  @IsNotEmpty()
+  @MinLength(8)
+  @MaxLength(128)
+  password: string;
+}
+
 export class UpdateProfileDto {
   @ApiProperty({ example: 'Ashwini', required: false })
   @IsOptional()
