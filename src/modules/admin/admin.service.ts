@@ -21,6 +21,7 @@ import { DriverWalletService } from '../driver/driver-wallet.service';
 import { RazorpayXService } from '../../services/razorpayx.service';
 import { CashfreePayoutService } from '../../services/cashfree-payout.service';
 import { S3Service } from '../../services/s3.service';
+import { MapboxService } from '../../services/mapbox.service';
 import { SystemSettingsService } from '../settings/system-settings.service';
 
 @Injectable()
@@ -52,6 +53,7 @@ export class AdminService {
     private razorpayXService: RazorpayXService,
     private cashfreePayoutService: CashfreePayoutService,
     private s3Service: S3Service,
+    private mapboxService: MapboxService,
     private systemSettings: SystemSettingsService,
   ) {}
 
@@ -513,21 +515,33 @@ export class AdminService {
       profile_image: driver.profile_image,
     });
 
-    // Decode the PostGIS geography Point into plain lat/lng for the map.
+    // Decode the PostGIS geography Point into plain lat/lng + fetch last_location_at.
     const loc: any[] = await this.dataSource.query(
       `SELECT ST_Y(current_location::geometry) AS lat,
-              ST_X(current_location::geometry) AS lng
+              ST_X(current_location::geometry) AS lng,
+              last_location_at
          FROM driver_profiles WHERE id = $1`,
       [driverId],
     );
     const current_lat = loc?.[0]?.lat != null ? Number(loc[0].lat) : null;
     const current_lng = loc?.[0]?.lng != null ? Number(loc[0].lng) : null;
+    const last_location_at: Date | null = loc?.[0]?.last_location_at ?? null;
+
+    // Reverse-geocode the last known position to a human-readable address (best-effort).
+    let last_active_address: string | null = null;
+    if (current_lat != null && current_lng != null) {
+      last_active_address = await this.mapboxService
+        .reverseGeocode(current_lat, current_lng)
+        .catch(() => null);
+    }
 
     return {
       ...driver,
       ...signedDocs,
       current_lat,
       current_lng,
+      last_location_at,
+      last_active_address,
       statistics: {
         total_bookings: totalBookings,
         completed_bookings: completedBookings,
