@@ -412,6 +412,15 @@ export class DriverService {
       );
     }
 
+    // A (re)submission goes back to PENDING for admin review and clears any prior
+    // rejection — unless the driver is already APPROVED (don't un-verify an active
+    // driver who is just editing details). This is how a REJECTED driver who
+    // re-uploads documents returns to the verification queue.
+    if (profile.verification_status !== VerificationStatus.APPROVED) {
+      profile.verification_status = VerificationStatus.PENDING;
+      profile.rejection_reason = null;
+    }
+
     await this.driverProfileRepository.save(profile);
 
     // Handle Vehicle Details

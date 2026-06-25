@@ -320,58 +320,29 @@ export class AdminService {
       throw new NotFoundException('Driver profile not found');
     }
 
-    const cleanReason = (reason || '').trim() || undefined;
+    const cleanReason = (reason || '').trim() || null;
 
-    // Notify before wiping data so the FCM token is still valid.
-    await this.notificationService.notifyDriverRejected(profile.user_id, cleanReason).catch(() => {});
-
-    // Purge KYC documents from cloud storage (best-effort — never block the rejection).
-    for (const ref of [
-      profile.aadhar_front_image,
-      profile.aadhar_back_image,
-      profile.driving_license_image,
-      profile.vehicle_rc_image,
-      profile.profile_image,
-    ]) {
-      if (ref) await this.s3Service.deleteFile(ref).catch(() => {});
-    }
-
-    // Detach bookings from this driver's vehicles BEFORE deleting them.
-    // bookings.vehicle_id has a FK to vehicles, so deleting a vehicle that a
-    // booking references — directly here, or via the driver-profile CASCADE below
-    // — violates the constraint and 500s the whole rejection. Null the reference
-    // instead; booking history is preserved (a booking's driver_id is the user,
-    // not the vehicle).
-    const driverVehicles = await this.vehicleRepository.find({
-      where: { driver_id: profile.id },
-      select: ['id'],
-    });
-    const vehicleIds = driverVehicles.map((v) => v.id);
-    if (vehicleIds.length) {
-      await this.bookingRepository
-        .createQueryBuilder()
-        .update(Booking)
-        .set({ vehicle_id: () => 'NULL' })
-        .where('vehicle_id IN (:...vehicleIds)', { vehicleIds })
-        .execute()
-        .catch(() => {});
-    }
-
-    // Delete any vehicles linked to this driver profile.
-    await this.vehicleRepository.delete({ driver_id: profile.id }).catch(() => {});
-
-    // Delete the driver profile entirely so the driver can re-onboard fresh.
-    await this.driverProfileRepository.delete({ id: driverProfileId });
-
-    // Reset the user: clear verification + sessions so they land back at onboarding.
-    await this.userRepository.update(profile.user_id, {
-      is_verified: false,
-      refresh_token: null,
-      fcm_token: null,
+    // Mark the profile REJECTED with the reason — do NOT delete it. Deleting
+    // cascaded to vehicles/bookings (FK 500s) and wiped the documents, and left
+    // the rider app showing "verification in progress" (getVerificationStatus
+    // falls back to PENDING when there's no profile). Keeping the profile lets
+    // the app show "Rejected" + reason, and the driver re-submits documents
+    // (onboardDriver flips the status back to PENDING for review).
+    await this.driverProfileRepository.update(driverProfileId, {
+      verification_status: VerificationStatus.REJECTED,
+      rejection_reason: cleanReason,
     });
 
-    this.logger.log(`[rejectDriver] profile ${driverProfileId} deleted, user ${profile.user_id} reset`);
-    return { message: 'Driver rejected and data cleared. Driver can re-register.' };
+    // Notify the driver with the reason (best-effort — never block the rejection).
+    await this.notificationService
+      .notifyDriverRejected(profile.user_id, cleanReason ?? undefined)
+      .catch(() => {});
+
+    // Ensure the user isn't flagged verified (a rejected driver can't go online).
+    await this.userRepository.update(profile.user_id, { is_verified: false });
+
+    this.logger.log(`[rejectDriver] profile ${driverProfileId} marked REJECTED`);
+    return { message: 'Driver rejected. They can re-submit their documents.' };
   }
 
   /**
