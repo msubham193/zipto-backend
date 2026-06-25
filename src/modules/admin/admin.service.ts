@@ -1281,25 +1281,30 @@ export class AdminService {
   }) {
     const { start, end } = this.getDateRange(query);
 
-    // Calculate Driver Stats based on bookings in period
+    // Per-driver revenue split over completed bookings in the period:
+    //   riderRevenue    = driver earnings (the driver's actual take-home)
+    //   platformRevenue = Zipto's cut = commission + platform fee + shield
+    // (GST is excluded — it's a remitted tax, not anyone's revenue.) Computed
+    // from booking columns, not a flat % approximation.
     const topDrivers = await this.bookingRepository
       .createQueryBuilder('booking')
       .leftJoin('booking.driver', 'driver') // Join with user
-      .leftJoin('booking.payments', 'payment', 'payment.payment_status = :paymentStatus', {
-        paymentStatus: PaymentStatus.COMPLETED,
-      })
       .select('booking.driver_id', 'id')
       .addSelect('driver.name', 'name')
       .addSelect('COUNT(booking.id)', 'trips')
-      .addSelect('COALESCE(SUM(payment.amount) * 0.8, 0)', 'earnings') // Approx 80% earnings
-      // We don't have direct rating on booking, checking driver profile
-      // For now, fetching simplified data
+      .addSelect('COALESCE(SUM(booking.driver_earnings), 0)', 'riderRevenue')
+      .addSelect(
+        `COALESCE(SUM(booking.skido_commission), 0)
+         + COALESCE(SUM((booking.fare_breakdown->>'platform_fee')::numeric), 0)
+         + COALESCE(SUM((booking.fare_breakdown->>'shield_fee')::numeric), 0)`,
+        'platformRevenue',
+      )
       .where('booking.created_at BETWEEN :start AND :end', { start, end })
       .andWhere('booking.status = :status', { status: BookingStatus.COMPLETED })
       .andWhere('booking.driver_id IS NOT NULL')
       .groupBy('booking.driver_id')
       .addGroupBy('driver.name') // Postgres requires this
-      .orderBy('earnings', 'DESC')
+      .orderBy('"platformRevenue"', 'DESC')
       .limit(10)
       .getRawMany();
 
