@@ -433,7 +433,13 @@ export class DriverService {
       vehicle.registration_number = vehicle_registration_number;
       if (vehicle_type) vehicle.vehicle_type = vehicle_type as VehicleType;
       if (vehicle_model) vehicle.vehicle_model = vehicle_model;
-      if (vehicle_capacity) vehicle.capacity = vehicle_capacity;
+      if (vehicle_capacity != null && String(vehicle_capacity).trim() !== '') {
+        // capacity is an INTEGER column but arrives as a raw multipart string
+        // (the app may send "20" or a label like "Up to 20kg"). Extract the first
+        // integer and default to 0 rather than letting a bad string 500 the insert.
+        const digits = String(vehicle_capacity).match(/\d+/);
+        vehicle.capacity = digits ? parseInt(digits[0], 10) : 0;
+      }
 
       if (files.vehicle_rc?.[0]) {
         vehicle.rc_document_url = await this.s3Service.uploadFile(
