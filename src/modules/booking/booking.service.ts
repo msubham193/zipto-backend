@@ -213,10 +213,10 @@ export class BookingService {
     }
 
     // --- Platform fee + GST (admin-configurable) ---
-    // GST applies to the DELIVERY CHARGE only (the ride) — a pass-through tax
-    // collected on top of the fare. The flat platform fee is added separately
-    // and is NOT taxed. Commission/driver earnings are on the pre-GST delivery
-    // charge (GST is remitted to the government, not platform/driver revenue).
+    // GST applies to the TAXABLE VALUE = delivery charge + platform fee — a
+    // pass-through tax collected on top. (The Zipto Shield is NOT in the taxable
+    // value; it stays a driver-side deduction.) Commission/driver earnings are on
+    // the pre-GST delivery charge (GST is remitted to the government).
     const fareSettings = await this.systemSettings.getFareSettings();
     const platformFee = this.round(fareSettings.platform_fee);
     const gstPercent = fareSettings.gst_percent;
@@ -247,17 +247,20 @@ export class BookingService {
       deliveryCharge = minimumFare as number;
     }
 
-    // 5. GST on the delivery charge. Intra-state supply → CGST + SGST, each
-    //    computed INDEPENDENTLY at gst%/2 to 2 decimals. (Never round the total
-    //    then halve it — that skews 9%+9% into e.g. ₹4 + ₹3 instead of the
-    //    correct ₹3.60 + ₹3.60.) GST total is the sum so the invoice foots.
+    // 5. Taxable value = delivery charge + platform fee (both are taxable supply).
+    const taxableValue = this.round2(deliveryCharge + platformFee);
+
+    // 6. GST on the taxable value. Intra-state supply → CGST + SGST, each computed
+    //    INDEPENDENTLY at gst%/2 to 2 decimals. (Never round the total then halve
+    //    it — that skews the split.) GST total is the sum so the invoice foots.
     const halfRate = gstPercent / 2;
-    const cgstAmount = this.round2(deliveryCharge * (halfRate / 100));
-    const sgstAmount = this.round2(deliveryCharge * (halfRate / 100));
+    const cgstAmount = this.round2(taxableValue * (halfRate / 100));
+    const sgstAmount = this.round2(taxableValue * (halfRate / 100));
     const gstAmount = this.round2(cgstAmount + sgstAmount);
 
-    // 6. Total the customer pays = delivery charge + GST + platform fee
-    const estimatedFare = this.round2(deliveryCharge + gstAmount + platformFee);
+    // 7. Total the customer pays = taxable value + GST (platform fee is already
+    //    inside the taxable value, so it is NOT added again).
+    const estimatedFare = this.round2(taxableValue + gstAmount);
 
     // 7. Commission split on the delivery charge (pre-GST, excl. platform fee).
     //    The Zipto Shield fee is also deducted from the driver (funds the shield
@@ -299,11 +302,12 @@ export class BookingService {
         multi_stop_charge: multiStopCharge,
         delivery_charge: deliveryCharge,
         platform_fee: platformFee,
+        taxable_value: taxableValue, // delivery + platform (GST base)
         gst_percent: gstPercent,
         gst_amount: gstAmount,
         cgst_amount: cgstAmount,
         sgst_amount: sgstAmount,
-        platform_fee_gst: gstAmount, // backward-compat alias (now = GST on delivery)
+        platform_fee_gst: gstAmount, // backward-compat alias (now = GST on taxable value)
         surge_multiplier: surgeMultiplier,
         subtotal: deliveryCharge,
         total_payable: estimatedFare,

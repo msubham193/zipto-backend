@@ -1008,7 +1008,11 @@ export class AdminService {
       `SELECT b.id AS booking_id, b.created_at, b.customer_gstin,
               COALESCE(u.name, b.name) AS customer_name,
               COALESCE(u.phone, b.mobile_number) AS customer_phone,
-              (b.fare_breakdown->>'delivery_charge')::numeric AS delivery_charge,
+              COALESCE(
+                (b.fare_breakdown->>'taxable_value')::numeric,
+                (b.fare_breakdown->>'delivery_charge')::numeric
+                  + COALESCE((b.fare_breakdown->>'platform_fee')::numeric, 0)
+              ) AS delivery_charge,
               (b.fare_breakdown->>'gst_percent')::numeric  AS gst_percent,
               (b.fare_breakdown->>'cgst_amount')::numeric   AS cgst_amount,
               (b.fare_breakdown->>'sgst_amount')::numeric   AS sgst_amount,
@@ -1029,7 +1033,11 @@ export class AdminService {
               COALESCE(SUM((b.fare_breakdown->>'gst_amount')::numeric),0)    AS total_gst,
               COALESCE(SUM((b.fare_breakdown->>'cgst_amount')::numeric),0)   AS total_cgst,
               COALESCE(SUM((b.fare_breakdown->>'sgst_amount')::numeric),0)   AS total_sgst,
-              COALESCE(SUM((b.fare_breakdown->>'delivery_charge')::numeric),0) AS total_taxable,
+              COALESCE(SUM(COALESCE(
+                (b.fare_breakdown->>'taxable_value')::numeric,
+                (b.fare_breakdown->>'delivery_charge')::numeric
+                  + COALESCE((b.fare_breakdown->>'platform_fee')::numeric, 0)
+              )),0) AS total_taxable,
               COUNT(*) FILTER (WHERE b.customer_gstin IS NOT NULL)::int AS b2b_count,
               COUNT(*) FILTER (WHERE b.customer_gstin IS NULL)::int     AS b2c_count,
               COALESCE(SUM((b.fare_breakdown->>'gst_amount')::numeric) FILTER (WHERE b.customer_gstin IS NOT NULL),0) AS b2b_gst,
@@ -1102,6 +1110,9 @@ export class AdminService {
       charges: {
         delivery_charge: bd.delivery_charge ?? null,
         platform_fee: bd.platform_fee ?? 0,
+        taxable_value:
+          bd.taxable_value ??
+          ((Number(bd.delivery_charge) || 0) + (Number(bd.platform_fee) || 0)),
         gst_percent: bd.gst_percent ?? 0,
         cgst_amount: bd.cgst_amount ?? 0,
         sgst_amount: bd.sgst_amount ?? 0,

@@ -21,6 +21,7 @@ export interface InvoiceData {
   charges: {
     delivery_charge: number | null;
     platform_fee: number | null;
+    taxable_value: number | null;
     gst_percent: number | null;
     cgst_amount: number | null;
     sgst_amount: number | null;
@@ -69,6 +70,10 @@ export function buildInvoiceData(booking: any, payment: any, tax: TaxSettings): 
     charges: {
       delivery_charge: bd.delivery_charge ?? null,
       platform_fee: bd.platform_fee ?? 0,
+      // Taxable value = delivery + platform (GST base). Fall back for old orders.
+      taxable_value:
+        bd.taxable_value ??
+        ((Number(bd.delivery_charge) || 0) + (Number(bd.platform_fee) || 0)),
       gst_percent: bd.gst_percent ?? 0,
       cgst_amount: bd.cgst_amount ?? 0,
       sgst_amount: bd.sgst_amount ?? 0,
@@ -158,8 +163,9 @@ export function renderInvoiceHtml(inv: InvoiceData): string {
     <thead><tr><th>Description</th><th style="text-align:right">Amount</th></tr></thead>
     <tbody>
       <tr><td colspan="2" style="padding:8px 12px;border-bottom:1px solid #eee;color:#64748b">${esc(inv.description)}</td></tr>
-      ${row('Delivery charge (taxable value)', inr(c.delivery_charge))}
+      ${row('Delivery charge', inr(c.delivery_charge))}
       ${(Number(c.platform_fee) > 0) ? row('Platform fee', inr(c.platform_fee)) : ''}
+      ${row('Taxable value', inr(c.taxable_value))}
       ${(Number(c.cgst_amount) > 0) ? row(`CGST (${half}%)`, inr(c.cgst_amount)) : ''}
       ${(Number(c.sgst_amount) > 0) ? row(`SGST (${half}%)`, inr(c.sgst_amount)) : ''}
       ${(Number(c.gst_amount) > 0 && !(Number(c.cgst_amount) > 0)) ? row(`GST (${Number(c.gst_percent) || 0}%)`, inr(c.gst_amount)) : ''}
@@ -267,8 +273,9 @@ export function buildInvoicePdf(inv: InvoiceData): Promise<Buffer> {
       };
 
       const half = (Number(c.gst_percent) || 0) / 2;
-      drawRow('Delivery charge (taxable value)', rs(c.delivery_charge));
+      drawRow('Delivery charge', rs(c.delivery_charge));
       if (Number(c.platform_fee) > 0) drawRow('Platform fee', rs(c.platform_fee));
+      drawRow('Taxable value', rs(c.taxable_value));
       if (Number(c.cgst_amount) > 0) drawRow(`CGST (${half}%)`, rs(c.cgst_amount));
       if (Number(c.sgst_amount) > 0) drawRow(`SGST (${half}%)`, rs(c.sgst_amount));
       if (Number(c.gst_amount) > 0 && !(Number(c.cgst_amount) > 0)) drawRow(`GST (${Number(c.gst_percent) || 0}%)`, rs(c.gst_amount));
