@@ -453,6 +453,11 @@ export class DriverService {
 
       vehicle.driver_id = profile.id; // (re)assign to the current driver
       vehicle.registration_number = vehicle_registration_number;
+      // A (re)submission puts the vehicle back in the review queue too (unless it
+      // is already approved), so the admin re-reviews the corrected details.
+      if (vehicle.verification_status !== VerificationStatus.APPROVED) {
+        vehicle.verification_status = VerificationStatus.PENDING;
+      }
       if (vehicle_type) vehicle.vehicle_type = vehicle_type as VehicleType;
       if (vehicle_model) vehicle.vehicle_model = vehicle_model;
       if (vehicle_capacity != null && String(vehicle_capacity).trim() !== '') {
@@ -1204,14 +1209,19 @@ export class DriverService {
       where: { user_id: userId },
     });
 
+    const rejectionReason = profile?.rejection_reason?.trim() || null;
+
     return {
       is_verified: user.is_verified,
       verification_status: profile?.verification_status || VerificationStatus.PENDING,
+      rejection_reason: rejectionReason,
       message:
         profile?.verification_status === VerificationStatus.APPROVED
           ? 'Your profile has been verified by the admin.'
           : profile?.verification_status === VerificationStatus.REJECTED
-            ? 'Your profile has been rejected. Please contact support.'
+            ? rejectionReason
+              ? `Your application was rejected: ${rejectionReason}. Please correct it and re-submit your documents.`
+              : 'Your application was rejected. Please re-submit your documents with the correct details.'
             : 'Your profile is pending admin verification.',
     };
   }
