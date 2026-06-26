@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, Between, DataSource } from 'typeorm';
+import { Repository, Between, DataSource, In } from 'typeorm';
 import { User, UserRole } from '../auth/entities/user.entity';
 import { Booking, BookingStatus } from '../booking/entities/booking.entity';
 import { Payment, PaymentStatus } from '../payment/entities/payment.entity';
@@ -264,19 +264,41 @@ export class AdminService {
       relations: ['user'],
       order: { created_at: 'ASC' },
     });
+
+    // Pull every pending driver's vehicle in one query, then map by driver_id so
+    // the admin KYC list shows the vehicle details captured at registration.
+    const profileIds = profiles.map((p) => p.id);
+    const vehicles = profileIds.length
+      ? await this.vehicleRepository.find({ where: { driver_id: In(profileIds) } })
+      : [];
+    const vehicleByDriver = new Map(vehicles.map((v) => [v.driver_id, v]));
+
     // Documents are stored as private R2 keys → presign so the admin KYC page
     // can render them (same as getDriverById / getDriverKyc).
     return Promise.all(
-      profiles.map(async (p) => ({
-        ...p,
-        ...(await this.s3Service.signFields({
-          aadhar_front_image: p.aadhar_front_image,
-          aadhar_back_image: p.aadhar_back_image,
-          driving_license_image: p.driving_license_image,
-          vehicle_rc_image: p.vehicle_rc_image,
-          profile_image: p.profile_image,
-        })),
-      })),
+      profiles.map(async (p) => {
+        const v = vehicleByDriver.get(p.id);
+        return {
+          ...p,
+          ...(await this.s3Service.signFields({
+            aadhar_front_image: p.aadhar_front_image,
+            aadhar_back_image: p.aadhar_back_image,
+            driving_license_image: p.driving_license_image,
+            vehicle_rc_image: p.vehicle_rc_image,
+            profile_image: p.profile_image,
+          })),
+          vehicle: v
+            ? {
+                id: v.id,
+                registration_number: v.registration_number,
+                vehicle_type: v.vehicle_type,
+                vehicle_model: v.vehicle_model,
+                capacity: v.capacity,
+                verification_status: v.verification_status,
+              }
+            : null,
+        };
+      }),
     );
   }
 
@@ -556,16 +578,21 @@ export class AdminService {
       throw new Error('Driver not found');
     }
 
-    // Recover missing vehicle_id for older driver profiles
-    if (!driver.vehicle_id) {
-      const vehicle = await this.vehicleRepository.findOne({
-        where: { driver_id: driverId },
-      });
-      if (vehicle) {
-        driver.vehicle_id = vehicle.id;
-        await this.driverProfileRepository.update(driverId, { vehicle_id: vehicle.id });
-      }
+    // Load the driver's vehicle (registration number, type, model, capacity) so
+    // the admin panel can show the vehicle details captured at onboarding.
+    const vehicle = await this.vehicleRepository.findOne({
+      where: { driver_id: driverId },
+    });
+    if (vehicle && driver.vehicle_id !== vehicle.id) {
+      driver.vehicle_id = vehicle.id;
+      await this.driverProfileRepository.update(driverId, { vehicle_id: vehicle.id });
     }
+    const signedVehicle = vehicle
+      ? {
+          ...vehicle,
+          rc_document_url: await this.s3Service.getSignedUrl(vehicle.rc_document_url),
+        }
+      : null;
 
     // bookings.driver_id stores the User ID (not DriverProfile ID)
     const driverUserId = driver.user_id;
@@ -625,6 +652,7 @@ export class AdminService {
     return {
       ...driver,
       ...signedDocs,
+      vehicle: signedVehicle,
       current_lat,
       current_lng,
       last_location_at,
@@ -870,6 +898,11 @@ export class AdminService {
       profile_image: profile.profile_image,
     });
 
+    // Vehicle details captured at onboarding (for the KYC review screen).
+    const vehicle = await this.vehicleRepository.findOne({
+      where: { driver_id: profile.id },
+    });
+
     return {
       driver_id: profile.id,
       user_id: profile.user_id,
@@ -879,6 +912,16 @@ export class AdminService {
       license_number: profile.license_number,
       license_expiry: profile.license_expiry,
       documents,
+      vehicle: vehicle
+        ? {
+            id: vehicle.id,
+            registration_number: vehicle.registration_number,
+            vehicle_type: vehicle.vehicle_type,
+            vehicle_model: vehicle.vehicle_model,
+            capacity: vehicle.capacity,
+            verification_status: vehicle.verification_status,
+          }
+        : null,
     };
   }
 
