@@ -1727,6 +1727,18 @@ export class BookingService {
         payment_status: PaymentStatus.COMPLETED,
       });
       await this.paymentRepository.save(cashPayment);
+
+      // Settled in cash → mark any leftover PENDING UPI (Cashfree QR/link)
+      // payment for this booking as FAILED, so admin doesn't show a stale
+      // "pending UPI" next to a cash-completed order.
+      await this.paymentRepository.update(
+        {
+          booking_id: bookingId,
+          payment_status: PaymentStatus.PENDING,
+          payment_method: PaymentMethod.UPI,
+        },
+        { payment_status: PaymentStatus.FAILED },
+      );
     } else if (paymentMethod !== 'cash') {
       // ── ONLINE / QR TRIP ─────────────────────────────────────────────────────
       // Credit driver earnings — idempotent (won't double-credit on retry).
