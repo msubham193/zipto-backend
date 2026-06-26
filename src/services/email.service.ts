@@ -194,6 +194,59 @@ export class EmailService {
     await this.sendMail(to, 'Your Zipto Admin account is ready', this.shell('Welcome to Zipto Admin', body));
   }
 
+  /** Sent to a driver when the admin APPROVES their KYC. */
+  async sendDriverApproved(to: string, name: string): Promise<void> {
+    const body = `
+      <p style="margin:0 0 16px">Hi ${this.esc(name || 'there')},</p>
+      <p style="margin:0 0 16px">
+        Great news — your Zipto delivery-partner application has been
+        <strong>approved</strong>! Your profile and vehicle have been verified by our team.
+      </p>
+      <p style="margin:0 0 16px">
+        You can now open the <strong>Zipto Partner</strong> app, go online, and start
+        accepting delivery requests. Welcome to the Zipto fleet 🚀
+      </p>
+      <p style="margin:24px 0 0;font-size:13px;color:#64748b">
+        Questions? Just reply to this email or contact support.
+      </p>`;
+    await this.sendMail(
+      to,
+      'Your Zipto partner account is approved 🎉',
+      this.shell('Application Approved', body),
+    );
+  }
+
+  /** Sent to a driver when the admin REJECTS their KYC (with an optional reason). */
+  async sendDriverRejected(to: string, name: string, reason?: string): Promise<void> {
+    const cleanReason = (reason || '').trim();
+    const reasonBlock = cleanReason
+      ? `<div style="background:#fef2f2;border:1px solid #fecaca;border-radius:12px;padding:16px;margin:0 0 16px">
+           <div style="font-size:13px;color:#b91c1c;margin-bottom:6px;font-weight:600">Reason</div>
+           <div style="font-size:15px;color:#7f1d1d">${this.esc(cleanReason)}</div>
+         </div>`
+      : '';
+    const body = `
+      <p style="margin:0 0 16px">Hi ${this.esc(name || 'there')},</p>
+      <p style="margin:0 0 16px">
+        Thank you for applying to become a Zipto delivery partner. Unfortunately your
+        application could not be approved at this time.
+      </p>
+      ${reasonBlock}
+      <p style="margin:0 0 16px">
+        You can correct the issue and re-submit directly in the <strong>Zipto Partner</strong>
+        app — open it and tap <strong>Re-upload Documents</strong> on the verification screen.
+        Our team will review your updated application.
+      </p>
+      <p style="margin:24px 0 0;font-size:13px;color:#64748b">
+        If you believe this was a mistake, reply to this email or contact support.
+      </p>`;
+    await this.sendMail(
+      to,
+      'Update on your Zipto partner application',
+      this.shell('Application Update', body),
+    );
+  }
+
   // ─── Templates ──────────────────────────────────────────────────────────────
 
   private otpCopy(purpose: OtpPurpose): { subject: string; intro: string } {

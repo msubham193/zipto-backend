@@ -22,6 +22,7 @@ import { RazorpayXService } from '../../services/razorpayx.service';
 import { CashfreePayoutService } from '../../services/cashfree-payout.service';
 import { S3Service } from '../../services/s3.service';
 import { MapboxService } from '../../services/mapbox.service';
+import { EmailService } from '../../services/email.service';
 import { SystemSettingsService } from '../settings/system-settings.service';
 
 @Injectable()
@@ -55,6 +56,7 @@ export class AdminService {
     private s3Service: S3Service,
     private mapboxService: MapboxService,
     private systemSettings: SystemSettingsService,
+    private emailService: EmailService,
   ) {}
 
   /**
@@ -326,8 +328,20 @@ export class AdminService {
       is_verified: true,
     });
 
-    // Notify driver
+    // Notify driver (push) + email
     await this.notificationService.notifyDriverApproved(profile.user_id);
+
+    const user = await this.userRepository.findOne({
+      where: { id: profile.user_id },
+      select: ['name', 'email'],
+    });
+    if (user?.email) {
+      this.emailService
+        .sendDriverApproved(user.email, user.name || 'there')
+        .catch((err) =>
+          this.logger.warn(`[approveDriver] approval email failed: ${err?.message}`),
+        );
+    }
 
     return { message: 'Driver approved successfully' };
   }
@@ -361,6 +375,19 @@ export class AdminService {
     await this.notificationService
       .notifyDriverRejected(profile.user_id, cleanReason ?? undefined)
       .catch(() => {});
+
+    // Email the driver with the reason (best-effort).
+    const user = await this.userRepository.findOne({
+      where: { id: profile.user_id },
+      select: ['name', 'email'],
+    });
+    if (user?.email) {
+      this.emailService
+        .sendDriverRejected(user.email, user.name || 'there', cleanReason ?? undefined)
+        .catch((err) =>
+          this.logger.warn(`[rejectDriver] rejection email failed: ${err?.message}`),
+        );
+    }
 
     // Ensure the user isn't flagged verified (a rejected driver can't go online).
     await this.userRepository.update(profile.user_id, { is_verified: false });
