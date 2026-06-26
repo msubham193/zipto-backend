@@ -124,6 +124,7 @@ export class AdminService {
               b.skido_commission AS commission,
               (b.fare_breakdown->>'platform_fee')::numeric AS platform_fee,
               (b.fare_breakdown->>'shield_fee')::numeric   AS shield,
+              (b.fare_breakdown->>'gst_amount')::numeric   AS gst,
               b.driver_earnings
          FROM bookings b
          LEFT JOIN users u ON u.id = b.customer_id
@@ -161,6 +162,7 @@ export class AdminService {
           commission: r2(c),
           platform_fee: r2(pf),
           shield: r2(sh),
+          gst: r2(row.gst),
           zipto_revenue: r2(c + pf + sh),
           driver_earnings: r2(row.driver_earnings),
         };
