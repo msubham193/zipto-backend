@@ -235,17 +235,12 @@ export class BookingService {
     // 2. Multi-stop charge
     const multiStopCharge = this.round(extra_stops * multiStopFee);
 
-    // 3. Delivery charge (driver's service) = (base + distance + multi-stop) × surge
+    // 3. Delivery charge (driver's service) = (base + distance + multi-stop) × surge.
+    //    (Minimum fare removed — the delivery charge is no longer floored.)
     const deliveryBeforeSurge = baseFare + distanceCharge + multiStopCharge;
     const surgeMultiplier = await this.calculateSurgeMultiplier();
-    let deliveryCharge = this.round(deliveryBeforeSurge * surgeMultiplier);
-
-    // 4. Minimum fare floor (applies to the delivery charge)
-    const minimumFare = pricingRule.minimum_fare ? Number(pricingRule.minimum_fare) : null;
-    const minimumFareApplied = !!(minimumFare && deliveryCharge < minimumFare);
-    if (minimumFareApplied) {
-      deliveryCharge = minimumFare as number;
-    }
+    const deliveryCharge = this.round(deliveryBeforeSurge * surgeMultiplier);
+    const minimumFareApplied = false;
 
     // 5. Taxable value = delivery charge + platform fee (both are taxable supply).
     const taxableValue = this.round2(deliveryCharge + platformFee);
@@ -317,7 +312,7 @@ export class BookingService {
         driver_earnings: driverEarnings,
       },
       pricing_info: {
-        minimum_fare: minimumFare,
+        minimum_fare: null,
         free_waiting_minutes: Number(pricingRule.free_waiting_minutes),
         waiting_charge_per_minute: Number(pricingRule.waiting_charge_per_minute),
         multi_stop_fee: multiStopFee,
