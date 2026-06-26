@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { PaymentController } from './payment.controller';
 import { PaymentService } from './payment.service';
@@ -11,7 +11,7 @@ import { SettingsModule } from '../settings/settings.module';
 import { DriverModule } from '../driver/driver.module';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Payment, Booking]), AuthModule, NotificationModule, BookingModule, SettingsModule, DriverModule],
+  imports: [TypeOrmModule.forFeature([Payment, Booking]), AuthModule, NotificationModule, forwardRef(() => BookingModule), SettingsModule, DriverModule],
   controllers: [PaymentController],
   providers: [PaymentService],
   exports: [PaymentService],

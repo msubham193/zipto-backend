@@ -19,6 +19,7 @@ import { ZiptoShieldModule } from '../zipto-shield/zipto-shield.module';
 import { DriverModule } from '../driver/driver.module';
 import { CouponModule } from '../coupon/coupon.module';
 import { ReferralModule } from '../referral/referral.module';
+import { PaymentModule } from '../payment/payment.module';
 
 @Module({
   imports: [
@@ -36,6 +37,7 @@ import { ReferralModule } from '../referral/referral.module';
     ZiptoShieldModule,
     DriverModule,
     CouponModule,
+    forwardRef(() => PaymentModule),
   ],
   controllers: [BookingController],
   providers: [BookingService, BookingGateway, BookingProcessor],

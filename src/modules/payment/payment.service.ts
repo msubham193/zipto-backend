@@ -188,6 +188,42 @@ export class PaymentService {
     };
   }
 
+  /**
+   * Driver-side reconciliation: if the booking's latest payment is a PENDING
+   * Cashfree payment link (the delivery QR), verify it with Cashfree and mark it
+   * complete if paid — so the rider auto-sees "Paid" without waiting on the
+   * webhook. Best-effort and idempotent. No auth check (the driver poll only
+   * ever reaches their own active booking).
+   */
+  async verifyPendingLinkForBooking(bookingId: string): Promise<void> {
+    const payment = await this.paymentRepository.findOne({
+      where: { booking_id: bookingId },
+      order: { created_at: 'DESC' },
+    });
+    if (
+      !payment ||
+      payment.payment_status !== PaymentStatus.PENDING ||
+      !payment.payment_link_url ||
+      !payment.cashfree_order_id
+    ) {
+      return;
+    }
+    try {
+      const link = await this.cashfreeService.getPaymentLink(payment.cashfree_order_id);
+      if (link.isPaid) {
+        await this.markCashfreePaymentComplete(
+          payment.cashfree_order_id,
+          undefined,
+          Number(payment.amount),
+        );
+      }
+    } catch (err: any) {
+      this.logger.warn(
+        `[link] driver-side status check failed for booking ${bookingId}: ${err?.message}`,
+      );
+    }
+  }
+
   // ─────────────────────────────────────────────────────────────────────────
   // Cashfree PG — initiate payment (returns a checkout URL for the WebView)
   // ─────────────────────────────────────────────────────────────────────────

@@ -4,7 +4,10 @@ import {
   NotFoundException,
   BadRequestException,
   ForbiddenException,
+  Inject,
+  forwardRef,
 } from '@nestjs/common';
+import { PaymentService } from '../payment/payment.service';
 import { randomUUID } from 'crypto';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
@@ -54,6 +57,8 @@ export class BookingService {
   private pricingRulesSyncPromise?: Promise<void>;
 
   constructor(
+    @Inject(forwardRef(() => PaymentService))
+    private paymentService: PaymentService,
     @InjectRepository(Booking)
     private bookingRepository: Repository<Booking>,
     @InjectRepository(PricingRule)
@@ -1100,6 +1105,14 @@ export class BookingService {
     });
 
     if (!booking) return null;
+
+    // Reconcile a pending delivery-QR (Cashfree payment link) with Cashfree so the
+    // rider auto-sees "Paid" within a poll cycle, even if the webhook is delayed.
+    // Then re-read payments so the flag + returned list reflect a just-paid order.
+    await this.paymentService.verifyPendingLinkForBooking(booking.id).catch(() => {});
+    booking.payments = await this.paymentRepository.find({
+      where: { booking_id: booking.id },
+    });
 
     const isAlreadyPaid = booking.payments?.some(p => p.payment_status === 'completed') ?? false;
 
