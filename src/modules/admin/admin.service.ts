@@ -457,7 +457,20 @@ export class AdminService {
       throw new NotFoundException('Vehicle not found');
     }
 
-    return vehicle;
+    // Documents are private R2 keys → presign so the admin panel can view them.
+    // The RC may live on the vehicle (rc_document_url) or, for older/reassigned
+    // records, on the driver profile (vehicle_rc_image) — fall back to that.
+    const rcKey = vehicle.rc_document_url || vehicle.driver?.vehicle_rc_image || null;
+    const [rc_document_url, insurance_document_url] = await Promise.all([
+      this.s3Service.getSignedUrl(rcKey),
+      this.s3Service.getSignedUrl(vehicle.insurance_document_url),
+    ]);
+
+    return {
+      ...vehicle,
+      rc_document_url,
+      insurance_document_url,
+    };
   }
 
   /**
