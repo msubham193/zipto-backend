@@ -120,7 +120,9 @@ export class SystemSettingsService implements OnModuleInit {
       const map: Record<string, string> = {};
       for (const r of rows) { map[r.key] = r.value; }
       this.fareCache = {
-        platform_fee: Math.max(0, parseFloat(map.platform_fee ?? '5') || 0),
+        // Platform fee has a HARD FLOOR of ₹5 — it can be raised but never set
+        // below 5 (or 0). A stored 0/invalid value falls back to the ₹5 minimum.
+        platform_fee: Math.max(5, parseFloat(map.platform_fee ?? '5') || 5),
         gst_percent:  Math.max(0, parseFloat(map.gst_percent ?? '0') || 0),
       };
       this.fareCacheAt = Date.now();
