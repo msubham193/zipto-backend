@@ -366,7 +366,13 @@ export class PaymentService {
       }
       this.logger.warn(`[upiQr] no qrcode for booking=${bookingId} — falling back to payment link`);
     } catch (err: any) {
-      this.logger.warn(`[upiQr] failed for booking=${bookingId}: ${err?.message} — falling back to payment link`);
+      // Capture Cashfree's actual error body so we can see WHY the UPI QR failed
+      // (e.g. endpoint/version mismatch, UPI-QR not enabled on the account).
+      const cf = err?.response?.data;
+      this.logger.warn(
+        `[upiQr] failed for booking=${bookingId}: status=${err?.response?.status} ` +
+          `msg=${err?.message} cashfree=${cf ? JSON.stringify(cf) : 'n/a'} — falling back to payment link`,
+      );
     }
 
     // ── Fallback: Cashfree payment LINK (web page) ──
