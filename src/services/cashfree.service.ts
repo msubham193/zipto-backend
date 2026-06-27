@@ -119,6 +119,55 @@ export class CashfreeService {
     };
   }
 
+  /**
+   * Create an order and immediately request a UPI QR for it (channel=qrcode).
+   * Returns the order id + the QR payload — a `upi://` string OR a base64 PNG
+   * data-URI depending on the Cashfree API version. Scanning it opens the
+   * customer's UPI app DIRECTLY (no external web page), and the order is tracked
+   * so getOrder() can confirm it. Falls back to a null qrcode if the channel
+   * isn't available (caller can then fall back to a payment link).
+   */
+  async createUpiQr(params: {
+    orderId: string;
+    amount: number;
+    customerId: string;
+    customerPhone: string;
+    returnUrl: string;
+    notifyUrl: string;
+  }): Promise<{ orderId: string; qrcode: string | null }> {
+    const order = await this.createOrder({
+      orderId: params.orderId,
+      amount: params.amount,
+      customerId: params.customerId,
+      customerPhone: params.customerPhone,
+      returnUrl: params.returnUrl,
+      notifyUrl: params.notifyUrl,
+    });
+
+    const { data } = await axios.post(
+      `${this.baseUrl}/orders/sessions`,
+      {
+        payment_session_id: order.paymentSessionId,
+        payment_method: { upi: { channel: 'qrcode' } },
+      },
+      { headers: this.headers(), timeout: 15000 },
+    );
+
+    // The QR lives under data.payload.qrcode (base64 PNG data-URI or a upi://
+    // string). Be defensive about the response shape across API versions.
+    const qrcode: string | null =
+      data?.data?.payload?.qrcode ??
+      data?.data?.payload?.default ??
+      data?.payload?.qrcode ??
+      data?.qrcode ??
+      null;
+
+    this.logger.log(
+      `[upiQr] order=${order.orderId} qrcode=${qrcode ? 'present' : 'MISSING'}`,
+    );
+    return { orderId: order.orderId, qrcode };
+  }
+
   /** Fetch an order's current status (authoritative confirmation). */
   async getOrder(orderId: string): Promise<CashfreeOrderStatus> {
     const { data } = await axios.get(`${this.baseUrl}/orders/${orderId}`, {

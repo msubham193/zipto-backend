@@ -203,14 +203,17 @@ export class PaymentService {
     if (
       !payment ||
       payment.payment_status !== PaymentStatus.PENDING ||
-      !payment.payment_link_url ||
       !payment.cashfree_order_id
     ) {
       return;
     }
     try {
-      const link = await this.cashfreeService.getPaymentLink(payment.cashfree_order_id);
-      if (link.isPaid) {
+      // A payment_link_url means it's a Cashfree LINK (verify via getPaymentLink);
+      // otherwise it's a direct UPI-QR ORDER (verify via getOrder).
+      const isPaid = payment.payment_link_url
+        ? (await this.cashfreeService.getPaymentLink(payment.cashfree_order_id)).isPaid
+        : (await this.cashfreeService.getOrder(payment.cashfree_order_id)).isPaid;
+      if (isPaid) {
         await this.markCashfreePaymentComplete(
           payment.cashfree_order_id,
           undefined,
@@ -219,7 +222,7 @@ export class PaymentService {
       }
     } catch (err: any) {
       this.logger.warn(
-        `[link] driver-side status check failed for booking ${bookingId}: ${err?.message}`,
+        `[verify] driver-side status check failed for booking ${bookingId}: ${err?.message}`,
       );
     }
   }
@@ -316,18 +319,64 @@ export class PaymentService {
     });
     if (completed) throw new BadRequestException('Payment already completed for this booking');
 
+    // Reconcile any existing pending payment with Cashfree first — if it was
+    // already paid, surface that instead of creating a brand-new QR.
+    const existingPending = await this.paymentRepository.findOne({
+      where: { booking_id: bookingId, payment_status: PaymentStatus.PENDING },
+    });
+    if (existingPending) {
+      await this.verifyPendingLinkForBooking(bookingId).catch(() => {});
+      const nowPaid = await this.paymentRepository.findOne({
+        where: { booking_id: bookingId, payment_status: PaymentStatus.COMPLETED },
+      });
+      if (nowPaid) throw new BadRequestException('Payment already completed for this booking');
+    }
+
+    const base = this.publicBase();
+    const phone = (booking.mobile_number || (booking as any).receiver_phone || booking.customer?.phone || '')
+      .replace(/\D/g, '').slice(-10) || '9999999999';
+
+    // ── Preferred: a direct UPI QR (scanning opens the UPI app, NO external page) ──
+    try {
+      const orderId = this.cashfreeService.generateOrderId();
+      const { qrcode } = await this.cashfreeService.createUpiQr({
+        orderId,
+        amount,
+        customerId: `cust_${bookingId.replace(/-/g, '').slice(-12)}`,
+        customerPhone: phone,
+        notifyUrl: `${base}/payment/cashfree/webhook`,
+        returnUrl: `${base}/payment/cashfree/return?order_id={order_id}`,
+      });
+      if (qrcode) {
+        // Supersede any stale pending payment so only the latest order is open.
+        await this.paymentRepository.update(
+          { booking_id: bookingId, payment_status: PaymentStatus.PENDING, payment_method: PaymentMethod.UPI },
+          { payment_status: PaymentStatus.FAILED },
+        );
+        const payment = this.paymentRepository.create({
+          booking_id: bookingId,
+          amount,
+          payment_method: PaymentMethod.UPI,
+          payment_status: PaymentStatus.PENDING,
+          cashfree_order_id: orderId, // order (no payment_link_url) → verified via getOrder
+        });
+        await this.paymentRepository.save(payment);
+        this.logger.log(`[upiQr] order=${orderId} booking=${bookingId} ₹${amount}`);
+        return { qrcode, order_id: orderId, short_url: null, amount };
+      }
+      this.logger.warn(`[upiQr] no qrcode for booking=${bookingId} — falling back to payment link`);
+    } catch (err: any) {
+      this.logger.warn(`[upiQr] failed for booking=${bookingId}: ${err?.message} — falling back to payment link`);
+    }
+
+    // ── Fallback: Cashfree payment LINK (web page) ──
     const pending = await this.paymentRepository.findOne({
       where: { booking_id: bookingId, payment_status: PaymentStatus.PENDING },
     });
     if (pending?.payment_link_url) {
-      return { short_url: pending.payment_link_url, amount: Number(pending.amount) || amount };
+      return { short_url: pending.payment_link_url, qrcode: null, amount: Number(pending.amount) || amount };
     }
-
-    const base = this.publicBase();
     const linkId = `zlink${bookingId.replace(/-/g, '').slice(-10)}${Date.now().toString().slice(-6)}`;
-    const phone = (booking.mobile_number || (booking as any).receiver_phone || booking.customer?.phone || '')
-      .replace(/\D/g, '').slice(-10) || '9999999999';
-
     const { linkUrl } = await this.cashfreeService.createPaymentLink({
       linkId,
       amount,
@@ -337,8 +386,7 @@ export class PaymentService {
       notifyUrl: `${base}/payment/cashfree/webhook`,
       returnUrl: `${base}/payment/cashfree/return?order_id={order_id}`,
     });
-
-    const payment = this.paymentRepository.create({
+    const linkPayment = this.paymentRepository.create({
       booking_id: bookingId,
       amount,
       payment_method: PaymentMethod.UPI,
@@ -346,10 +394,9 @@ export class PaymentService {
       cashfree_order_id: linkId,
       payment_link_url: linkUrl,
     });
-    await this.paymentRepository.save(payment);
-
+    await this.paymentRepository.save(linkPayment);
     this.logger.log(`[link] Cashfree payment link created: ${linkId} booking=${bookingId} ₹${amount}`);
-    return { short_url: linkUrl, amount };
+    return { short_url: linkUrl, qrcode: null, amount };
   }
 
   /** HTML page (loaded in the app WebView) that launches the Cashfree checkout. */
