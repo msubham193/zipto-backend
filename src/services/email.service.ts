@@ -40,7 +40,7 @@ export class EmailService {
     private readonly redisService: RedisService,
   ) {
     const smtp = this.configService.get<any>('externalServices.smtp') || {};
-    this.from = smtp.from || 'Zipto <ride.zipto@gmail.com>';
+    this.from = smtp.from || 'Bookfleet <ride.zipto@gmail.com>';
     this.isDev = process.env.NODE_ENV !== 'production';
     this.enabled = Boolean(smtp.user && smtp.pass);
 
@@ -173,7 +173,7 @@ export class EmailService {
       <p style="margin:0 0 16px">Hi ${this.esc(name)},</p>
       <p style="margin:0 0 16px">
         ${this.esc(invitedBy)} has created an administrator account for you on the
-        <strong>Zipto Admin Panel</strong>. Use the temporary password below to sign in.
+        <strong>Bookfleet Admin Panel</strong>. Use the temporary password below to sign in.
       </p>
       <div style="background:#f1f5f9;border:1px solid #e2e8f0;border-radius:12px;padding:18px;margin:0 0 16px">
         <div style="font-size:13px;color:#64748b;margin-bottom:6px">Your login email</div>
@@ -191,7 +191,7 @@ export class EmailService {
         If you weren't expecting this email, please ignore it or contact your administrator.
       </p>`;
 
-    await this.sendMail(to, 'Your Zipto Admin account is ready', this.shell('Welcome to Zipto Admin', body));
+    await this.sendMail(to, 'Your Bookfleet Admin account is ready', this.shell('Welcome to Bookfleet Admin', body));
   }
 
   /** Sent to a driver when the admin APPROVES their KYC. */
@@ -199,19 +199,19 @@ export class EmailService {
     const body = `
       <p style="margin:0 0 16px">Hi ${this.esc(name || 'there')},</p>
       <p style="margin:0 0 16px">
-        Great news — your Zipto delivery-partner application has been
+        Great news — your Bookfleet delivery-partner application has been
         <strong>approved</strong>! Your profile and vehicle have been verified by our team.
       </p>
       <p style="margin:0 0 16px">
-        You can now open the <strong>Zipto Partner</strong> app, go online, and start
-        accepting delivery requests. Welcome to the Zipto fleet 🚀
+        You can now open the <strong>Bookfleet Partner</strong> app, go online, and start
+        accepting delivery requests. Welcome to the Bookfleet fleet 🚀
       </p>
       <p style="margin:24px 0 0;font-size:13px;color:#64748b">
         Questions? Just reply to this email or contact support.
       </p>`;
     await this.sendMail(
       to,
-      'Your Zipto partner account is approved 🎉',
+      'Your Bookfleet partner account is approved 🎉',
       this.shell('Application Approved', body),
     );
   }
@@ -228,12 +228,12 @@ export class EmailService {
     const body = `
       <p style="margin:0 0 16px">Hi ${this.esc(name || 'there')},</p>
       <p style="margin:0 0 16px">
-        Thank you for applying to become a Zipto delivery partner. Unfortunately your
+        Thank you for applying to become a Bookfleet delivery partner. Unfortunately your
         application could not be approved at this time.
       </p>
       ${reasonBlock}
       <p style="margin:0 0 16px">
-        You can correct the issue and re-submit directly in the <strong>Zipto Partner</strong>
+        You can correct the issue and re-submit directly in the <strong>Bookfleet Partner</strong>
         app — open it and tap <strong>Re-upload Documents</strong> on the verification screen.
         Our team will review your updated application.
       </p>
@@ -242,7 +242,7 @@ export class EmailService {
       </p>`;
     await this.sendMail(
       to,
-      'Update on your Zipto partner application',
+      'Update on your Bookfleet partner application',
       this.shell('Application Update', body),
     );
   }
@@ -259,17 +259,17 @@ export class EmailService {
     const body = `
       <p style="margin:0 0 16px">Hi ${this.esc(name || 'there')},</p>
       <p style="margin:0 0 16px">
-        Your <strong>Zipto Partner</strong> account has been <strong>suspended</strong> by our team,
+        Your <strong>Bookfleet Partner</strong> account has been <strong>suspended</strong> by our team,
         so you won't be able to go online or accept deliveries for now.
       </p>
       ${reasonBlock}
       <p style="margin:0 0 16px">
         If you think this is a mistake or want to appeal, please reply to this email or
-        contact Zipto support and we'll review your account.
+        contact Bookfleet support and we'll review your account.
       </p>`;
     await this.sendMail(
       to,
-      'Your Zipto partner account has been suspended',
+      'Your Bookfleet partner account has been suspended',
       this.shell('Account Suspended', body),
     );
   }
@@ -280,17 +280,17 @@ export class EmailService {
     switch (purpose) {
       case 'password_change':
         return {
-          subject: 'Your Zipto password change code',
+          subject: 'Your Bookfleet password change code',
           intro: 'Use the code below to confirm your password change. It expires in 10 minutes.',
         };
       case 'admin_verify':
         return {
-          subject: 'Verify your Zipto Admin email',
+          subject: 'Verify your Bookfleet Admin email',
           intro: 'Use the code below to verify your email address. It expires in 10 minutes.',
         };
       case 'password_reset':
         return {
-          subject: 'Reset your Zipto Admin password',
+          subject: 'Reset your Bookfleet Admin password',
           intro: 'Use the code below to reset your admin password. It expires in 10 minutes.',
         };
     }
@@ -305,7 +305,7 @@ export class EmailService {
         <div style="font-size:34px;font-weight:700;letter-spacing:10px;color:#0f172a;font-family:monospace">${this.esc(otp)}</div>
       </div>
       <p style="margin:0;font-size:13px;color:#64748b">
-        Never share this code with anyone — Zipto staff will never ask for it.
+        Never share this code with anyone — Bookfleet staff will never ask for it.
         If you didn't request this, you can safely ignore this email.
       </p>`;
     return this.shell('Verification code', body);

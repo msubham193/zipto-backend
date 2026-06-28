@@ -84,7 +84,7 @@ export function buildInvoiceData(booking: any, payment: any, tax: TaxSettings): 
     payment_status: payment?.payment_status ?? null,
     note:
       customerGstin && !tax.zipto_gstin
-        ? 'Zipto GSTIN not yet configured — set it in Admin → GST settings to issue a valid tax invoice.'
+        ? 'Seller GSTIN not yet configured — set it in Admin → GST settings to issue a valid tax invoice.'
         : undefined,
   };
 }
@@ -114,8 +114,8 @@ export function renderInvoiceHtml(inv: InvoiceData): string {
 <style>
   *{box-sizing:border-box} body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;color:#0f172a;margin:0;padding:24px;background:#f8fafc}
   .wrap{max-width:720px;margin:0 auto;background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:28px}
-  .head{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid #16a34a;padding-bottom:16px;margin-bottom:24px}
-  .brand{font-size:26px;font-weight:800;color:#16a34a;letter-spacing:-.5px}
+  .head{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid #1d4ed8;padding-bottom:16px;margin-bottom:24px}
+  .brand{font-size:26px;font-weight:800;color:#1d4ed8;letter-spacing:-.5px}
   .doc{font-size:18px;font-weight:700;text-align:right}
   .muted{color:#64748b;font-size:12px;line-height:1.5}
   .grid{display:flex;gap:24px;margin-bottom:24px;flex-wrap:wrap}
@@ -123,16 +123,16 @@ export function renderInvoiceHtml(inv: InvoiceData): string {
   .box h4{margin:0 0 6px;font-size:11px;text-transform:uppercase;letter-spacing:1px;color:#64748b}
   table{width:100%;border-collapse:collapse;font-size:13px;border:1px solid #eee;border-radius:8px;overflow:hidden}
   th{text-align:left;padding:10px 12px;background:#f8fafc;border-bottom:1px solid #eee}
-  .total td{padding:12px;background:#f0fdf4;font-weight:800;font-size:15px}
+  .total td{padding:12px;background:#eef2ff;color:#1d4ed8;font-weight:800;font-size:15px}
   .note{margin-top:16px;font-size:12px;color:#b45309;background:#fffbeb;border:1px solid #fde68a;padding:10px;border-radius:8px}
   .foot{margin-top:28px;text-align:center;color:#94a3b8;font-size:11px}
-  .btn{display:inline-block;background:#16a34a;color:#fff;border:0;padding:11px 26px;border-radius:8px;font-size:14px;font-family:inherit;font-weight:600;cursor:pointer;text-decoration:none}
+  .btn{display:inline-block;background:#1d4ed8;color:#fff;border:0;padding:11px 26px;border-radius:8px;font-size:14px;font-family:inherit;font-weight:600;cursor:pointer;text-decoration:none}
   @media print{body{padding:0;background:#fff}.wrap{border:0;border-radius:0}.noprint{display:none}}
 </style></head>
 <body><div class="wrap">
   <div class="head">
     <div>
-      <div class="brand">ZIPTO</div>
+      <div class="brand">bookfleet</div>
       <div class="muted">${esc(inv.seller.name || 'Zipto Hyperlogistics Pvt. Ltd.')}</div>
       ${inv.seller.address ? `<div class="muted">${esc(inv.seller.address)}</div>` : ''}
       ${inv.seller.state ? `<div class="muted">State: ${esc(inv.seller.state)}</div>` : ''}
@@ -215,11 +215,11 @@ export function buildInvoicePdf(inv: InvoiceData): Promise<Buffer> {
 
       const L = 40, R = 555; // content bounds (A4 width 595 − margins)
       const W = R - L;
-      const GREEN = '#16a34a', DARK = '#0f172a', MUTED = '#64748b';
+      const BLUE = '#1d4ed8', DARK = '#0f172a', MUTED = '#64748b';
       const c = inv.charges;
 
       // ── Header ──
-      doc.fillColor(GREEN).font('Helvetica-Bold').fontSize(24).text('ZIPTO', L, 40);
+      doc.fillColor(BLUE).font('Helvetica-Bold').fontSize(24).text('bookfleet', L, 40);
       const title = inv.is_tax_invoice ? 'TAX INVOICE' : 'INVOICE';
       doc.fillColor(DARK).font('Helvetica-Bold').fontSize(16).text(title, L, 42, { width: W, align: 'right' });
       doc.fillColor(MUTED).font('Helvetica').fontSize(9)
@@ -237,7 +237,7 @@ export function buildInvoicePdf(inv: InvoiceData): Promise<Buffer> {
 
       // ── Rule ──
       y = Math.max(y, 120) + 8;
-      doc.moveTo(L, y).lineTo(R, y).lineWidth(2).strokeColor(GREEN).stroke();
+      doc.moveTo(L, y).lineTo(R, y).lineWidth(2).strokeColor(BLUE).stroke();
       y += 16;
 
       // ── Billed To / Order ──
@@ -282,8 +282,8 @@ export function buildInvoicePdf(inv: InvoiceData): Promise<Buffer> {
 
       // ── Total ──
       y += 4;
-      doc.rect(L, y - 2, W, 24).fill('#f0fdf4');
-      doc.fillColor(DARK).font('Helvetica-Bold').fontSize(12)
+      doc.rect(L, y - 2, W, 24).fill('#eef2ff');
+      doc.fillColor(BLUE).font('Helvetica-Bold').fontSize(12)
         .text('Total Paid', L + 6, y + 4, { width: 360 })
         .text(rs(inv.total), L, y + 4, { width: W - 6, align: 'right' });
       y += 34;
