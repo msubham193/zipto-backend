@@ -247,6 +247,33 @@ export class EmailService {
     );
   }
 
+  /** Sent to a driver when the admin SUSPENDS their account (with optional reason). */
+  async sendDriverSuspended(to: string, name: string, reason?: string): Promise<void> {
+    const cleanReason = (reason || '').trim();
+    const reasonBlock = cleanReason
+      ? `<div style="background:#fef2f2;border:1px solid #fecaca;border-radius:12px;padding:16px;margin:0 0 16px">
+           <div style="font-size:13px;color:#b91c1c;margin-bottom:6px;font-weight:600">Reason</div>
+           <div style="font-size:15px;color:#7f1d1d">${this.esc(cleanReason)}</div>
+         </div>`
+      : '';
+    const body = `
+      <p style="margin:0 0 16px">Hi ${this.esc(name || 'there')},</p>
+      <p style="margin:0 0 16px">
+        Your <strong>Zipto Partner</strong> account has been <strong>suspended</strong> by our team,
+        so you won't be able to go online or accept deliveries for now.
+      </p>
+      ${reasonBlock}
+      <p style="margin:0 0 16px">
+        If you think this is a mistake or want to appeal, please reply to this email or
+        contact Zipto support and we'll review your account.
+      </p>`;
+    await this.sendMail(
+      to,
+      'Your Zipto partner account has been suspended',
+      this.shell('Account Suspended', body),
+    );
+  }
+
   // ─── Templates ──────────────────────────────────────────────────────────────
 
   private otpCopy(purpose: OtpPurpose): { subject: string; intro: string } {

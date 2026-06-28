@@ -153,6 +153,20 @@ export class DriverService {
    * Update driver availability status
    */
   async updateAvailability(userId: string, updateAvailabilityDto: UpdateAvailabilityDto) {
+    // A suspended driver (is_active=false) cannot go ONLINE — otherwise they could
+    // just re-toggle online after being suspended.
+    if (updateAvailabilityDto.availability_status === AvailabilityStatus.ONLINE) {
+      const user = await this.userRepository.findOne({
+        where: { id: userId },
+        select: ['is_active'],
+      });
+      if (user && user.is_active === false) {
+        throw new ForbiddenException(
+          'Your account is suspended. Please contact support to go back online.',
+        );
+      }
+    }
+
     // Targeted update — avoid round-tripping getProfile()'s presigned doc URLs
     // back into the stored R2 keys.
     const result = await this.driverProfileRepository.update(

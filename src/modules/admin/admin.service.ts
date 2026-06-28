@@ -4,7 +4,7 @@ import { Repository, Between, DataSource, In } from 'typeorm';
 import { User, UserRole } from '../auth/entities/user.entity';
 import { Booking, BookingStatus } from '../booking/entities/booking.entity';
 import { Payment, PaymentStatus } from '../payment/entities/payment.entity';
-import { DriverProfile, VerificationStatus } from '../driver/entities/driver-profile.entity';
+import { DriverProfile, VerificationStatus, AvailabilityStatus } from '../driver/entities/driver-profile.entity';
 import { WithdrawalRequest, WithdrawalStatus } from '../driver/entities/withdrawal-request.entity';
 import { BankAccount } from '../driver/entities/bank-account.entity';
 import { Vehicle } from '../vehicle/entities/vehicle.entity';
@@ -789,8 +789,15 @@ export class AdminService {
   async suspendDriver(driverProfileId: string, reason?: string) {
     const profile = await this.driverProfileRepository.findOne({ where: { id: driverProfileId } });
     if (!profile) throw new NotFoundException('Driver not found');
-    await this.userRepository.update(profile.user_id, { is_active: false });
     const clean = (reason || '').trim();
+
+    await this.userRepository.update(profile.user_id, { is_active: false });
+    // Force the driver OFFLINE so a suspended driver can't keep receiving/showing
+    // as online; dispatch only matches online drivers.
+    await this.driverProfileRepository.update(driverProfileId, {
+      availability_status: AvailabilityStatus.OFFLINE,
+    });
+
     await this.notificationService.push(
       profile.user_id,
       'general',
@@ -800,6 +807,20 @@ export class AdminService {
         : 'Your account has been suspended by admin. Please contact support.',
       { type: 'account_suspended', ...(clean ? { reason: clean } : {}) },
     );
+
+    // Email the driver why they were suspended (best-effort).
+    const user = await this.userRepository.findOne({
+      where: { id: profile.user_id },
+      select: ['name', 'email'],
+    });
+    if (user?.email) {
+      this.emailService
+        .sendDriverSuspended(user.email, user.name || 'there', clean || undefined)
+        .catch((err) =>
+          this.logger.warn(`[suspendDriver] suspension email failed: ${err?.message}`),
+        );
+    }
+
     return { message: 'Driver suspended successfully' };
   }
 
