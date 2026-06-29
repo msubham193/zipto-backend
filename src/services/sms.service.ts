@@ -45,6 +45,12 @@ export class SmsService {
   private readonly resendCooldownMs: number;
   private readonly isDev: boolean;
 
+  // SMS Retriever (hands-free OTP auto-read) config — OFF until configured.
+  // Each app has its own 11-char hash; the short hash-bearing message must match
+  // the DLT template registered under TWO_FACTOR_OTP_HASH_CT_ID word-for-word.
+  private readonly otpHashByRole: { driver: string; customer: string };
+  private readonly otpHashCtId: string;
+
   constructor(
     private readonly configService: ConfigService,
     private readonly redisService: RedisService,
@@ -57,6 +63,12 @@ export class SmsService {
     // Use process.env directly — configService.get('NODE_ENV') is undefined when NODE_ENV
     // is not declared in any registered config file, which would make isDev always true.
     this.isDev           = process.env.NODE_ENV !== 'production';
+
+    this.otpHashByRole = {
+      driver:   (process.env.SMS_OTP_HASH_DRIVER   || '').trim(),
+      customer: (process.env.SMS_OTP_HASH_CUSTOMER || '').trim(),
+    };
+    this.otpHashCtId   = (process.env.TWO_FACTOR_OTP_HASH_CT_ID || '').trim();
 
     this.logger.log(
       `2Factor SMS — apiKey: ${this.apiKey ? this.apiKey.substring(0, 8) + '...' : 'MISSING'} | ` +
@@ -75,7 +87,7 @@ export class SmsService {
    * Generate a fresh 6-digit OTP, store it in Redis, and deliver it via 2Factor SMS.
    * Enforces per-phone resend cooldown.
    */
-  async sendOTP(phone: string): Promise<SendOtpResult> {
+  async sendOTP(phone: string, role?: 'driver' | 'customer'): Promise<SendOtpResult> {
     const normalised = this.normalisePhone(phone);
 
     // Resend cooldown guard
@@ -105,11 +117,26 @@ export class SmsService {
       return { success: true, dev_otp: otp };
     }
 
-    // Production — send via 2Factor (DLT login template, word-for-word)
-    const loginMsg =
-      `Your Zipto OTP is ${otp}. Use this OTP for login and Verification. ` +
-      `Do not share it with anyone. -Zipto Hyperlogistics Private Limited`;
-    const sent = await this.send2Factor(normalised, loginMsg, CT_ID);
+    // Production — send via 2Factor (DLT login template, word-for-word).
+    // When SMS Retriever is configured for this app, send the short hash-bearing
+    // variant so the app can auto-read the OTP hands-free; otherwise the standard
+    // login template. Both must match their registered DLT template exactly.
+    const appHash = role ? this.otpHashByRole[role] : '';
+    let loginMsg: string;
+    let ctId: string;
+    if (appHash && this.otpHashCtId) {
+      const mins = Math.round(this.otpExpiryMs / 60_000);
+      loginMsg =
+        `Your Bookfleet OTP is ${otp}. Valid for ${mins} minutes. ` +
+        `Do not share. ${appHash}`;
+      ctId = this.otpHashCtId;
+    } else {
+      loginMsg =
+        `Your Zipto OTP is ${otp}. Use this OTP for login and Verification. ` +
+        `Do not share it with anyone. -Zipto Hyperlogistics Private Limited`;
+      ctId = CT_ID;
+    }
+    const sent = await this.send2Factor(normalised, loginMsg, ctId);
     if (!sent) {
       // Roll back Redis entries so the user can immediately retry
       await this.redisService.del(KEY_OTP(normalised), KEY_RESEND(normalised));

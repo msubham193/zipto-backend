@@ -73,7 +73,7 @@ export class AuthService {
       );
     }
 
-    await this.smsService.sendOTP(formattedPhone);
+    await this.smsService.sendOTP(formattedPhone, 'driver');
 
     return {
       message: 'OTP sent successfully',
@@ -90,6 +90,13 @@ export class AuthService {
    * client can ask the user to confirm before they get signed out of the
    * other app.
    */
+  /** Map a UserRole to the SMS app bucket used to pick the OTP auto-read hash. */
+  private smsRoleOf(role?: UserRole): 'driver' | 'customer' | undefined {
+    if (role === UserRole.DRIVER) return 'driver';
+    if (role === UserRole.CUSTOMER) return 'customer';
+    return undefined;
+  }
+
   private roleSwitchInfo(existingUser: User | null, requestedRole?: UserRole) {
     const requires =
       !!existingUser &&
@@ -117,7 +124,7 @@ export class AuthService {
       throw new UnauthorizedException('User account is deactivated');
     }
 
-    await this.smsService.sendOTP(formattedPhone);
+    await this.smsService.sendOTP(formattedPhone, this.smsRoleOf(registerDto.role as UserRole | undefined));
 
     return {
       message: 'OTP sent successfully',
@@ -144,7 +151,7 @@ export class AuthService {
       throw new UnauthorizedException('User account is deactivated');
     }
 
-    await this.smsService.sendOTP(formattedPhone);
+    await this.smsService.sendOTP(formattedPhone, this.smsRoleOf(requestedRole));
 
     return {
       message: 'OTP sent successfully',
@@ -288,7 +295,7 @@ export class AuthService {
     }
 
     // SmsService enforces resend cooldown — throws TooManyRequestsException if too soon
-    await this.smsService.sendOTP(formattedPhone);
+    await this.smsService.sendOTP(formattedPhone, this.smsRoleOf(user?.role));
 
     return {
       message: 'OTP resent successfully',
