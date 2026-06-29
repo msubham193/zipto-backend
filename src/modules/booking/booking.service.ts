@@ -1149,7 +1149,7 @@ export class BookingService {
     const walletSuspended = await this.driverWalletService.isWalletSuspended(driverId);
     if (walletSuspended) {
       throw new BadRequestException(
-        'Your Zipto wallet balance is too low. Please top up to continue accepting rides.',
+        'Your Bookfleet wallet balance is too low. Please top up to continue accepting rides.',
       );
     }
 
