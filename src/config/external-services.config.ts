@@ -39,7 +39,7 @@ export default registerAs('externalServices', () => ({
     secure: (process.env.SMTP_SECURE ?? 'true') === 'true', // true for 465, false for 587
     user  : process.env.SMTP_USER || '',
     pass  : (process.env.SMTP_PASS || '').replace(/\s+/g, ''), // app passwords are shown space-separated
-    from  : process.env.SMTP_FROM || 'Zipto <ride.zipto@gmail.com>',
+    from  : process.env.SMTP_FROM || 'Bookfleet <ride.zipto@gmail.com>',
   },
   admin: {
     // Public URL of the admin panel — used in invite/notification emails.

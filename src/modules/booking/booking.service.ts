@@ -107,7 +107,7 @@ export class BookingService {
       const tax = await this.systemSettings.getTaxSettings();
       const invoice = buildInvoiceData(booking, payment, tax);
       const html = renderInvoiceHtml(invoice);
-      const subject = `${invoice.is_tax_invoice ? 'Tax Invoice' : 'Invoice'} ${invoice.invoice_number} — Zipto`;
+      const subject = `${invoice.is_tax_invoice ? 'Tax Invoice' : 'Invoice'} ${invoice.invoice_number} — Bookfleet`;
 
       // Attach the invoice as a PDF so the customer has a filable copy.
       let attachments: Array<{ filename: string; content: Buffer; contentType?: string }> | undefined;
