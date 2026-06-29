@@ -84,8 +84,8 @@ export class ReferralService {
       referee_coins: settings.referee_coins,
       referrer_coins: settings.referrer_coins,
       share_message:
-        `Join Zipto with my referral code ${code} for fast, affordable delivery. ` +
-        `Complete your first order and we both earn Zipto coins!\n\n` +
+        `Join Bookfleet with my referral code ${code} for fast, affordable delivery. ` +
+        `Complete your first order and we both earn Bookfleet coins!\n\n` +
         `Tap to join: ${settings.share_base_url}/${code}`,
       stats: {
         total_referred: referrals.length,
@@ -219,7 +219,7 @@ export class ReferralService {
       await this.coinService.creditCoins(
         referral.referee_id,
         referral.referee_coins,
-        'Referral bonus — joined Zipto with a friend’s code',
+        'Referral bonus — joined Bookfleet with a friend’s code',
         bookingId,
       );
       await this.coinService.creditCoins(
@@ -242,7 +242,7 @@ export class ReferralService {
             referral.referee_id,
             'general',
             '🎉 Referral bonus credited!',
-            `You earned ${referral.referee_coins} Zipto coins for your first order. Enjoy!`,
+            `You earned ${referral.referee_coins} Bookfleet coins for your first order. Enjoy!`,
             { type: 'referral_reward', coins: String(referral.referee_coins) },
           )
           .catch(() => {});
@@ -251,7 +251,7 @@ export class ReferralService {
             referral.referrer_id,
             'general',
             '🎉 You earned referral coins!',
-            `Your friend completed their first order — ${referral.referrer_coins} Zipto coins added to your balance.`,
+            `Your friend completed their first order — ${referral.referrer_coins} Bookfleet coins added to your balance.`,
             { type: 'referral_reward', coins: String(referral.referrer_coins) },
           )
           .catch(() => {});

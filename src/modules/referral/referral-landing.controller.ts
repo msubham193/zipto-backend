@@ -25,9 +25,9 @@ export class ReferralLandingController {
     const code = (rawCode || '').replace(/[^A-Za-z0-9]/g, '').slice(0, 12).toUpperCase();
     const cfg = await this.settings.getReferralSettings();
 
-    const title = `Get ${cfg.referee_coins} Zipto coins`;
+    const title = `Get ${cfg.referee_coins} Bookfleet coins`;
     const description =
-      `Join Zipto with code ${code} and earn ${cfg.referee_coins} bonus coins on your first order. ` +
+      `Join Bookfleet with code ${code} and earn ${cfg.referee_coins} bonus coins on your first order. ` +
       `Fast, affordable last-mile delivery.`;
     const pageUrl = `${cfg.share_base_url}/${code}`;
     const appLink = `zipto://refer?code=${code}`;
@@ -73,7 +73,7 @@ function html(p: {
   <meta property="og:image:width" content="1200" />
   <meta property="og:image:height" content="675" />
   <meta property="og:url" content="${esc(p.pageUrl)}" />
-  <meta property="og:site_name" content="Zipto" />
+  <meta property="og:site_name" content="Bookfleet" />
 
   <!-- Twitter -->
   <meta name="twitter:card" content="summary_large_image" />
@@ -95,11 +95,11 @@ function html(p: {
 </head>
 <body>
   <div class="card">
-    <img class="banner" src="${esc(p.banner)}" alt="Zipto referral" />
+    <img class="banner" src="${esc(p.banner)}" alt="Bookfleet referral" />
     <h1>${title}</h1>
     <p>${description}</p>
     <div class="code">${esc(p.code)}</div>
-    <a class="btn" id="open" href="${esc(p.appLink)}">Open in Zipto app</a>
+    <a class="btn" id="open" href="${esc(p.appLink)}">Open in Bookfleet app</a>
     <a class="btn secondary" href="${esc(p.storeUrl)}">Don't have the app? Download</a>
   </div>
   <script>
