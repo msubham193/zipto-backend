@@ -316,27 +316,42 @@ export class DriverService {
       take: limit,
     });
 
-    const trips = bookings.map(b => ({
-      id: b.id,
-      status: b.status,
-      pickup_location: b.pickup_address,
-      dropoff_location: b.drop_address,
-      amount: b.final_fare || b.estimated_fare,
-      distance: b.distance,
-      vehicle_type: b.vehicle_type,
-      service_category: b.service_category,
-      created_at: b.created_at,
-      completion_time: b.completion_time,
-      customer_name: b.customer?.name || null,
-      customer_phone: b.customer?.phone || null,
-      payment_status: b.payments?.some(p => p.payment_status === 'completed')
-        ? 'paid'
-        : b.status === BookingStatus.COMPLETED ? 'paid' : 'unpaid',
-      payment_method: b.payments?.find(p => p.payment_status === 'completed')?.payment_method
-        || (b.status === BookingStatus.COMPLETED ? 'cash' : null),
-      driver_earnings: b.driver_earnings,
-      cancellation_reason: b.cancellation_reason,
-    }));
+    const trips = bookings.map(b => {
+      const completedPayment = b.payments?.find(p => p.payment_status === 'completed');
+      // Most recent payment row regardless of status — used so a still-pending
+      // online payment (e.g. a UPI QR awaiting webhook confirmation) is never
+      // mislabeled as "cash" just because nothing has completed yet.
+      const latestPayment = b.payments?.length
+        ? [...b.payments].sort(
+            (x, y) => new Date(y.created_at).getTime() - new Date(x.created_at).getTime(),
+          )[0]
+        : null;
+
+      return {
+        id: b.id,
+        status: b.status,
+        pickup_location: b.pickup_address,
+        dropoff_location: b.drop_address,
+        amount: b.final_fare || b.estimated_fare,
+        distance: b.distance,
+        vehicle_type: b.vehicle_type,
+        service_category: b.service_category,
+        created_at: b.created_at,
+        completion_time: b.completion_time,
+        customer_name: b.customer?.name || null,
+        customer_phone: b.customer?.phone || null,
+        payment_status: completedPayment
+          ? 'paid'
+          : b.status === BookingStatus.COMPLETED ? 'paid' : 'unpaid',
+        // Only fall back to 'cash' when there's truly no payment record at
+        // all — never assume cash just because no payment has completed yet.
+        payment_method: completedPayment?.payment_method
+          || latestPayment?.payment_method
+          || (b.status === BookingStatus.COMPLETED ? 'cash' : null),
+        driver_earnings: b.driver_earnings,
+        cancellation_reason: b.cancellation_reason,
+      };
+    });
 
     return {
       trips,
