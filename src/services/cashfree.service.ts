@@ -66,7 +66,7 @@ export class CashfreeService {
     this.apiVersion = (process.env.CASHFREE_API_VERSION || '2023-08-01').trim();
     this.softposApiVersion = (process.env.CASHFREE_SOFTPOS_API_VERSION || '2025-01-01').trim();
     this.softposEnabledFlag = (process.env.CASHFREE_SOFTPOS_ENABLED || '').trim() === 'true';
-    this.softposTerminalType = (process.env.CASHFREE_SOFTPOS_TERMINAL_TYPE || 'AGENT').trim();
+    this.softposTerminalType = (process.env.CASHFREE_SOFTPOS_TERMINAL_TYPE || 'SPOS').trim();
     this.mode = (process.env.CASHFREE_ENV || 'production').trim() === 'sandbox'
       ? 'sandbox'
       : 'production';
