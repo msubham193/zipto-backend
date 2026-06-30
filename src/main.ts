@@ -32,8 +32,20 @@ async function bootstrap() {
   const nodeEnv = configService.get<string>('app.nodeEnv') || 'development';
   const isProduction = nodeEnv === 'production';
 
-  // Body size limit — prevent oversized payload attacks
-  app.use(express.json({ limit: '1mb' }));
+  // Body size limit — prevent oversized payload attacks.
+  // `verify` captures the exact raw bytes onto req.rawBody BEFORE JSON parsing
+  // replaces req.body. Webhook signature checks (Cashfree, Cashfree Payouts)
+  // hash these exact bytes — without this, `rawBody: true` above is shadowed
+  // by this middleware (it runs first and consumes the body) and signature
+  // verification silently always fails.
+  app.use(
+    express.json({
+      limit: '1mb',
+      verify: (req: any, _res, buf) => {
+        req.rawBody = buf;
+      },
+    }),
+  );
   app.use(express.urlencoded({ extended: true, limit: '1mb' }));
 
   // Serve static public assets (e.g. the referral banner used for link previews)
