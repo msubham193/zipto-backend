@@ -114,6 +114,11 @@ export class DriverProfile {
   @Column({ type: 'varchar', nullable: true })
   wallet_freeze_reason: string;
 
+  // Cashfree SoftPOS terminal id (created once at approval) — used to mint
+  // dynamic UPI QRs at delivery with no hosted checkout page.
+  @Column({ type: 'varchar', nullable: true })
+  cf_terminal_id: string | null;
+
   @OneToMany(() => BankAccount, (ba) => ba.driver_profile)
   bank_accounts: BankAccount[];
 

@@ -68,6 +68,52 @@ export class DriverService {
   ) {}
 
   /**
+   * Ensure the driver has a Cashfree SoftPOS terminal and return its
+   * cf_terminal_id. Lazily creates one on first need (covers drivers approved
+   * before SoftPOS existed) and persists it. Idempotent: a stored id short-
+   * circuits. Returns null if SoftPOS is disabled or creation fails, so callers
+   * can fall back to the link flow. Never throws.
+   */
+  async ensureDriverTerminal(driverUserId: string): Promise<string | null> {
+    if (!this.cashfreeService.softposEnabled) return null;
+    try {
+      const profile = await this.driverProfileRepository.findOne({
+        where: { user_id: driverUserId },
+        relations: ['user'],
+      });
+      if (!profile) return null;
+      if (profile.cf_terminal_id) return profile.cf_terminal_id;
+
+      const user = profile.user;
+      const phone = (user?.phone || '').replace(/\D/g, '').slice(-10);
+      if (phone.length !== 10) {
+        this.logger.warn(`[softpos] driver ${driverUserId} has no valid phone — skipping terminal`);
+        return null;
+      }
+
+      const terminal = await this.cashfreeService.createTerminal({
+        terminalId: `rider_${profile.id}`,
+        terminalName: (user?.name || 'Bookfleet Rider').slice(0, 100),
+        terminalEmail: (user?.email || `rider_${phone}@bookfleet.in`).slice(0, 100),
+        terminalPhone: phone,
+      });
+
+      await this.driverProfileRepository.update(profile.id, {
+        cf_terminal_id: terminal.cfTerminalId,
+      });
+      this.logger.log(`[softpos] terminal created for driver=${driverUserId} cf_terminal_id=${terminal.cfTerminalId}`);
+      return terminal.cfTerminalId;
+    } catch (err: any) {
+      const cf = err?.response?.data;
+      this.logger.warn(
+        `[softpos] ensureDriverTerminal failed for ${driverUserId}: ` +
+          `${err?.message} cashfree=${cf ? JSON.stringify(cf) : 'n/a'}`,
+      );
+      return null;
+    }
+  }
+
+  /**
    * Get driver profile (flattened — name/phone/email surfaced at top level)
    */
   async getProfile(userId: string) {

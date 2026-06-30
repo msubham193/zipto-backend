@@ -325,5 +325,9 @@ BEGIN
   END;
 END $$;
 
+-- ── 8. Cashfree SoftPOS terminal id (per-rider dynamic UPI QR) ─
+ALTER TABLE driver_profiles
+  ADD COLUMN IF NOT EXISTS cf_terminal_id VARCHAR;
+
 -- ── Done ──────────────────────────────────────────────────────
 SELECT 'Migration complete' AS result;

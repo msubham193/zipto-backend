@@ -6,6 +6,20 @@ import * as crypto from 'crypto';
 export interface CashfreeOrderResult {
   orderId: string;
   paymentSessionId: string;
+  /** Cashfree's own numeric order id (string) — needed by the Terminal API. */
+  cfOrderId?: string;
+}
+
+export interface CashfreeTerminal {
+  cfTerminalId: string;
+  terminalId: string;
+  status: string;
+}
+
+export interface TerminalTxnResult {
+  /** Base64-encoded PNG of the dynamic UPI QR (data-URI body, no prefix). */
+  qrcode: string | null;
+  cfPaymentId: string | null;
 }
 
 export interface CashfreeOrderStatus {
@@ -35,6 +49,10 @@ export class CashfreeService {
   /** Dedicated webhook signing secret (newer dashboards); falls back to secretKey. */
   private readonly webhookSecret: string;
   private readonly apiVersion: string;
+  /** Newer API version required by the SoftPOS / Terminal endpoints. */
+  private readonly softposApiVersion: string;
+  /** Feature flag — SoftPOS (agent QR collection) must be enabled on the account. */
+  private readonly softposEnabledFlag: boolean;
   private readonly baseUrl: string;
   /** 'production' | 'sandbox' — drives both the API host and the JS SDK mode. */
   readonly mode: 'production' | 'sandbox';
@@ -44,6 +62,8 @@ export class CashfreeService {
     this.secretKey = (process.env.CASHFREE_SECRET_KEY || '').trim();
     this.webhookSecret = (process.env.CASHFREE_WEBHOOK_SECRET || '').trim() || this.secretKey;
     this.apiVersion = (process.env.CASHFREE_API_VERSION || '2023-08-01').trim();
+    this.softposApiVersion = (process.env.CASHFREE_SOFTPOS_API_VERSION || '2025-01-01').trim();
+    this.softposEnabledFlag = (process.env.CASHFREE_SOFTPOS_ENABLED || '').trim() === 'true';
     this.mode = (process.env.CASHFREE_ENV || 'production').trim() === 'sandbox'
       ? 'sandbox'
       : 'production';
@@ -64,11 +84,16 @@ export class CashfreeService {
     return !!this.appId && !!this.secretKey;
   }
 
-  private headers() {
+  /** SoftPOS usable only when credentials exist AND the feature flag is on. */
+  get softposEnabled(): boolean {
+    return this.isEnabled && this.softposEnabledFlag;
+  }
+
+  private headers(apiVersion: string = this.apiVersion) {
     return {
       'x-client-id': this.appId,
       'x-client-secret': this.secretKey,
-      'x-api-version': this.apiVersion,
+      'x-api-version': apiVersion,
       'Content-Type': 'application/json',
     };
   }
@@ -116,6 +141,65 @@ export class CashfreeService {
     return {
       orderId: data.order_id,
       paymentSessionId: data.payment_session_id,
+      cfOrderId: data.cf_order_id != null ? String(data.cf_order_id) : undefined,
+    };
+  }
+
+  // ── SoftPOS / Terminal (agent QR collection) ────────────────────────────────
+
+  /**
+   * Create a Cashfree SoftPOS terminal — one per delivery rider, created once
+   * (idempotent on `terminalId`). The returned `cfTerminalId` is stored against
+   * the driver and used to mint dynamic UPI QRs at delivery without any hosted
+   * checkout page. Requires the SoftPOS product enabled on the account.
+   */
+  async createTerminal(params: {
+    terminalId: string;
+    terminalName: string;
+    terminalEmail: string;
+    terminalPhone: string;
+  }): Promise<CashfreeTerminal> {
+    const body = {
+      terminal_id: params.terminalId,
+      terminal_name: params.terminalName.slice(0, 100),
+      terminal_email: params.terminalEmail.slice(0, 100),
+      terminal_phone_no: params.terminalPhone.replace(/\D/g, '').slice(-10),
+      terminal_type: 'AGENT',
+    };
+    const { data } = await axios.post(`${this.baseUrl}/terminal`, body, {
+      headers: this.headers(this.softposApiVersion),
+      timeout: 15000,
+    });
+    return {
+      cfTerminalId: String(data.cf_terminal_id),
+      terminalId: data.terminal_id,
+      status: data.terminal_status,
+    };
+  }
+
+  /**
+   * Create a terminal transaction for an existing order and return a dynamic
+   * UPI QR (base64 PNG). Scanning it opens the customer's UPI app directly — no
+   * hosted checkout / no "redirecting to external website" warning. The order is
+   * tracked normally, so the standard webhook / getOrder confirms payment.
+   */
+  async createTerminalTransaction(params: {
+    cfOrderId: string;
+    cfTerminalId: string;
+  }): Promise<TerminalTxnResult> {
+    const body = {
+      cf_order_id: params.cfOrderId,
+      cf_terminal_id: Number(params.cfTerminalId),
+      payment_method: 'QR_CODE',
+    };
+    const { data } = await axios.post(`${this.baseUrl}/terminal/transactions`, body, {
+      headers: this.headers(this.softposApiVersion),
+      timeout: 15000,
+    });
+    const qrcode: string | null = data?.qrcode ?? data?.qr_payload ?? null;
+    return {
+      qrcode,
+      cfPaymentId: data?.cf_payment_id != null ? String(data.cf_payment_id) : null,
     };
   }
 

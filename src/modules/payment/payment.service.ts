@@ -336,6 +336,56 @@ export class PaymentService {
     const phone = (booking.mobile_number || (booking as any).receiver_phone || booking.customer?.phone || '')
       .replace(/\D/g, '').slice(-10) || '9999999999';
 
+    // ── Preferred: Cashfree SoftPOS dynamic QR (base64 PNG; scanning opens the
+    //    UPI app DIRECTLY — no hosted checkout, no "redirecting" warning). Each
+    //    rider has a terminal (created lazily). Gated by CASHFREE_SOFTPOS_ENABLED. ──
+    if (this.cashfreeService.softposEnabled && booking.driver_id) {
+      try {
+        const cfTerminalId = await this.driverService.ensureDriverTerminal(booking.driver_id);
+        if (cfTerminalId) {
+          const orderId = this.cashfreeService.generateOrderId();
+          const order = await this.cashfreeService.createOrder({
+            orderId,
+            amount,
+            customerId: `cust_${bookingId.replace(/-/g, '').slice(-12)}`,
+            customerPhone: phone,
+            notifyUrl: `${base}/payment/cashfree/webhook`,
+            returnUrl: `${base}/payment/cashfree/return?order_id={order_id}`,
+          });
+          if (order.cfOrderId) {
+            const { qrcode } = await this.cashfreeService.createTerminalTransaction({
+              cfOrderId: order.cfOrderId,
+              cfTerminalId,
+            });
+            if (qrcode) {
+              await this.paymentRepository.update(
+                { booking_id: bookingId, payment_status: PaymentStatus.PENDING, payment_method: PaymentMethod.UPI },
+                { payment_status: PaymentStatus.FAILED },
+              );
+              const payment = this.paymentRepository.create({
+                booking_id: bookingId,
+                amount,
+                payment_method: PaymentMethod.UPI,
+                payment_status: PaymentStatus.PENDING,
+                cashfree_order_id: orderId, // tracked via getOrder()/webhook like any order
+              });
+              await this.paymentRepository.save(payment);
+              this.logger.log(`[softpos] qr minted order=${orderId} booking=${bookingId} ₹${amount}`);
+              const dataUri = qrcode.startsWith('data:') ? qrcode : `data:image/png;base64,${qrcode}`;
+              return { qrcode: dataUri, qr_is_image: true, order_id: orderId, short_url: null, amount };
+            }
+          }
+          this.logger.warn(`[softpos] no qr for booking=${bookingId} — falling back to UPI QR / link`);
+        }
+      } catch (err: any) {
+        const cf = err?.response?.data;
+        this.logger.warn(
+          `[softpos] failed for booking=${bookingId}: status=${err?.response?.status} ` +
+            `msg=${err?.message} cashfree=${cf ? JSON.stringify(cf) : 'n/a'} — falling back`,
+        );
+      }
+    }
+
     // ── Preferred: a direct UPI QR (scanning opens the UPI app, NO external page) ──
     try {
       const orderId = this.cashfreeService.generateOrderId();
