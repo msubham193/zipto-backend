@@ -318,7 +318,7 @@ export class EmailService {
   <body style="margin:0;background:#f8fafc;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#0f172a">
     <div style="max-width:520px;margin:0 auto;padding:32px 16px">
       <div style="text-align:center;margin-bottom:24px">
-        <span style="font-size:24px;font-weight:800;color:#16a34a;letter-spacing:-0.5px">ZIPTO</span>
+        <span style="font-size:24px;font-weight:800;color:#1d4ed8;letter-spacing:-0.5px">bookfleet</span>
       </div>
       <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:16px;padding:32px">
         <h1 style="margin:0 0 20px;font-size:20px;font-weight:700;color:#0f172a">${this.esc(title)}</h1>
