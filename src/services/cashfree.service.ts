@@ -92,6 +92,15 @@ export class CashfreeService {
     return this.isEnabled && this.softposEnabledFlag;
   }
 
+  /**
+   * A single shared (company) terminal id used for ALL riders. When set, you
+   * KYC one terminal once instead of every rider — the whole fleet collects
+   * through it. Falls back to per-rider terminals when unset.
+   */
+  get sharedTerminalId(): string | null {
+    return (process.env.CASHFREE_SOFTPOS_TERMINAL_ID || '').trim() || null;
+  }
+
   private headers(apiVersion: string = this.apiVersion) {
     return {
       'x-client-id': this.appId,

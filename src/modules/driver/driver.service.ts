@@ -76,6 +76,9 @@ export class DriverService {
    */
   async ensureDriverTerminal(driverUserId: string): Promise<string | null> {
     if (!this.cashfreeService.softposEnabled) return null;
+    // A configured shared company terminal serves the whole fleet (one KYC).
+    const shared = this.cashfreeService.sharedTerminalId;
+    if (shared) return shared;
     try {
       const profile = await this.driverProfileRepository.findOne({
         where: { user_id: driverUserId },
