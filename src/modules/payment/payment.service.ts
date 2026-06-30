@@ -344,11 +344,12 @@ export class PaymentService {
         const cfTerminalId = await this.driverService.ensureDriverTerminal(booking.driver_id);
         if (cfTerminalId) {
           const orderId = this.cashfreeService.generateOrderId();
-          const order = await this.cashfreeService.createOrder({
+          const order = await this.cashfreeService.createTerminalOrder({
             orderId,
             amount,
             customerId: `cust_${bookingId.replace(/-/g, '').slice(-12)}`,
             customerPhone: phone,
+            cfTerminalId,
             notifyUrl: `${base}/payment/cashfree/webhook`,
             returnUrl: `${base}/payment/cashfree/return?order_id={order_id}`,
           });

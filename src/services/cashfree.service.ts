@@ -53,6 +53,8 @@ export class CashfreeService {
   private readonly softposApiVersion: string;
   /** Feature flag — SoftPOS (agent QR collection) must be enabled on the account. */
   private readonly softposEnabledFlag: boolean;
+  /** terminal_type sent on the order's terminal object (AGENT | SPOS | STOREFRONT). */
+  private readonly softposTerminalType: string;
   private readonly baseUrl: string;
   /** 'production' | 'sandbox' — drives both the API host and the JS SDK mode. */
   readonly mode: 'production' | 'sandbox';
@@ -64,6 +66,7 @@ export class CashfreeService {
     this.apiVersion = (process.env.CASHFREE_API_VERSION || '2023-08-01').trim();
     this.softposApiVersion = (process.env.CASHFREE_SOFTPOS_API_VERSION || '2025-01-01').trim();
     this.softposEnabledFlag = (process.env.CASHFREE_SOFTPOS_ENABLED || '').trim() === 'true';
+    this.softposTerminalType = (process.env.CASHFREE_SOFTPOS_TERMINAL_TYPE || 'AGENT').trim();
     this.mode = (process.env.CASHFREE_ENV || 'production').trim() === 'sandbox'
       ? 'sandbox'
       : 'production';
@@ -146,6 +149,49 @@ export class CashfreeService {
   }
 
   // ── SoftPOS / Terminal (agent QR collection) ────────────────────────────────
+
+  /**
+   * Create an order **linked to a SoftPOS terminal** (top-level `terminal`
+   * object, x-api-version 2025-01-01). This is required before
+   * createTerminalTransaction() — a plain /orders order created under the old
+   * version is not visible to the Terminal API ("order_not_found").
+   */
+  async createTerminalOrder(params: {
+    orderId: string;
+    amount: number;
+    customerId: string;
+    customerPhone: string;
+    cfTerminalId: string;
+    returnUrl: string;
+    notifyUrl: string;
+  }): Promise<CashfreeOrderResult> {
+    const body = {
+      order_id: params.orderId,
+      order_amount: Number(params.amount.toFixed(2)),
+      order_currency: 'INR',
+      customer_details: {
+        customer_id: params.customerId,
+        customer_phone: params.customerPhone,
+      },
+      order_meta: {
+        return_url: params.returnUrl,
+        notify_url: params.notifyUrl,
+      },
+      terminal: {
+        cf_terminal_id: Number(params.cfTerminalId),
+        terminal_type: this.softposTerminalType,
+      },
+    };
+    const { data } = await axios.post(`${this.baseUrl}/orders`, body, {
+      headers: this.headers(this.softposApiVersion),
+      timeout: 15000,
+    });
+    return {
+      orderId: data.order_id,
+      paymentSessionId: data.payment_session_id,
+      cfOrderId: data.cf_order_id != null ? String(data.cf_order_id) : undefined,
+    };
+  }
 
   /**
    * Create a Cashfree SoftPOS terminal — one per delivery rider, created once
