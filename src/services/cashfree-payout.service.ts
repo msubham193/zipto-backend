@@ -78,6 +78,55 @@ export class CashfreePayoutService {
     };
   }
 
+  /**
+   * Available Payouts balance (the prepaid pool that funds driver withdrawals).
+   *
+   * Payouts V2 has NO balance endpoint, so this uses the legacy V1
+   * authorize → getBalance flow with the same credentials. If V1 isn't enabled
+   * on the account it returns a null balance + reason (view it in the Cashfree
+   * dashboard → Payouts → Balance instead). Never throws.
+   */
+  async getBalance(): Promise<{
+    configured: boolean;
+    mode: 'production' | 'sandbox';
+    available_balance: number | null;
+    balance: number | null;
+    error?: string;
+  }> {
+    const base = { configured: this.isConfigured, mode: this.mode };
+    if (!this.isConfigured) {
+      return { ...base, available_balance: null, balance: null, error: 'Payouts not configured' };
+    }
+    const v1Base =
+      this.mode === 'sandbox'
+        ? 'https://payout-gamma.cashfree.com'
+        : 'https://payout-api.cashfree.com';
+    try {
+      const auth = await axios.post(`${v1Base}/payout/v1/authorize`, {}, {
+        headers: { 'X-Client-Id': this.clientId, 'X-Client-Secret': this.clientSecret },
+        timeout: 12000,
+      });
+      const token = auth.data?.data?.token;
+      if (!token) {
+        return { ...base, available_balance: null, balance: null, error: 'Payouts V1 authorize returned no token' };
+      }
+      const res = await axios.get(`${v1Base}/payout/v1/getBalance`, {
+        headers: { Authorization: `Bearer ${token}` },
+        timeout: 12000,
+      });
+      const d = res.data?.data ?? {};
+      return {
+        ...base,
+        available_balance: d.availableBalance != null ? Number(d.availableBalance) : null,
+        balance: d.balance != null ? Number(d.balance) : null,
+      };
+    } catch (err: any) {
+      const msg = err?.response?.data?.message ?? err?.message ?? 'unknown error';
+      this.logger.warn(`[CashfreePayout] getBalance failed: ${msg}`);
+      return { ...base, available_balance: null, balance: null, error: msg };
+    }
+  }
+
   /** Cashfree beneficiary/transfer ids: alphanumeric + _ only, ≤ 40 chars. */
   private sanitizeId(raw: string): string {
     return raw.replace(/[^a-zA-Z0-9_]/g, '').slice(0, 40);

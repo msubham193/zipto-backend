@@ -1708,6 +1708,15 @@ export class AdminService {
     });
   }
 
+  /**
+   * Available Cashfree Payouts balance — the prepaid pool that funds driver
+   * withdrawals. If empty, auto-payouts fail. (V2 has no balance API, so this
+   * uses the legacy V1 endpoint; falls back to a reason if unavailable.)
+   */
+  async getPayoutBalance() {
+    return this.cashfreePayoutService.getBalance();
+  }
+
   async approveWithdrawal(withdrawalId: string, remarks?: string, payoutReference?: string) {
     const withdrawal = await this.withdrawalRepository.findOne({
       where: { id: withdrawalId },

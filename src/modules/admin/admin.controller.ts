@@ -86,6 +86,13 @@ export class AdminController {
   // Transaction ledger (unified audit log of every money/coin movement)
   // ─────────────────────────────────────────────────────────────────────────
 
+  @Get('payouts/balance')
+  @ApiOperation({ summary: 'Available Cashfree Payouts balance (funds driver withdrawals)' })
+  @ApiResponse({ status: 200, description: 'Payout balance retrieved' })
+  async getPayoutBalance() {
+    return this.adminService.getPayoutBalance();
+  }
+
   @Get('transactions')
   @ApiOperation({ summary: 'List all transactions (paginated, filterable)' })
   @ApiResponse({ status: 200, description: 'Transactions retrieved' })
