@@ -139,16 +139,14 @@ export class BookingService {
   }
 
   private async syncDefaultPricingRules() {
+    // Only fills in rules that don't exist yet (e.g. a new vehicle type) — must
+    // never touch an existing row, or every server restart would silently wipe
+    // out admin-configured rates back to these hardcoded defaults.
     for (const rule of getDefaultPricingRules()) {
       const existing = await this.pricingRuleRepository.findOne({
         where: { vehicle_type: rule.vehicle_type, city: rule.city },
       });
-
-      if (existing) {
-        Object.assign(existing, rule, { is_active: true });
-        await this.pricingRuleRepository.save(existing);
-        continue;
-      }
+      if (existing) continue;
 
       const pricingRule = this.pricingRuleRepository.create(rule);
       await this.pricingRuleRepository.save(pricingRule);
