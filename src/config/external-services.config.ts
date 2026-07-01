@@ -45,9 +45,9 @@ export default registerAs('externalServices', () => ({
     // Public URL of the admin panel — used in invite/notification emails.
     panelUrl       : process.env.ADMIN_PANEL_URL || 'https://admin.ridezipto.com',
     // The single root super-admin who may create/manage other admins.
-    superAdminEmail: (process.env.SUPER_ADMIN_EMAIL || 'ashwini@ridezipto.com').trim().toLowerCase(),
+    superAdminEmail: (process.env.SUPER_ADMIN_EMAIL || 'ashwini@bookfleet.in').trim().toLowerCase(),
     // Initial password seeded for the super-admin if the account doesn't exist yet.
-    superAdminPassword: process.env.SUPER_ADMIN_PASSWORD || 'Admin@123',
+    superAdminPassword: process.env.SUPER_ADMIN_PASSWORD || 'Bookfleet@123',
     superAdminName : process.env.SUPER_ADMIN_NAME || 'Ashwini',
     // Legacy/default admin logins to retire (disabled on boot). Comma-separated.
     legacyAdminEmails: (process.env.LEGACY_ADMIN_EMAILS || 'admin@skido.com,admin@zipto.in')

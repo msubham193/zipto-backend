@@ -73,7 +73,7 @@ export class AdminAccountService implements OnModuleInit {
 
   private get superAdminEmail(): string {
     return (this.configService.get<string>('externalServices.admin.superAdminEmail')
-      || 'ashwini@ridezipto.com').trim().toLowerCase();
+      || 'ashwini@bookfleet.in').trim().toLowerCase();
   }
 
   /**
