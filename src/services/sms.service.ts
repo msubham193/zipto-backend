@@ -11,7 +11,11 @@ import { RedisService } from './redis.service';
 
 // ─── DLT-approved metadata ────────────────────────────────────────────────────
 const TWO_FACTOR_BASE_URL = 'https://2factor.in/API/R1/';
-const SENDER_ID           = (process.env.TWO_FACTOR_SENDER_ID || '').trim() || 'Bookfleet';
+// DLT sender/header ID — must be the exact code registered with the telecom
+// entity (distinct from the message templates below). 'Bookfleet' is NOT a
+// valid header (9 chars, gets rejected with an HTTP 400) — 'BKFLT' is the
+// registered Bookfleet header. Override via env if it ever changes.
+const SENDER_ID           = (process.env.TWO_FACTOR_SENDER_ID || '').trim() || 'BKFLT';
 const PE_ID               = '1101559440000094860';
 // Content template ids for the DLT-approved templates (env-overridable).
 const CT_ID               = (process.env.TWO_FACTOR_CT_ID || '').trim() || '1107178289852040589'; // Login_otp1
