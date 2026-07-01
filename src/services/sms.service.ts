@@ -11,12 +11,12 @@ import { RedisService } from './redis.service';
 
 // ─── DLT-approved metadata ────────────────────────────────────────────────────
 const TWO_FACTOR_BASE_URL = 'https://2factor.in/API/R1/';
-const SENDER_ID           = 'Zipto';
+const SENDER_ID           = (process.env.TWO_FACTOR_SENDER_ID || '').trim() || 'Bookfleet';
 const PE_ID               = '1101559440000094860';
-const CT_ID               = '1107177908307247477';
-// Content template id for the DLT-approved "Delivery OTP" template.
-// Env override supported; defaults to the approved Delivery OTP CT_ID.
-const DELIVERY_CT_ID      = (process.env.TWO_FACTOR_DELIVERY_CT_ID || '').trim() || '1107177912259934237';
+// Content template ids for the DLT-approved templates (env-overridable).
+const CT_ID               = (process.env.TWO_FACTOR_CT_ID || '').trim() || '1107178289852040589'; // Login_otp1
+const DELIVERY_CT_ID      = (process.env.TWO_FACTOR_DELIVERY_CT_ID || '').trim() || '1107178289983687481'; // delivery_otp1
+const PICKUP_CT_ID        = (process.env.TWO_FACTOR_PICKUP_CT_ID || '').trim() || '1107178289957312398'; // pickup_otp1
 
 // ─── Redis key namespaces ─────────────────────────────────────────────────────
 const KEY_OTP    = (phone: string) => `otp:${phone}`;
@@ -132,8 +132,8 @@ export class SmsService {
       ctId = this.otpHashCtId;
     } else {
       loginMsg =
-        `Your Zipto OTP is ${otp}. Use this OTP for login and Verification. ` +
-        `Do not share it with anyone. -Zipto Hyperlogistics Private Limited`;
+        `Your Bookfleet OTP is ${otp}. Use this OTP for login and Verification. ` +
+        `Do not share it with anyone. - Zipto Hyperlogistics Private Limited.`;
       ctId = CT_ID;
     }
     const sent = await this.send2Factor(normalised, loginMsg, ctId);
@@ -244,8 +244,8 @@ export class SmsService {
     const normalised = this.normalisePhone(phone);
     // Must match the registered DLT template exactly.
     const message =
-      `Your Zipto Delivery OTP is ${otp}. Use this OTP for Delivery verification. ` +
-      `Do not share it with anyone.\n- Zipto Hyperlogistics Private Limited`;
+      `Your Bookfleet Delivery OTP is  ${otp}. Share this OTP with your delivery partner only after successful delivery.\n\n` +
+      `- Zipto Hyperlogistics Private Limited`;
 
     if (this.isDev) {
       this.logger.warn(`[DEV] Delivery OTP SMS to ${this.mask(normalised)}: ${message}`);
@@ -253,6 +253,26 @@ export class SmsService {
     }
 
     return this.send2Factor(normalised, message, DELIVERY_CT_ID);
+  }
+
+  /**
+   * Send the PICKUP OTP to the sender's phone, using the DLT-approved
+   * "Pickup OTP" template (word-for-word). The sender reveals this code to the
+   * rider only at pickup to confirm handover of the package.
+   */
+  async sendPickupOtp(phone: string, otp: string): Promise<boolean> {
+    const normalised = this.normalisePhone(phone);
+    // Must match the registered DLT template exactly.
+    const message =
+      `Your Bookfleet Pickup OTP is ${otp}. Share this OTP with your delivery partner only at pickup.\n\n` +
+      `- Zipto Hyperlogistics Private Limited`;
+
+    if (this.isDev) {
+      this.logger.warn(`[DEV] Pickup OTP SMS to ${this.mask(normalised)}: ${message}`);
+      return true;
+    }
+
+    return this.send2Factor(normalised, message, PICKUP_CT_ID);
   }
 
   /**

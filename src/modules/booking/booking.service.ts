@@ -1321,9 +1321,15 @@ export class BookingService {
         }
       }
 
-      // Send the DELIVERY OTP to the RECEIVER's phone via the DLT-approved
-      // template — they reveal it to the rider only at delivery. The pickup OTP
-      // is shown to the sender in-app on the live-tracking screen.
+      // Send the PICKUP OTP to the SENDER's phone (also shown in-app on the
+      // live-tracking screen) — they hand it to the rider at pickup. Send the
+      // DELIVERY OTP to the RECEIVER's phone — they reveal it to the rider only
+      // at delivery. Both via DLT-approved templates.
+      if (offerData.pickup_otp && offerData.mobile_number) {
+        this.smsService.sendPickupOtp(offerData.mobile_number, offerData.pickup_otp).catch(err =>
+          this.logger.warn(`Failed to send pickup OTP SMS: ${err?.message}`),
+        );
+      }
       const deliveryOtpPhone =
         offerData.receiver_phone || offerData.alternative_phone || offerData.mobile_number;
       if (offerData.delivery_otp && deliveryOtpPhone) {
@@ -1497,10 +1503,7 @@ export class BookingService {
     if (booking.delivery_otp) {
       const receiverPhone = booking.receiver_phone || booking.mobile_number;
       if (receiverPhone) {
-        const smsBody =
-          `Zipto Delivery OTP: *${booking.delivery_otp}*\n` +
-          `Your package is on the way! Share this OTP with the rider ONLY when the package arrives at your door.`;
-        this.smsService.sendSms(receiverPhone, smsBody).catch(err =>
+        this.smsService.sendDeliveryOtp(receiverPhone, booking.delivery_otp).catch(err =>
           this.logger.warn(`[startTrip] Failed to send delivery OTP SMS: ${err?.message}`),
         );
       }
@@ -1533,11 +1536,7 @@ export class BookingService {
     const receiverPhone = booking.receiver_phone || booking.mobile_number;
     if (!receiverPhone) throw new BadRequestException('No receiver phone number available.');
 
-    const smsBody =
-      `[Resent] Zipto Delivery OTP: *${booking.delivery_otp}*\n` +
-      `Share this OTP with the delivery rider ONLY when the package arrives.`;
-
-    const sent = await this.smsService.sendSms(receiverPhone, smsBody);
+    const sent = await this.smsService.sendDeliveryOtp(receiverPhone, booking.delivery_otp);
     if (!sent) throw new BadRequestException('Failed to send SMS. Please try again.');
 
     this.logger.log(`[resendDeliveryOtp] Resent to ${receiverPhone} for booking ${bookingId}`);
