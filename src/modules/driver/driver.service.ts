@@ -825,9 +825,13 @@ export class DriverService {
         accountNumber: bankAccount.account_number,
       });
 
+      // Cashfree accepted the account+IFSC as a valid payout beneficiary — the
+      // only real verification signal we have, so use it to clear "Pending"
+      // (previously nothing ever set is_verified, leaving it stuck forever).
       await this.bankAccountRepository.update(bankAccount.id, {
         cashfree_beneficiary_id: beneId,
         cashfree_sync_status: 'synced',
+        is_verified: true,
       });
       this.logger.log(`[CashfreePayout] Bank account synced: ${bankAccount.id} → beneficiary=${beneId}`);
     } catch (err: any) {
