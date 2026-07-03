@@ -7,12 +7,14 @@ import {
   Logger,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, LessThan } from 'typeorm';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import * as bcrypt from 'bcryptjs';
+import * as crypto from 'crypto';
 import { User, UserRole } from './entities/user.entity';
 import { OTP } from './entities/otp.entity';
+import { RefreshToken } from './entities/refresh-token.entity';
 import {
   RegisterDto,
   VerifyOtpDto,
@@ -43,6 +45,8 @@ export class AuthService {
     private readonly otpRepository: Repository<OTP>,
     @InjectRepository(DriverProfile)
     private readonly driverProfileRepository: Repository<DriverProfile>,
+    @InjectRepository(RefreshToken)
+    private readonly refreshTokenRepository: Repository<RefreshToken>,
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
     private readonly smsService: SmsService,
@@ -244,6 +248,10 @@ export class AuthService {
         // (the driver profile, keyed by user_id, is NOT deleted), so the user
         // can switch back later from the other app.
         user.role = role as UserRole;
+        // Explicitly sign the account out of every existing session (the other
+        // app's included) — this is the one case where killing other sessions
+        // is intentional, not a side effect of a generic login.
+        await this.revokeAllSessions(user.id);
       }
 
       // Verification: customers are always verified; a driver is only verified
@@ -568,11 +576,20 @@ export class AuthService {
       });
 
       const user = await this.userRepository.findOne({ where: { id: payload.sub } });
-      if (!user || user.refresh_token !== refresh_token) {
+      if (!user) {
         throw new UnauthorizedException('Invalid refresh token');
       }
       if (!user.is_active) {
         throw new UnauthorizedException('Account is deactivated');
+      }
+
+      // Look up THIS specific session — other devices/app installs are separate
+      // rows and are never affected by this request.
+      const session = await this.refreshTokenRepository.findOne({
+        where: { user_id: user.id, token_hash: this.hashToken(refresh_token) },
+      });
+      if (!session || session.expires_at < new Date()) {
+        throw new UnauthorizedException('Invalid refresh token');
       }
 
       // Issue a NEW access token only — keep the SAME refresh token. Rotating it
@@ -588,6 +605,9 @@ export class AuthService {
         },
       );
 
+      // Best-effort — lets sessions be inspected/pruned by recency later.
+      this.refreshTokenRepository.update(session.id, { last_used_at: new Date() }).catch(() => {});
+
       return { access_token: accessToken, refresh_token };
     } catch {
       throw new UnauthorizedException('Invalid or expired refresh token');
@@ -595,11 +615,13 @@ export class AuthService {
   }
 
   async logout(userId: string) {
-    // Use null (not undefined — TypeORM skips undefined columns, so the token
-    // would never actually be cleared). Also clear the FCM token so no push
-    // booking-offer or notification can reach the device after logout.
+    // Revoke every session (matches the prior single-column behavior — logout
+    // has always signed the account out everywhere, not just one device).
+    await this.revokeAllSessions(userId);
+    // Clear the FCM token so no push booking-offer or notification can reach
+    // the device after logout. Use null (not undefined — TypeORM skips
+    // undefined columns, so the token would never actually be cleared).
     await this.userRepository.update(userId, {
-      refresh_token: null,
       fcm_token: null,
     });
     // Take drivers offline on logout so dispatch immediately stops matching them.
@@ -666,15 +688,26 @@ export class AuthService {
     }
 
     user.password_hash = await bcrypt.hash(password, 10);
-    user.refresh_token = null;
     await this.userRepository.save(user);
+    // Security-sensitive action — sign the account out everywhere.
+    await this.revokeAllSessions(user.id);
 
     return { message: 'Password reset successfully.' };
   }
 
   // ─── Internals ───────────────────────────────────────────────────────────────
 
-  private async generateTokens(user: User) {
+  private hashToken(token: string): string {
+    return crypto.createHash('sha256').update(token).digest('hex');
+  }
+
+  /**
+   * Issue a new session (access + refresh token pair) for `user` without
+   * touching any of their other active sessions — multiple devices/app
+   * installs can stay logged in concurrently. `deviceId` is stored purely for
+   * visibility/debugging, not used for lookup.
+   */
+  private async generateTokens(user: User, deviceId?: string) {
     const payload = { sub: user.id, phone: user.phone, role: user.role };
 
     const accessToken = this.jwtService.sign(payload, {
@@ -687,10 +720,28 @@ export class AuthService {
       expiresIn: this.configService.get<string>('jwt.refreshExpiresIn'),
     });
 
-    user.refresh_token = refreshToken;
-    await this.userRepository.save(user);
+    const decoded = this.jwtService.decode(refreshToken) as { exp?: number } | null;
+    const expiresAt = decoded?.exp ? new Date(decoded.exp * 1000) : new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+
+    // Opportunistic cleanup — bounds table growth without needing a cron job.
+    await this.refreshTokenRepository.delete({ user_id: user.id, expires_at: LessThan(new Date()) });
+
+    await this.refreshTokenRepository.save(
+      this.refreshTokenRepository.create({
+        user_id: user.id,
+        token_hash: this.hashToken(refreshToken),
+        device_id: deviceId ?? null,
+        expires_at: expiresAt,
+      }),
+    );
 
     return { access_token: accessToken, refresh_token: refreshToken };
+  }
+
+  /** Revoke every active session for a user — used only for the explicit,
+   * consented cross-role switch ("signs the user out of the other app"). */
+  private async revokeAllSessions(userId: string): Promise<void> {
+    await this.refreshTokenRepository.delete({ user_id: userId });
   }
 
   private sanitizeUser(user: User) {

@@ -7,6 +7,7 @@ import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { User } from './entities/user.entity';
 import { OTP } from './entities/otp.entity';
+import { RefreshToken } from './entities/refresh-token.entity';
 import { DriverProfile } from '../driver/entities/driver-profile.entity';
 import { JwtStrategy } from './strategies/jwt.strategy';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
@@ -15,7 +16,7 @@ import { ReferralModule } from '../referral/referral.module';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([User, OTP, DriverProfile]),
+    TypeOrmModule.forFeature([User, OTP, DriverProfile, RefreshToken]),
     ReferralModule,
     PassportModule.register({ defaultStrategy: 'jwt' }),
     JwtModule.registerAsync({

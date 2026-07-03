@@ -9,11 +9,12 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, In } from 'typeorm';
 import { ConfigService } from '@nestjs/config';
 import * as bcrypt from 'bcryptjs';
 import * as crypto from 'crypto';
 import { User, UserRole } from '../auth/entities/user.entity';
+import { RefreshToken } from '../auth/entities/refresh-token.entity';
 import { EmailService } from '../../services/email.service';
 import { ChangePasswordDto, CreateAdminDto } from './dto/admin-account.dto';
 
@@ -31,9 +32,16 @@ export class AdminAccountService implements OnModuleInit {
   constructor(
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
+    @InjectRepository(RefreshToken)
+    private readonly refreshTokenRepository: Repository<RefreshToken>,
     private readonly emailService: EmailService,
     private readonly configService: ConfigService,
   ) {}
+
+  /** Revoke every active session for a user (all devices/app installs). */
+  private async revokeAllSessions(userId: string): Promise<void> {
+    await this.refreshTokenRepository.delete({ user_id: userId });
+  }
 
   // ─── Boot seeding ───────────────────────────────────────────────────────────
 
@@ -56,10 +64,22 @@ export class AdminAccountService implements OnModuleInit {
       .filter((e) => e && e !== this.superAdminEmail);
     if (!emails.length) return;
 
+    const toRetire = await this.userRepository
+      .createQueryBuilder()
+      .select('id')
+      .where('lower(email) IN (:...emails)', { emails })
+      .andWhere('role = :role', { role: UserRole.ADMIN })
+      .andWhere('is_super_admin = false')
+      .andWhere('is_active = true')
+      .getRawMany<{ id: string }>();
+    if (toRetire.length) {
+      await this.refreshTokenRepository.delete({ user_id: In(toRetire.map((r) => r.id)) });
+    }
+
     const result = await this.userRepository
       .createQueryBuilder()
       .update(User)
-      .set({ is_active: false, refresh_token: null as any })
+      .set({ is_active: false })
       .where('lower(email) IN (:...emails)', { emails })
       .andWhere('role = :role', { role: UserRole.ADMIN })
       .andWhere('is_super_admin = false')
@@ -148,9 +168,9 @@ export class AdminAccountService implements OnModuleInit {
     await this.userRepository.update(user.id, {
       password_hash: await bcrypt.hash(dto.newPassword, BCRYPT_ROUNDS),
       must_change_password: false,
-      // Invalidate other sessions' refresh tokens after a credential change.
-      refresh_token: null as any,
     });
+    // Invalidate other sessions after a credential change.
+    await this.revokeAllSessions(user.id);
 
     this.logger.log(`Password changed for admin ${this.mask(user.email)}`);
     return { message: 'Password changed successfully' };
@@ -234,10 +254,8 @@ export class AdminAccountService implements OnModuleInit {
     if (target.is_super_admin) {
       throw new ForbiddenException('The super-admin account cannot be disabled.');
     }
-    await this.userRepository.update(target.id, {
-      is_active: isActive,
-      ...(isActive ? {} : { refresh_token: null as any }),
-    });
+    await this.userRepository.update(target.id, { is_active: isActive });
+    if (!isActive) await this.revokeAllSessions(target.id);
     return { message: isActive ? 'Admin enabled' : 'Admin disabled' };
   }
 
@@ -251,8 +269,8 @@ export class AdminAccountService implements OnModuleInit {
     await this.userRepository.update(target.id, {
       password_hash: await bcrypt.hash(tempPassword, BCRYPT_ROUNDS),
       must_change_password: true,
-      refresh_token: null as any,
     });
+    await this.revokeAllSessions(target.id);
     await this.emailService.sendAdminInvite(target.email, target.name, tempPassword, actor.name || 'A super-admin');
 
     this.logger.log(`Password reset for admin ${this.mask(target.email)} by ${this.mask(actor.email)}`);
