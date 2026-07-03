@@ -362,14 +362,14 @@ export class DriverWalletService {
       await this.notificationService.sendPushNotification({
         user_id: driverUserId,
         title: 'Account Suspended',
-        body: `Your Zipto wallet is at ₹${balance.toFixed(0)}. Top up now to continue accepting rides.`,
+        body: `Your Bookfleet wallet is at ₹${balance.toFixed(0)}. Top up now to continue accepting rides.`,
         data: { type: 'wallet_suspended', balance: String(balance) },
       });
     } else if (balance < LOW_BALANCE_THRESHOLD) {
       await this.notificationService.sendPushNotification({
         user_id: driverUserId,
         title: 'Low Wallet Balance',
-        body: `Your Zipto wallet is at ₹${balance.toFixed(0)}. Top up to avoid interruptions.`,
+        body: `Your Bookfleet wallet is at ₹${balance.toFixed(0)}. Top up to avoid interruptions.`,
         data: { type: 'wallet_low', balance: String(balance) },
       });
     }

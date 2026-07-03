@@ -1253,7 +1253,7 @@ export class DriverService {
     this.notificationService.sendPushNotification({
       user_id: driverUserId,
       title: '⚠️ Payout Failed',
-      body: `Your ₹${amount.toLocaleString('en-IN')} withdrawal could not be processed and has been refunded to your Zipto wallet. Please try again.`,
+      body: `Your ₹${amount.toLocaleString('en-IN')} withdrawal could not be processed and has been refunded to your Bookfleet wallet. Please try again.`,
       data: { type: 'payout_failed', amount: String(amount), withdrawal_id: withdrawalId },
     }).catch(() => {});
   }
@@ -1678,7 +1678,7 @@ export class DriverService {
       link = await razorpay.paymentLink.create({
         amount:       amountPaise,
         currency:     'INR',
-        description:  `Zipto Driver Wallet Top-up Rs.${amount}`,
+        description:  `Bookfleet Driver Wallet Top-up Rs.${amount}`,
         reminder_enable: false,
         notify:       { sms: false, email: false },
         reference_id: `tp_${request.id}`,

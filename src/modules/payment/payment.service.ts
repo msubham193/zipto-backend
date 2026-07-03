@@ -134,7 +134,7 @@ export class PaymentService {
     // Return HTML that the WebView sees — JS redirect makes URL detectable
     return `<!DOCTYPE html>
 <html>
-  <head><meta charset="utf-8"/><title>Zipto Payment</title></head>
+  <head><meta charset="utf-8"/><title>Bookfleet Payment</title></head>
   <body>
     <script>window.location.replace(${JSON.stringify(resultUrl)});</script>
     <noscript><meta http-equiv="refresh" content="0;url=${resultUrl}"/></noscript>
@@ -464,7 +464,7 @@ export class PaymentService {
   <head>
     <meta charset="utf-8"/>
     <meta name="viewport" content="width=device-width, initial-scale=1"/>
-    <title>Zipto Payment</title>
+    <title>Bookfleet Payment</title>
     <script src="https://sdk.cashfree.com/js/v3/cashfree.js"></script>
     <style>body{font-family:sans-serif;display:flex;justify-content:center;align-items:center;height:100vh;margin:0;background:#f9fafb;color:#6b7280}</style>
   </head>
@@ -506,7 +506,7 @@ export class PaymentService {
   <head>
     <meta charset="utf-8"/>
     <meta name="viewport" content="width=device-width, initial-scale=1"/>
-    <title>Zipto Payment ${isSuccess ? 'Successful' : 'Failed'}</title>
+    <title>Bookfleet Payment ${isSuccess ? 'Successful' : 'Failed'}</title>
     <!-- Marker URL the WebView detects -->
     <script>window.__ZIPTO_PAYMENT__ = ${JSON.stringify({ status, orderId, amount })};</script>
     <style>

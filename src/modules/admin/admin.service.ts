@@ -1898,7 +1898,7 @@ export class AdminService {
         this.notificationService.sendPushNotification({
           user_id: driverUserId,
           title: '⚠️ Payout Failed',
-          body: `Your ₹${amount.toLocaleString('en-IN')} withdrawal could not be processed and has been refunded to your Zipto wallet. Please try again.`,
+          body: `Your ₹${amount.toLocaleString('en-IN')} withdrawal could not be processed and has been refunded to your Bookfleet wallet. Please try again.`,
           data: { type: 'payout_failed', amount: String(amount), withdrawal_id: withdrawal.id },
         }).catch(() => {});
       }
@@ -1938,7 +1938,7 @@ export class AdminService {
       this.notificationService.sendPushNotification({
         user_id: driverUserId,
         title: 'Withdrawal Rejected',
-        body: `Your ₹${amount.toLocaleString('en-IN')} withdrawal was rejected and has been refunded to your Zipto wallet.${remarks ? ` Reason: ${remarks}` : ''}`,
+        body: `Your ₹${amount.toLocaleString('en-IN')} withdrawal was rejected and has been refunded to your Bookfleet wallet.${remarks ? ` Reason: ${remarks}` : ''}`,
         data: { type: 'withdrawal_rejected', amount: String(amount), withdrawal_id: withdrawalId },
       }).catch(() => {});
     }
@@ -1981,7 +1981,7 @@ export class AdminService {
     this.notificationService.sendPushNotification({
       user_id: req.driver_user_id,
       title: 'Wallet Topped Up!',
-      body: `₹${Number(req.amount).toLocaleString('en-IN')} added to your Zipto wallet. New balance: ₹${newBalance.toLocaleString('en-IN')}.`,
+      body: `₹${Number(req.amount).toLocaleString('en-IN')} added to your Bookfleet wallet. New balance: ₹${newBalance.toLocaleString('en-IN')}.`,
       data: { type: 'topup_approved', amount: String(req.amount) },
     }).catch(() => {});
 
@@ -2030,7 +2030,7 @@ export class AdminService {
     this.notificationService.sendPushNotification({
       user_id: profile.user_id,
       title: 'Wallet Credited',
-      body: `₹${amount.toLocaleString('en-IN')} added to your Zipto wallet. New balance: ₹${newBalance.toLocaleString('en-IN')}.`,
+      body: `₹${amount.toLocaleString('en-IN')} added to your Bookfleet wallet. New balance: ₹${newBalance.toLocaleString('en-IN')}.`,
       data: { type: 'wallet_credit', amount: String(amount) },
     }).catch(() => {});
 
