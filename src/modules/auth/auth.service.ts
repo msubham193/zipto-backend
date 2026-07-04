@@ -561,10 +561,26 @@ export class AuthService {
       user.name = dto.name.trim();
     }
     if (typeof dto.phone === 'string' && dto.phone.trim()) {
-      user.phone = dto.phone.trim();
+      const phone = formatPhoneNumber(dto.phone.trim());
+      if (phone !== user.phone) {
+        const exists = await this.userRepository.findOne({ where: { phone } });
+        if (exists && exists.id !== userId) {
+          throw new ConflictException('That phone number is already in use by another account.');
+        }
+        user.phone = phone;
+      }
     }
 
-    await this.userRepository.save(user);
+    try {
+      await this.userRepository.save(user);
+    } catch (err: any) {
+      // Safety net for a uniqueness race condition slipping past the checks
+      // above — never let a raw DB constraint error surface as a 500.
+      if (err?.code === '23505') {
+        throw new ConflictException('That email or phone number is already in use by another account.');
+      }
+      throw err;
+    }
     return this.sanitizeUser(user);
   }
 

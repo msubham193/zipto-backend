@@ -1,6 +1,6 @@
-import { Controller, Get, Put, Post, Delete, Param, Query, Body, BadRequestException, Req, Headers } from '@nestjs/common';
+import { Controller, Get, Put, Post, Delete, Param, Query, Body, BadRequestException, Req, Headers, Res } from '@nestjs/common';
 import { RawBodyRequest } from '@nestjs/common';
-import { Request } from 'express';
+import { Request, Response } from 'express';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { Public } from '../../common/decorators/public.decorator';
 import { GetUser } from '../../common/decorators/get-user.decorator';
@@ -365,6 +365,37 @@ export class AdminController {
   @ApiResponse({ status: 200, description: 'Invoice generated' })
   async getGstInvoice(@Param('bookingId') bookingId: string) {
     return this.adminService.getGstInvoice(bookingId);
+  }
+
+  @Get('reports/gst/invoices/pdf')
+  @ApiOperation({ summary: 'Download every invoice matching the GST report filters as ONE combined PDF' })
+  @ApiResponse({ status: 200, description: 'Combined PDF generated' })
+  async downloadGstInvoicesPdf(
+    @Query('from') from: string | undefined,
+    @Query('to') to: string | undefined,
+    @Query('gstin') gstin: string | undefined,
+    @Query('type') type: string | undefined,
+    @Res() res: Response,
+  ) {
+    const { buffer, filename, count, truncated } = await this.adminService.getGstReportInvoicesPdf({
+      from,
+      to,
+      gstin,
+      type,
+    });
+    if (!count) {
+      res.status(404).json({ success: false, message: 'No invoices match these filters.' });
+      return;
+    }
+    res.set({
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': `attachment; filename="${filename}"`,
+      'Content-Length': String(buffer.length),
+      'Cache-Control': 'no-store',
+      'X-Invoice-Count': String(count),
+      'X-Truncated': String(truncated),
+    });
+    res.end(buffer);
   }
 
   @Get('reports/drivers')

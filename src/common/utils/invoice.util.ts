@@ -200,19 +200,11 @@ export function invoiceFileName(inv: InvoiceData): string {
 }
 
 /**
- * Render the invoice as a real PDF (Buffer) — used for the in-app download
- * (served with Content-Disposition: attachment) and the email attachment.
- * Reliable on every phone, unlike window.print() in an in-app browser.
+ * Draw one invoice onto the CURRENT page of an already-open PDFDocument.
+ * Shared by buildInvoicePdf() (one invoice, one PDF) and buildInvoicesPdf()
+ * (many invoices, one PDF — a new page per invoice) so the two never drift.
  */
-export function buildInvoicePdf(inv: InvoiceData): Promise<Buffer> {
-  return new Promise((resolve, reject) => {
-    try {
-      const doc = new PDFDocument({ size: 'A4', margin: 40 });
-      const chunks: Buffer[] = [];
-      doc.on('data', (c: Buffer) => chunks.push(c));
-      doc.on('end', () => resolve(Buffer.concat(chunks)));
-      doc.on('error', reject);
-
+function drawInvoicePage(doc: PDFKit.PDFDocument, inv: InvoiceData): void {
       const L = 40, R = 555; // content bounds (A4 width 595 − margins)
       const W = R - L;
       const BLUE = '#1d4ed8', DARK = '#0f172a', MUTED = '#64748b';
@@ -296,7 +288,53 @@ export function buildInvoicePdf(inv: InvoiceData): Promise<Buffer> {
       doc.fillColor(MUTED).font('Helvetica').fontSize(8)
         .text('This is a computer-generated invoice and does not require a signature.', L, 788, { width: W, align: 'center' })
         .text(`© ${new Date().getFullYear()} Zipto Hyperlogistics Pvt. Ltd.`, L, 800, { width: W, align: 'center' });
+}
 
+/**
+ * Render a single invoice as a real PDF (Buffer) — used for the in-app
+ * download (served with Content-Disposition: attachment) and the email
+ * attachment. Reliable on every phone, unlike window.print() in an in-app
+ * browser.
+ */
+export function buildInvoicePdf(inv: InvoiceData): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    try {
+      const doc = new PDFDocument({ size: 'A4', margin: 40 });
+      const chunks: Buffer[] = [];
+      doc.on('data', (c: Buffer) => chunks.push(c));
+      doc.on('end', () => resolve(Buffer.concat(chunks)));
+      doc.on('error', reject);
+
+      drawInvoicePage(doc, inv);
+      doc.end();
+    } catch (e) {
+      reject(e);
+    }
+  });
+}
+
+/**
+ * Render MANY invoices into a SINGLE combined PDF — one invoice per page, in
+ * the order given. Used by the admin GST report's "Download all as PDF".
+ * Individual per-order invoice download is unaffected — this is additive.
+ */
+export function buildInvoicesPdf(invoices: InvoiceData[]): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    try {
+      if (!invoices.length) {
+        resolve(Buffer.from(''));
+        return;
+      }
+      const doc = new PDFDocument({ size: 'A4', margin: 40 });
+      const chunks: Buffer[] = [];
+      doc.on('data', (c: Buffer) => chunks.push(c));
+      doc.on('end', () => resolve(Buffer.concat(chunks)));
+      doc.on('error', reject);
+
+      invoices.forEach((inv, i) => {
+        if (i > 0) doc.addPage();
+        drawInvoicePage(doc, inv);
+      });
       doc.end();
     } catch (e) {
       reject(e);

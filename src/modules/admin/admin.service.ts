@@ -24,6 +24,7 @@ import { S3Service } from '../../services/s3.service';
 import { MapboxService } from '../../services/mapbox.service';
 import { EmailService } from '../../services/email.service';
 import { SystemSettingsService } from '../settings/system-settings.service';
+import { InvoiceData, buildInvoicesPdf } from '../../common/utils/invoice.util';
 
 @Injectable()
 export class AdminService {
@@ -993,18 +994,9 @@ export class AdminService {
    * the customer's GSTIN + name + CGST/SGST breakdown, plus running totals.
    * Filterable by date range and GSTIN.
    */
-  async getGstReport(params: {
-    from?: string;
-    to?: string;
-    gstin?: string;
-    type?: string; // 'b2b' | 'b2c' | undefined (all)
-    page?: number;
-    limit?: number;
-  }) {
-    const page = Math.max(1, Number(params.page) || 1);
-    const limit = Math.min(200, Math.max(1, Number(params.limit) || 50));
-    const offset = (page - 1) * limit;
-
+  /** Shared WHERE clause for the GST report + the "download all invoices" PDF,
+   * so the two can never drift out of sync with each other. */
+  private buildGstFilter(params: { from?: string; to?: string; gstin?: string; type?: string }) {
     const conds: string[] = [
       `p.payment_status = 'completed'`,
       `(b.fare_breakdown->>'gst_amount') IS NOT NULL`,
@@ -1023,7 +1015,22 @@ export class AdminService {
     const type = (params.type || '').toLowerCase();
     if (type === 'b2b') conds.push(`b.customer_gstin IS NOT NULL`);
     else if (type === 'b2c') conds.push(`b.customer_gstin IS NULL`);
-    const where = conds.join(' AND ');
+    return { where: conds.join(' AND '), args };
+  }
+
+  async getGstReport(params: {
+    from?: string;
+    to?: string;
+    gstin?: string;
+    type?: string; // 'b2b' | 'b2c' | undefined (all)
+    page?: number;
+    limit?: number;
+  }) {
+    const page = Math.max(1, Number(params.page) || 1);
+    const limit = Math.min(200, Math.max(1, Number(params.limit) || 50));
+    const offset = (page - 1) * limit;
+
+    const { where, args } = this.buildGstFilter(params);
 
     const transactions = await this.bookingRepository.manager.query(
       `SELECT b.id AS booking_id, b.created_at, b.customer_gstin,
@@ -1146,6 +1153,58 @@ export class AdminService {
         customerGstin && !tax.zipto_gstin
           ? 'Zipto GSTIN not yet configured — set it in Admin → GST settings to issue a valid tax invoice.'
           : undefined,
+    };
+  }
+
+  /**
+   * Build ONE combined PDF containing every invoice matching the GST report's
+   * filters (one invoice per page) — the individual per-booking invoice
+   * download is untouched, this is purely additive. Capped so a huge, unbounded
+   * date range can't hang the request; the admin narrows the filter instead.
+   */
+  private static readonly GST_BULK_PDF_LIMIT = 500;
+
+  async getGstReportInvoicesPdf(params: {
+    from?: string;
+    to?: string;
+    gstin?: string;
+    type?: string;
+  }): Promise<{ buffer: Buffer; filename: string; count: number; truncated: boolean }> {
+    const { where, args } = this.buildGstFilter(params);
+
+    const rows = await this.bookingRepository.manager.query(
+      `SELECT b.id AS booking_id
+         FROM bookings b
+         JOIN payments p ON p.booking_id = b.id
+        WHERE ${where}
+        ORDER BY b.created_at ASC
+        LIMIT ${AdminService.GST_BULK_PDF_LIMIT + 1}`,
+      args,
+    );
+
+    const truncated = rows.length > AdminService.GST_BULK_PDF_LIMIT;
+    const bookingIds: string[] = rows.slice(0, AdminService.GST_BULK_PDF_LIMIT).map((r: any) => r.booking_id);
+
+    const invoices: InvoiceData[] = [];
+    for (const id of bookingIds) {
+      try {
+        invoices.push(await this.getGstInvoice(id));
+      } catch {
+        // Skip a booking whose payment/invoice data is unexpectedly missing
+        // rather than failing the whole batch download.
+      }
+    }
+
+    const buffer = invoices.length
+      ? await buildInvoicesPdf(invoices)
+      : Buffer.from('');
+
+    const stamp = new Date().toISOString().slice(0, 10);
+    return {
+      buffer,
+      filename: `gst-invoices-${stamp}.pdf`,
+      count: invoices.length,
+      truncated,
     };
   }
 
