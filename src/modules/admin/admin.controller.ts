@@ -13,6 +13,7 @@ import { NotificationService } from '../notification/notification.service';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { GetBookingsDto } from './dto/get-bookings.dto';
 import { PaginationDto } from './dto/pagination.dto';
+import { CustomerQueryDto } from './dto/customer-query.dto';
 import { ReportsQueryDto } from './dto/reports-query.dto';
 import { CreatePricingRuleDto, UpdatePricingRuleDto } from './dto/pricing-rule.dto';
 import { VehiclesQueryDto } from './dto/vehicles-query.dto';
@@ -259,9 +260,9 @@ export class AdminController {
   }
 
   @Get('customers')
-  @ApiOperation({ summary: 'Get all customers with pagination' })
+  @ApiOperation({ summary: 'Get all customers with pagination, search, and status filter' })
   @ApiResponse({ status: 200, description: 'Customers retrieved' })
-  async getAllCustomers(@Query() query: PaginationDto) {
+  async getAllCustomers(@Query() query: CustomerQueryDto) {
     return this.adminService.getAllCustomers(query);
   }
 

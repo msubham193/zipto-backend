@@ -570,20 +570,34 @@ export class AdminService {
   }
 
   /**
-   * Get all customers with pagination
+   * Get all customers with pagination, search, and status filter
    */
-  async getAllCustomers(query: { page?: number; limit?: number }) {
+  async getAllCustomers(query: { page?: number; limit?: number; search?: string; status?: string }) {
     const page = Number(query.page) || 1;
     const limit = Number(query.limit) || 20;
 
-    const [customers, total] = await this.userRepository.findAndCount({
+    const qb = this.userRepository
+      .createQueryBuilder('u')
+      .select(['u.id', 'u.phone', 'u.email', 'u.name', 'u.is_verified', 'u.is_active', 'u.created_at', 'u.updated_at'])
+      .where('u.role = :role', { role: UserRole.CUSTOMER })
       // Hide self-deleted (anonymized) accounts from the admin list.
-      where: { role: UserRole.CUSTOMER, is_deleted: false },
-      select: ['id', 'phone', 'email', 'name', 'is_verified', 'is_active', 'created_at', 'updated_at'],
-      order: { created_at: 'DESC' },
-      skip: (page - 1) * limit,
-      take: limit,
-    });
+      .andWhere('u.is_deleted = false');
+
+    const status = (query.status || '').toLowerCase();
+    if (status === 'active') qb.andWhere('u.is_active = true');
+    else if (status === 'blocked') qb.andWhere('u.is_active = false');
+
+    if (query.search) {
+      qb.andWhere('(u.name ILIKE :search OR u.email ILIKE :search OR u.phone ILIKE :search)', {
+        search: `%${query.search.trim()}%`,
+      });
+    }
+
+    const [customers, total] = await qb
+      .orderBy('u.created_at', 'DESC')
+      .skip((page - 1) * limit)
+      .take(limit)
+      .getManyAndCount();
 
     return {
       customers,
