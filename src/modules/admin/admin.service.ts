@@ -1398,7 +1398,6 @@ export class AdminService {
       b2bRows,
       invoices,
       monthly,
-      verifyText: `BOOKFLEET-GST-REPORT|${periodLabel}|${summary.invoiceCount} invoices|Rs ${summary.totalGst.toFixed(2)} GST`,
     });
 
     const stamp = new Date().toISOString().slice(0, 10);

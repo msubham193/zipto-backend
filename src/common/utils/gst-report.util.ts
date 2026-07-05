@@ -8,7 +8,6 @@
 // pdfkit is CommonJS (`export =`) and the project has esModuleInterop off —
 // see invoice.util.ts for why this import form is required.
 import PDFDocument = require('pdfkit');
-import * as QRCode from 'qrcode';
 
 const BLUE = '#1d4ed8';
 const BLUE_DARK = '#1e3a8a';
@@ -85,7 +84,6 @@ export interface GstReportData {
   b2bRows: GstReportB2BRow[];
   invoices: GstReportInvoiceRow[];
   monthly: GstReportMonthRow[];
-  verifyText: string;
 }
 
 const inr = (n: number | null | undefined) =>
@@ -95,9 +93,7 @@ const fmtDate = (d: Date | string) =>
 
 const INVOICE_ROW_LIMIT = 1000;
 
-export async function buildGstReportPdf(data: GstReportData): Promise<Buffer> {
-  const qrPng = await QRCode.toBuffer(data.verifyText, { margin: 1, width: 200 });
-
+export function buildGstReportPdf(data: GstReportData): Promise<Buffer> {
   return new Promise((resolve, reject) => {
     try {
       const doc = new PDFDocument({ size: 'A4', margin: 30, bufferPages: true });
@@ -139,27 +135,33 @@ export async function buildGstReportPdf(data: GstReportData): Promise<Buffer> {
 
       // ── Company details box ──
       const boxTop = doc.y;
-      const boxH = 92;
+      const boxH = 104;
       doc.roundedRect(L, boxTop, W, boxH, 8).lineWidth(1).strokeColor(BORDER).stroke();
       doc.fillColor(BLUE).font('Helvetica-Bold').fontSize(10).text('COMPANY DETAILS', L + 14, boxTop + 12);
 
       const c = data.company;
       const colA = L + 14, colB = L + 300;
+      // Value widths are computed from the box's actual boundaries so long
+      // values (e.g. the registered address) can't run past the page edge.
+      const colAValW = colB - 10 - (colA + 100);
+      const colBValW = (R - 14) - (colB + 100);
       let ry = boxTop + 32;
-      const field = (x: number, label: string, value: string, y: number) => {
+      const field = (x: number, label: string, value: string, y: number, valW: number) => {
         doc.fillColor(MUTED).font('Helvetica').fontSize(8.5).text(label, x, y, { width: 100 });
-        doc.fillColor(DARK).font('Helvetica-Bold').fontSize(8.5).text(value || '—', x + 100, y, { width: 195 });
+        doc.fillColor(DARK).font('Helvetica-Bold').fontSize(8.5).text(value || '—', x + 100, y, { width: valW });
       };
-      field(colA, 'Company Name', c.legalName, ry);
-      field(colB, 'Registered Address', c.address || '—', ry);
+      field(colA, 'Company Name', c.legalName, ry, colAValW);
+      field(colB, 'Brand Name', c.brandName, ry, colBValW);
       ry += 15;
-      field(colA, 'Brand Name', c.brandName, ry);
+      field(colA, 'GSTIN', c.gstin || 'Not configured', ry, colAValW);
+      field(colB, 'PAN No.', c.pan || '—', ry, colBValW);
       ry += 15;
-      field(colA, 'GSTIN', c.gstin || 'Not configured', ry);
-      field(colB, 'Email', c.email, ry);
+      field(colA, 'Email', c.email, ry, colAValW);
+      field(colB, 'Contact No.', c.phone, ry, colBValW);
       ry += 15;
-      field(colA, 'PAN No.', c.pan || '—', ry);
-      field(colB, 'Contact No.', c.phone, ry);
+      // Registered Address gets its own full-width row instead of being
+      // squeezed into a half-column, since it's usually the longest field.
+      field(colA, 'Registered Address', c.address || '—', ry, (R - 14) - (colA + 100));
 
       doc.y = boxTop + boxH + 14;
 
@@ -374,20 +376,18 @@ export async function buildGstReportPdf(data: GstReportData): Promise<Buffer> {
 
       doc.y = Math.max(yAfterMonth, by + 8) + 14;
 
-      // ── Declaration + QR ──
-      ensureSpace(90);
+      // ── Declaration ──
+      ensureSpace(60);
       const declTop = doc.y;
-      const declH = 78;
-      const qrSize = 78;
+      const declH = 50;
       doc.roundedRect(L, declTop, W, declH, 8).lineWidth(1).strokeColor(BORDER).stroke();
       doc.fillColor(BLUE).font('Helvetica-Bold').fontSize(9).text('DECLARATION', L + 14, declTop + 12);
       doc.fillColor(MUTED).font('Helvetica').fontSize(8)
         .text(
           `This GST Report is system generated from the ${data.company.brandName} Admin Panel based on paid deliveries ` +
           'and is intended for accounting and GST reconciliation purposes.',
-          L + 14, declTop + 28, { width: W - qrSize - 50 },
+          L + 14, declTop + 28, { width: W - 28 },
         );
-      doc.image(qrPng, R - qrSize - 12, declTop + (declH - qrSize) / 2, { width: qrSize, height: qrSize });
       doc.y = declTop + declH + 10;
 
       // ── Watermark + footer on every page ──
