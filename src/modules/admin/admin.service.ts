@@ -1370,10 +1370,20 @@ export class AdminService {
         ? `${new Date(params.from).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })} – ${new Date(params.to).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}`
         : 'All Time';
 
+    const filterType = (params.type || '').toLowerCase();
+    const reportTypeLabel = params.gstin
+      ? `GSTIN: ${params.gstin.trim().toUpperCase()}`
+      : filterType === 'b2b'
+        ? 'B2B Only (with GSTIN)'
+        : filterType === 'b2c'
+          ? 'B2C Only (no GSTIN)'
+          : 'Summary + Detailed';
+
     const buffer = await buildGstReportPdf({
       generatedOn: new Date(),
       generatedBy,
       periodLabel,
+      reportTypeLabel,
       company: {
         legalName: tax.zipto_legal_name || 'Zipto Hyperlogistics Private Limited',
         brandName: 'Bookfleet',
