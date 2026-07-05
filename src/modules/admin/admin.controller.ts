@@ -398,22 +398,21 @@ export class AdminController {
     res.end(buffer);
   }
 
-  @Get('reports/gst/gstr1')
-  @ApiOperation({ summary: 'GSTR-1 export (PDF) for the CA — B2B + B2CS sections matching the standard GSTR-1 layout' })
-  @ApiResponse({ status: 200, description: 'GSTR-1 PDF generated' })
-  async downloadGstr1(
+  @Get('reports/gst/report-pdf')
+  @ApiOperation({ summary: 'Branded GST Report PDF for the CA — company details, summary cards, B2B/B2C breakdown, invoice listing, monthly trend' })
+  @ApiResponse({ status: 200, description: 'GST report PDF generated' })
+  async downloadGstReportPdf(
+    @GetUser() user: User,
     @Query('from') from: string | undefined,
     @Query('to') to: string | undefined,
     @Query('gstin') gstin: string | undefined,
     @Query('type') type: string | undefined,
     @Res() res: Response,
   ) {
-    const { buffer, filename, count, truncated } = await this.adminService.getGstr1Export({
-      from,
-      to,
-      gstin,
-      type,
-    });
+    const { buffer, filename, count, truncated } = await this.adminService.getGstReportPdf(
+      { from, to, gstin, type },
+      user.name || 'Bookfleet Admin',
+    );
     if (!count) {
       res.status(404).json({ success: false, message: 'No invoices match these filters.' });
       return;

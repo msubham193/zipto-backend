@@ -24,7 +24,14 @@ import { S3Service } from '../../services/s3.service';
 import { MapboxService } from '../../services/mapbox.service';
 import { EmailService } from '../../services/email.service';
 import { SystemSettingsService } from '../settings/system-settings.service';
-import { InvoiceData, buildInvoicesPdf, buildGstr1Pdf, Gstr1B2BRow, Gstr1B2csRow } from '../../common/utils/invoice.util';
+import { InvoiceData, buildInvoicesPdf } from '../../common/utils/invoice.util';
+import {
+  buildGstReportPdf,
+  GstReportSummary,
+  GstReportB2BRow,
+  GstReportInvoiceRow,
+  GstReportMonthRow,
+} from '../../common/utils/gst-report.util';
 
 @Injectable()
 export class AdminService {
@@ -1209,28 +1216,92 @@ export class AdminService {
   }
 
   /**
-   * GSTR-1 export for the CA — a PDF with the two sections a GST return
-   * needs: B2B (invoice-level, one row per registered-GSTIN customer) and
-   * B2CS (consolidated by place-of-supply + rate, as GSTR-1 requires for
-   * unregistered/B2C customers — NOT invoice-level). Column names match the
-   * standard GSTR-1 offline-utility layout; verify against the current
-   * portal template before an actual filing upload, since GST formats do get
-   * revised — this is built for CA reconciliation/audit, not a certified
-   * direct-to-portal file.
+   * The branded "GST Report" PDF for the CA — company details, summary
+   * cards, B2B/B2C breakdown, full invoice listing, monthly trend, and a
+   * verification QR. Built for CA reconciliation/audit and IT return prep.
    */
-  private static readonly GSTR1_ROW_LIMIT = 20_000;
+  private static readonly GST_REPORT_ROW_LIMIT = 1000;
 
-  async getGstr1Export(params: { from?: string; to?: string; gstin?: string; type?: string }): Promise<{
-    buffer: Buffer;
-    filename: string;
-    count: number;
-    truncated: boolean;
-  }> {
+  async getGstReportPdf(
+    params: { from?: string; to?: string; gstin?: string; type?: string },
+    generatedBy: string,
+  ): Promise<{ buffer: Buffer; filename: string; count: number; truncated: boolean }> {
     const { where, args } = this.buildGstFilter(params);
 
-    const rows = await this.bookingRepository.manager.query(
+    const [summaryRow] = await this.bookingRepository.manager.query(
+      `SELECT COUNT(*)::int AS count,
+              COALESCE(SUM((b.fare_breakdown->>'gst_amount')::numeric),0)  AS total_gst,
+              COALESCE(SUM((b.fare_breakdown->>'cgst_amount')::numeric),0) AS total_cgst,
+              COALESCE(SUM((b.fare_breakdown->>'sgst_amount')::numeric),0) AS total_sgst,
+              COALESCE(SUM(COALESCE(
+                (b.fare_breakdown->>'taxable_value')::numeric,
+                (b.fare_breakdown->>'delivery_charge')::numeric
+                  + COALESCE((b.fare_breakdown->>'platform_fee')::numeric, 0)
+              )),0) AS total_taxable,
+              COUNT(*) FILTER (WHERE b.customer_gstin IS NOT NULL)::int AS b2b_count,
+              COUNT(*) FILTER (WHERE b.customer_gstin IS NULL)::int     AS b2c_count,
+              COALESCE(SUM((b.fare_breakdown->>'gst_amount')::numeric) FILTER (WHERE b.customer_gstin IS NOT NULL),0) AS b2b_gst,
+              COALESCE(SUM((b.fare_breakdown->>'gst_amount')::numeric) FILTER (WHERE b.customer_gstin IS NULL),0)     AS b2c_gst,
+              COALESCE(SUM(COALESCE(
+                (b.fare_breakdown->>'taxable_value')::numeric,
+                (b.fare_breakdown->>'delivery_charge')::numeric
+                  + COALESCE((b.fare_breakdown->>'platform_fee')::numeric, 0)
+              )) FILTER (WHERE b.customer_gstin IS NOT NULL),0) AS b2b_taxable,
+              COALESCE(SUM(COALESCE(
+                (b.fare_breakdown->>'taxable_value')::numeric,
+                (b.fare_breakdown->>'delivery_charge')::numeric
+                  + COALESCE((b.fare_breakdown->>'platform_fee')::numeric, 0)
+              )) FILTER (WHERE b.customer_gstin IS NULL),0) AS b2c_taxable
+         FROM bookings b
+         JOIN payments p ON p.booking_id = b.id
+        WHERE ${where}`,
+      args,
+    );
+
+    const summary: GstReportSummary = {
+      totalGst: Number(summaryRow?.total_gst) || 0,
+      totalCgst: Number(summaryRow?.total_cgst) || 0,
+      totalSgst: Number(summaryRow?.total_sgst) || 0,
+      totalTaxable: Number(summaryRow?.total_taxable) || 0,
+      invoiceCount: Number(summaryRow?.count) || 0,
+      b2bCount: Number(summaryRow?.b2b_count) || 0,
+      b2cCount: Number(summaryRow?.b2c_count) || 0,
+      b2bGst: Number(summaryRow?.b2b_gst) || 0,
+      b2cGst: Number(summaryRow?.b2c_gst) || 0,
+      b2bTaxable: Number(summaryRow?.b2b_taxable) || 0,
+      b2cTaxable: Number(summaryRow?.b2c_taxable) || 0,
+    };
+
+    const b2bGroupRows = await this.bookingRepository.manager.query(
+      `SELECT b.customer_gstin AS gstin,
+              MAX(COALESCE(u.name, b.name)) AS customer_name,
+              COUNT(*)::int AS invoices,
+              SUM(COALESCE(
+                (b.fare_breakdown->>'taxable_value')::numeric,
+                (b.fare_breakdown->>'delivery_charge')::numeric
+                  + COALESCE((b.fare_breakdown->>'platform_fee')::numeric, 0)
+              )) AS taxable_value,
+              SUM((b.fare_breakdown->>'gst_amount')::numeric) AS gst_amount
+         FROM bookings b
+         JOIN payments p ON p.booking_id = b.id
+         LEFT JOIN users u ON u.id = b.customer_id
+        WHERE ${where} AND b.customer_gstin IS NOT NULL
+        GROUP BY b.customer_gstin
+        ORDER BY taxable_value DESC`,
+      args,
+    );
+    const b2bRows: GstReportB2BRow[] = b2bGroupRows.map((r: any) => ({
+      gstin: r.gstin,
+      customerName: r.customer_name || 'Customer',
+      invoices: Number(r.invoices) || 0,
+      taxableValue: Number(r.taxable_value) || 0,
+      gstAmount: Number(r.gst_amount) || 0,
+    }));
+
+    const invoiceRows = await this.bookingRepository.manager.query(
       `SELECT b.id AS booking_id, b.created_at, b.customer_gstin,
               COALESCE(u.name, b.name) AS customer_name,
+              COALESCE(u.phone, b.mobile_number) AS customer_phone,
               COALESCE(
                 (b.fare_breakdown->>'taxable_value')::numeric,
                 (b.fare_breakdown->>'delivery_charge')::numeric
@@ -1239,74 +1310,92 @@ export class AdminService {
               (b.fare_breakdown->>'gst_percent')::numeric AS gst_percent,
               (b.fare_breakdown->>'cgst_amount')::numeric  AS cgst_amount,
               (b.fare_breakdown->>'sgst_amount')::numeric  AS sgst_amount,
-              b.estimated_fare::numeric AS invoice_value
+              (b.fare_breakdown->>'gst_amount')::numeric   AS gst_amount,
+              b.estimated_fare::numeric AS total
          FROM bookings b
          JOIN payments p ON p.booking_id = b.id
          LEFT JOIN users u ON u.id = b.customer_id
         WHERE ${where}
-        ORDER BY b.created_at ASC
-        LIMIT ${AdminService.GSTR1_ROW_LIMIT + 1}`,
+        ORDER BY b.created_at DESC
+        LIMIT ${AdminService.GST_REPORT_ROW_LIMIT + 1}`,
       args,
     );
-
-    const truncated = rows.length > AdminService.GSTR1_ROW_LIMIT;
-    const data = rows.slice(0, AdminService.GSTR1_ROW_LIMIT);
-
-    const tax = await this.systemSettings.getTaxSettings();
-    const stateCode = (tax.zipto_gstin || '').trim().slice(0, 2);
-    const placeOfSupply = /^\d{2}$/.test(stateCode)
-      ? `${stateCode}-${tax.zipto_gst_state}`
-      : tax.zipto_gst_state || '';
-
-    // B2B — invoice-level, one row per registered-GSTIN customer.
-    const b2b: Gstr1B2BRow[] = [];
-    // B2CS — consolidated by place-of-supply + rate (NOT per-invoice, per
-    // GSTR-1 rules for unregistered/B2C customers).
-    const b2csTotals = new Map<string, { rate: number; taxable: number; cgst: number; sgst: number }>();
-
-    for (const r of data) {
-      const rate = Number(r.gst_percent) || 0;
-      const taxable = Number(r.taxable_value) || 0;
-      const cgst = Number(r.cgst_amount) || 0;
-      const sgst = Number(r.sgst_amount) || 0;
-
-      if (r.customer_gstin) {
-        b2b.push({
-          gstin: r.customer_gstin,
-          name: r.customer_name || 'Customer',
-          invoice_no: `ZPT-${String(r.booking_id).slice(0, 8).toUpperCase()}`,
-          invoice_date: new Date(r.created_at).toLocaleDateString('en-GB').replace(/\//g, '-'),
-          invoice_value: Number(r.invoice_value) || 0,
-          pos: placeOfSupply,
-          rate,
-          taxable_value: taxable,
-          cgst,
-          sgst,
-        });
-      } else {
-        const key = `${placeOfSupply}|${rate}`;
-        const bucket = b2csTotals.get(key) || { rate, taxable: 0, cgst: 0, sgst: 0 };
-        bucket.taxable += taxable;
-        bucket.cgst += cgst;
-        bucket.sgst += sgst;
-        b2csTotals.set(key, bucket);
-      }
-    }
-
-    const b2cs: Gstr1B2csRow[] = Array.from(b2csTotals.values()).map((bucket) => ({
-      pos: placeOfSupply,
-      rate: bucket.rate,
-      taxable_value: this.round2(bucket.taxable),
-      cgst: this.round2(bucket.cgst),
-      sgst: this.round2(bucket.sgst),
+    const truncated = invoiceRows.length > AdminService.GST_REPORT_ROW_LIMIT;
+    const invoiceData = invoiceRows.slice(0, AdminService.GST_REPORT_ROW_LIMIT);
+    const invoices: GstReportInvoiceRow[] = invoiceData.map((r: any) => ({
+      date: r.created_at,
+      invoiceNo: `ZPT-${String(r.booking_id).slice(0, 8).toUpperCase()}`,
+      customerName: r.customer_name || 'Customer',
+      customerPhone: r.customer_phone || null,
+      isB2b: !!r.customer_gstin,
+      gstin: r.customer_gstin || null,
+      taxableValue: Number(r.taxable_value) || 0,
+      cgst: Number(r.cgst_amount) || 0,
+      sgst: Number(r.sgst_amount) || 0,
+      gstAmount: Number(r.gst_amount) || 0,
+      gstPercent: Number(r.gst_percent) || 0,
+      totalPaid: Number(r.total) || 0,
     }));
 
-    const buffer = await buildGstr1Pdf(b2b, b2cs);
+    const monthlyRows = await this.bookingRepository.manager.query(
+      `SELECT to_char(date_trunc('month', b.created_at), 'FMMonth YYYY') AS label,
+              date_trunc('month', b.created_at) AS month_start,
+              COUNT(*)::int AS invoices,
+              SUM(COALESCE(
+                (b.fare_breakdown->>'taxable_value')::numeric,
+                (b.fare_breakdown->>'delivery_charge')::numeric
+                  + COALESCE((b.fare_breakdown->>'platform_fee')::numeric, 0)
+              )) AS taxable_value,
+              SUM((b.fare_breakdown->>'gst_amount')::numeric) AS gst_amount
+         FROM bookings b
+         JOIN payments p ON p.booking_id = b.id
+        WHERE ${where}
+        GROUP BY date_trunc('month', b.created_at)
+        ORDER BY month_start ASC`,
+      args,
+    );
+    const monthly: GstReportMonthRow[] = monthlyRows.map((r: any) => ({
+      label: r.label,
+      invoices: Number(r.invoices) || 0,
+      taxableValue: Number(r.taxable_value) || 0,
+      gstAmount: Number(r.gst_amount) || 0,
+    }));
+
+    const tax = await this.systemSettings.getTaxSettings();
+    const gstin = (tax.zipto_gstin || '').trim() || null;
+    const pan = gstin && gstin.length >= 12 ? gstin.slice(2, 12) : null;
+
+    const periodLabel =
+      params.from && params.to
+        ? `${new Date(params.from).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })} – ${new Date(params.to).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}`
+        : 'All Time';
+
+    const buffer = await buildGstReportPdf({
+      generatedOn: new Date(),
+      generatedBy,
+      periodLabel,
+      company: {
+        legalName: tax.zipto_legal_name || 'Zipto Hyperlogistics Private Limited',
+        brandName: 'Bookfleet',
+        gstin,
+        pan,
+        address: tax.zipto_invoice_address || null,
+        email: 'support@bookfleet.in',
+        phone: '+91 78734 56789',
+        website: 'www.bookfleet.in',
+      },
+      summary,
+      b2bRows,
+      invoices,
+      monthly,
+      verifyText: `BOOKFLEET-GST-REPORT|${periodLabel}|${summary.invoiceCount} invoices|Rs ${summary.totalGst.toFixed(2)} GST`,
+    });
+
     const stamp = new Date().toISOString().slice(0, 10);
     return {
       buffer,
-      filename: `gstr1-export-${stamp}.pdf`,
-      count: data.length,
+      filename: `gst-report-${stamp}.pdf`,
+      count: invoices.length,
       truncated,
     };
   }
