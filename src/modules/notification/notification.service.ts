@@ -488,7 +488,7 @@ export class NotificationService implements OnModuleInit {
       userId,
       'general',
       'Account Temporarily Suspended',
-      `Your account has been suspended until ${blockedUntil.toLocaleDateString()}. Reason: ${reason}. You may submit an appeal from the app.`,
+      `Your account has been suspended until ${blockedUntil.toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata' })}. Reason: ${reason}. You may submit an appeal from the app.`,
     );
   }
 

@@ -89,7 +89,10 @@ export interface GstReportData {
 const inr = (n: number | null | undefined) =>
   `Rs ${(Number(n) || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const fmtDate = (d: Date | string) =>
-  new Date(d).toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true });
+  new Date(d).toLocaleString('en-IN', {
+    day: '2-digit', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true,
+    timeZone: 'Asia/Kolkata',
+  });
 
 const INVOICE_ROW_LIMIT = 1000;
 

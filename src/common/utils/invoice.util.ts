@@ -96,7 +96,7 @@ const esc = (s: unknown) =>
     { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] as string
   ));
 const fmtDate = (d: Date | string) => {
-  try { return new Date(d).toLocaleDateString('en-IN', { dateStyle: 'long' } as any); }
+  try { return new Date(d).toLocaleDateString('en-IN', { dateStyle: 'long', timeZone: 'Asia/Kolkata' } as any); }
   catch { return String(d); }
 };
 

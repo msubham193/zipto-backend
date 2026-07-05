@@ -1365,9 +1365,10 @@ export class AdminService {
     const gstin = (tax.zipto_gstin || '').trim() || null;
     const pan = gstin && gstin.length >= 12 ? gstin.slice(2, 12) : null;
 
+    const dateOpts = { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata' } as const;
     const periodLabel =
       params.from && params.to
-        ? `${new Date(params.from).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })} – ${new Date(params.to).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}`
+        ? `${new Date(params.from).toLocaleDateString('en-IN', dateOpts)} – ${new Date(params.to).toLocaleDateString('en-IN', dateOpts)}`
         : 'All Time';
 
     const filterType = (params.type || '').toLowerCase();
