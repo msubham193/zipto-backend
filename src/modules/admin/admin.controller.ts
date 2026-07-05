@@ -398,6 +398,37 @@ export class AdminController {
     res.end(buffer);
   }
 
+  @Get('reports/gst/gstr1')
+  @ApiOperation({ summary: 'GSTR-1 export (Excel) for the CA — B2B + B2CS sheets matching the standard GSTR-1 layout' })
+  @ApiResponse({ status: 200, description: 'GSTR-1 workbook generated' })
+  async downloadGstr1(
+    @Query('from') from: string | undefined,
+    @Query('to') to: string | undefined,
+    @Query('gstin') gstin: string | undefined,
+    @Query('type') type: string | undefined,
+    @Res() res: Response,
+  ) {
+    const { buffer, filename, count, truncated } = await this.adminService.getGstr1Export({
+      from,
+      to,
+      gstin,
+      type,
+    });
+    if (!count) {
+      res.status(404).json({ success: false, message: 'No invoices match these filters.' });
+      return;
+    }
+    res.set({
+      'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'Content-Disposition': `attachment; filename="${filename}"`,
+      'Content-Length': String(buffer.length),
+      'Cache-Control': 'no-store',
+      'X-Row-Count': String(count),
+      'X-Truncated': String(truncated),
+    });
+    res.end(buffer);
+  }
+
   @Get('reports/drivers')
   @ApiOperation({ summary: 'Get driver performance reports' })
   @ApiResponse({ status: 200, description: 'Driver reports retrieved' })
