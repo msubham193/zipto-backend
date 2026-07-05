@@ -579,7 +579,7 @@ export class AdminService {
     const [customers, total] = await this.userRepository.findAndCount({
       // Hide self-deleted (anonymized) accounts from the admin list.
       where: { role: UserRole.CUSTOMER, is_deleted: false },
-      select: ['id', 'phone', 'email', 'name', 'is_verified', 'is_active', 'created_at'],
+      select: ['id', 'phone', 'email', 'name', 'is_verified', 'is_active', 'created_at', 'updated_at'],
       order: { created_at: 'DESC' },
       skip: (page - 1) * limit,
       take: limit,
@@ -728,7 +728,7 @@ export class AdminService {
   async getCustomerById(customerId: string) {
     const customer = await this.userRepository.findOne({
       where: { id: customerId, role: UserRole.CUSTOMER },
-      select: ['id', 'phone', 'email', 'name', 'is_verified', 'is_active', 'created_at'],
+      select: ['id', 'phone', 'email', 'name', 'is_verified', 'is_active', 'created_at', 'updated_at'],
     });
 
     if (!customer) throw new NotFoundException('Customer not found');
