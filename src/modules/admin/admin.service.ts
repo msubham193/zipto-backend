@@ -24,8 +24,7 @@ import { S3Service } from '../../services/s3.service';
 import { MapboxService } from '../../services/mapbox.service';
 import { EmailService } from '../../services/email.service';
 import { SystemSettingsService } from '../settings/system-settings.service';
-import { InvoiceData, buildInvoicesPdf } from '../../common/utils/invoice.util';
-import * as ExcelJS from 'exceljs';
+import { InvoiceData, buildInvoicesPdf, buildGstr1Pdf, Gstr1B2BRow, Gstr1B2csRow } from '../../common/utils/invoice.util';
 
 @Injectable()
 export class AdminService {
@@ -1210,9 +1209,9 @@ export class AdminService {
   }
 
   /**
-   * GSTR-1 export for the CA — an Excel workbook with the two sheets a GST
-   * return needs: B2B (invoice-level, one row per registered-GSTIN customer)
-   * and B2CS (consolidated by place-of-supply + rate, as GSTR-1 requires for
+   * GSTR-1 export for the CA — a PDF with the two sections a GST return
+   * needs: B2B (invoice-level, one row per registered-GSTIN customer) and
+   * B2CS (consolidated by place-of-supply + rate, as GSTR-1 requires for
    * unregistered/B2C customers — NOT invoice-level). Column names match the
    * standard GSTR-1 offline-utility layout; verify against the current
    * portal template before an actual filing upload, since GST formats do get
@@ -1243,6 +1242,7 @@ export class AdminService {
               b.estimated_fare::numeric AS invoice_value
          FROM bookings b
          JOIN payments p ON p.booking_id = b.id
+         LEFT JOIN users u ON u.id = b.customer_id
         WHERE ${where}
         ORDER BY b.created_at ASC
         LIMIT ${AdminService.GSTR1_ROW_LIMIT + 1}`,
@@ -1258,32 +1258,10 @@ export class AdminService {
       ? `${stateCode}-${tax.zipto_gst_state}`
       : tax.zipto_gst_state || '';
 
-    const workbook = new ExcelJS.Workbook();
-    workbook.creator = 'Bookfleet';
-    workbook.created = new Date();
-
-    // ── B2B sheet — invoice-level, one row per registered-GSTIN customer ──
-    const b2bSheet = workbook.addWorksheet('B2B Invoices');
-    b2bSheet.columns = [
-      { header: 'GSTIN/UIN of Recipient', key: 'gstin', width: 18 },
-      { header: 'Receiver Name', key: 'name', width: 24 },
-      { header: 'Invoice Number', key: 'invoice_no', width: 16 },
-      { header: 'Invoice Date', key: 'invoice_date', width: 14 },
-      { header: 'Invoice Value', key: 'invoice_value', width: 14 },
-      { header: 'Place Of Supply', key: 'pos', width: 16 },
-      { header: 'Reverse Charge', key: 'reverse_charge', width: 14 },
-      { header: 'Invoice Type', key: 'invoice_type', width: 12 },
-      { header: 'Rate', key: 'rate', width: 8 },
-      { header: 'Taxable Value', key: 'taxable_value', width: 14 },
-      { header: 'CGST Amount', key: 'cgst', width: 13 },
-      { header: 'SGST Amount', key: 'sgst', width: 13 },
-      { header: 'IGST Amount', key: 'igst', width: 13 },
-      { header: 'Cess Amount', key: 'cess', width: 12 },
-    ];
-    b2bSheet.getRow(1).font = { bold: true };
-
-    // ── B2CS sheet — consolidated by place-of-supply + rate (NOT per-invoice,
-    //    per GSTR-1 rules for unregistered/B2C customers) ──
+    // B2B — invoice-level, one row per registered-GSTIN customer.
+    const b2b: Gstr1B2BRow[] = [];
+    // B2CS — consolidated by place-of-supply + rate (NOT per-invoice, per
+    // GSTR-1 rules for unregistered/B2C customers).
     const b2csTotals = new Map<string, { rate: number; taxable: number; cgst: number; sgst: number }>();
 
     for (const r of data) {
@@ -1293,21 +1271,17 @@ export class AdminService {
       const sgst = Number(r.sgst_amount) || 0;
 
       if (r.customer_gstin) {
-        b2bSheet.addRow({
+        b2b.push({
           gstin: r.customer_gstin,
           name: r.customer_name || 'Customer',
           invoice_no: `ZPT-${String(r.booking_id).slice(0, 8).toUpperCase()}`,
           invoice_date: new Date(r.created_at).toLocaleDateString('en-GB').replace(/\//g, '-'),
           invoice_value: Number(r.invoice_value) || 0,
           pos: placeOfSupply,
-          reverse_charge: 'N',
-          invoice_type: 'Regular',
           rate,
           taxable_value: taxable,
           cgst,
           sgst,
-          igst: 0,
-          cess: 0,
         });
       } else {
         const key = `${placeOfSupply}|${rate}`;
@@ -1319,37 +1293,19 @@ export class AdminService {
       }
     }
 
-    const b2csSheet = workbook.addWorksheet('B2CS (Consolidated)');
-    b2csSheet.columns = [
-      { header: 'Type', key: 'type', width: 14 },
-      { header: 'Place Of Supply', key: 'pos', width: 16 },
-      { header: 'Rate', key: 'rate', width: 8 },
-      { header: 'Taxable Value', key: 'taxable_value', width: 14 },
-      { header: 'CGST Amount', key: 'cgst', width: 13 },
-      { header: 'SGST Amount', key: 'sgst', width: 13 },
-      { header: 'IGST Amount', key: 'igst', width: 13 },
-      { header: 'Cess Amount', key: 'cess', width: 12 },
-    ];
-    b2csSheet.getRow(1).font = { bold: true };
-    for (const [key, bucket] of b2csTotals) {
-      const pos = key.split('|')[0];
-      b2csSheet.addRow({
-        type: 'Intra-State',
-        pos,
-        rate: bucket.rate,
-        taxable_value: this.round2(bucket.taxable),
-        cgst: this.round2(bucket.cgst),
-        sgst: this.round2(bucket.sgst),
-        igst: 0,
-        cess: 0,
-      });
-    }
+    const b2cs: Gstr1B2csRow[] = Array.from(b2csTotals.values()).map((bucket) => ({
+      pos: placeOfSupply,
+      rate: bucket.rate,
+      taxable_value: this.round2(bucket.taxable),
+      cgst: this.round2(bucket.cgst),
+      sgst: this.round2(bucket.sgst),
+    }));
 
-    const buffer = (await workbook.xlsx.writeBuffer()) as unknown as Buffer;
+    const buffer = await buildGstr1Pdf(b2b, b2cs);
     const stamp = new Date().toISOString().slice(0, 10);
     return {
       buffer,
-      filename: `gstr1-export-${stamp}.xlsx`,
+      filename: `gstr1-export-${stamp}.pdf`,
       count: data.length,
       truncated,
     };

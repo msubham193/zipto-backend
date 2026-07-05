@@ -399,8 +399,8 @@ export class AdminController {
   }
 
   @Get('reports/gst/gstr1')
-  @ApiOperation({ summary: 'GSTR-1 export (Excel) for the CA — B2B + B2CS sheets matching the standard GSTR-1 layout' })
-  @ApiResponse({ status: 200, description: 'GSTR-1 workbook generated' })
+  @ApiOperation({ summary: 'GSTR-1 export (PDF) for the CA — B2B + B2CS sections matching the standard GSTR-1 layout' })
+  @ApiResponse({ status: 200, description: 'GSTR-1 PDF generated' })
   async downloadGstr1(
     @Query('from') from: string | undefined,
     @Query('to') to: string | undefined,
@@ -419,7 +419,7 @@ export class AdminController {
       return;
     }
     res.set({
-      'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'Content-Type': 'application/pdf',
       'Content-Disposition': `attachment; filename="${filename}"`,
       'Content-Length': String(buffer.length),
       'Cache-Control': 'no-store',
