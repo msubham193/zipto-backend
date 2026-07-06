@@ -326,6 +326,13 @@ export class AdminController {
     return this.adminService.getDriverKyc(id);
   }
 
+  @Get('reports/states')
+  @ApiOperation({ summary: 'Get the list of states available for the Reports page State filter' })
+  @ApiResponse({ status: 200, description: 'States retrieved' })
+  async getReportStates() {
+    return this.adminService.getReportStates();
+  }
+
   @Get('reports/bookings')
   @ApiOperation({ summary: 'Get booking reports' })
   @ApiResponse({ status: 200, description: 'Booking reports retrieved' })
@@ -514,14 +521,15 @@ export class AdminController {
   }
 
   @Get('payments')
-  @ApiOperation({ summary: 'Get all payments with pagination' })
+  @ApiOperation({ summary: 'Get all payments with pagination, search, and status filter' })
   @ApiResponse({ status: 200, description: 'Payments retrieved' })
   async getAllPayments(
     @Query('page') page?: number,
     @Query('limit') limit?: number,
     @Query('status') status?: string,
+    @Query('search') search?: string,
   ) {
-    return this.adminService.getAllPayments({ page, limit, status });
+    return this.adminService.getAllPayments({ page, limit, status, search });
   }
 
   // ─── Withdrawal Management ────────────────────────────────────────────────

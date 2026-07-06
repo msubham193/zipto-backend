@@ -4,6 +4,7 @@ import { Repository, Between, DataSource, In } from 'typeorm';
 import { User, UserRole } from '../auth/entities/user.entity';
 import { Booking, BookingStatus } from '../booking/entities/booking.entity';
 import { Payment, PaymentStatus } from '../payment/entities/payment.entity';
+import { VehicleType } from '../vehicle/entities/vehicle.entity';
 import { DriverProfile, VerificationStatus, AvailabilityStatus } from '../driver/entities/driver-profile.entity';
 import { WithdrawalRequest, WithdrawalStatus } from '../driver/entities/withdrawal-request.entity';
 import { BankAccount } from '../driver/entities/bank-account.entity';
@@ -25,6 +26,7 @@ import { MapboxService } from '../../services/mapbox.service';
 import { EmailService } from '../../services/email.service';
 import { SystemSettingsService } from '../settings/system-settings.service';
 import { InvoiceData, buildInvoicesPdf } from '../../common/utils/invoice.util';
+import { citiesForState, allStates } from '../../common/constants/city-state';
 import {
   buildGstReportPdf,
   GstReportSummary,
@@ -506,26 +508,71 @@ export class AdminService {
   /**
    * Get all bookings with filters
    */
-  async getAllBookings(query: { status?: BookingStatus; page?: number; limit?: number }) {
-    const { status } = query;
+  async getAllBookings(query: {
+    status?: BookingStatus;
+    search?: string;
+    vehicleType?: VehicleType;
+    paymentStatus?: 'pending' | 'paid' | 'failed' | 'refunded';
+    page?: number;
+    limit?: number;
+  }) {
     const page = Number(query.page) || 1;
     const limit = Number(query.limit) || 20;
 
-    const queryBuilder = this.bookingRepository
+    // Payments is one-to-many, so filtering/joining it directly on the same
+    // query as skip/take would double-count bookings with >1 payment row and
+    // break pagination. Resolve the matching (distinct) booking IDs for this
+    // page first, then fetch the full entities + relations for just those IDs.
+    const idQb = this.bookingRepository
       .createQueryBuilder('booking')
-      .leftJoinAndSelect('booking.customer', 'customer')
-      .leftJoinAndSelect('booking.driver', 'driver')
-      .leftJoinAndSelect('booking.vehicle', 'vehicle');
+      .leftJoin('booking.customer', 'customer')
+      .leftJoin('booking.driver', 'driver')
+      .select('booking.id', 'id')
+      .addSelect('booking.created_at', 'created_at')
+      .distinct(true);
 
-    if (status) {
-      queryBuilder.where('booking.status = :status', { status });
+    if (query.status) idQb.andWhere('booking.status = :status', { status: query.status });
+    if (query.vehicleType) idQb.andWhere('booking.vehicle_type = :vehicleType', { vehicleType: query.vehicleType });
+
+    if (query.search) {
+      const search = query.search.trim();
+      const idSearch = search.replace(/^bk-/i, '');
+      idQb.andWhere(
+        `(booking.name ILIKE :search OR booking.mobile_number ILIKE :search
+          OR customer.name ILIKE :search OR customer.phone ILIKE :search
+          OR driver.name ILIKE :search OR driver.phone ILIKE :search
+          OR booking.id::text ILIKE :idSearch)`,
+        { search: `%${search}%`, idSearch: `%${idSearch}%` },
+      );
     }
 
-    const [bookings, total] = await queryBuilder
+    if (query.paymentStatus) {
+      const dbStatus = query.paymentStatus === 'paid' ? PaymentStatus.COMPLETED : query.paymentStatus;
+      idQb.andWhere(
+        'EXISTS (SELECT 1 FROM payments p WHERE p.booking_id = booking.id AND p.payment_status = :paymentStatus)',
+        { paymentStatus: dbStatus },
+      );
+    }
+
+    const total = await idQb.getCount();
+    const idRows = await idQb
       .orderBy('booking.created_at', 'DESC')
       .skip((page - 1) * limit)
       .take(limit)
-      .getManyAndCount();
+      .getRawMany();
+    const ids = idRows.map((r) => r.id);
+
+    const bookings = ids.length
+      ? await this.bookingRepository
+          .createQueryBuilder('booking')
+          .leftJoinAndSelect('booking.customer', 'customer')
+          .leftJoinAndSelect('booking.driver', 'driver')
+          .leftJoinAndSelect('booking.vehicle', 'vehicle')
+          .leftJoinAndSelect('booking.payments', 'payments')
+          .where('booking.id IN (:...ids)', { ids })
+          .orderBy('booking.created_at', 'DESC')
+          .getMany()
+      : [];
 
     return {
       bookings,
@@ -922,7 +969,7 @@ export class AdminService {
   /**
    * Get all payments with pagination
    */
-  async getAllPayments(query: { page?: number; limit?: number; status?: string }) {
+  async getAllPayments(query: { page?: number; limit?: number; status?: string; search?: string }) {
     const page = Number(query.page) || 1;
     const limit = Number(query.limit) || 20;
     const { status } = query;
@@ -936,7 +983,18 @@ export class AdminService {
       .take(limit);
 
     if (status && status !== 'all') {
-      qb.where('payment.payment_status = :status', { status });
+      qb.andWhere('payment.payment_status = :status', { status });
+    }
+
+    if (query.search) {
+      const search = query.search.trim();
+      qb.andWhere(
+        `(payment.transaction_id ILIKE :search OR payment.razorpay_payment_id ILIKE :search
+          OR payment.razorpay_order_id ILIKE :search
+          OR customer.name ILIKE :search OR customer.phone ILIKE :search
+          OR driver.name ILIKE :search OR driver.phone ILIKE :search)`,
+        { search: `%${search}%` },
+      );
     }
 
     const [payments, total] = await qb.getManyAndCount();
@@ -1611,13 +1669,20 @@ export class AdminService {
   }
 
   /**
+   * States available for the Reports page's State filter.
+   */
+  getReportStates() {
+    return { states: allStates() };
+  }
+
+  /**
    * Get booking reports
    */
   async getBookingReports(query: {
     period?: string;
     startDate?: string;
     endDate?: string;
-    city?: string;
+    state?: string;
   }) {
     const { start, end } = this.getDateRange(query);
 
@@ -1625,8 +1690,9 @@ export class AdminService {
       .createQueryBuilder('booking')
       .where('booking.created_at BETWEEN :start AND :end', { start, end });
 
-    if (query.city && query.city !== 'all') {
-      queryBuilder.andWhere('booking.city = :city', { city: query.city });
+    if (query.state && query.state !== 'all') {
+      const cities = citiesForState(query.state);
+      queryBuilder.andWhere(cities.length ? 'booking.city IN (:...cities)' : '1 = 0', { cities });
     }
 
     // Chart Data
@@ -1676,7 +1742,7 @@ export class AdminService {
     period?: string;
     startDate?: string;
     endDate?: string;
-    city?: string;
+    state?: string;
   }) {
     const { start, end } = this.getDateRange(query);
 
@@ -1686,9 +1752,10 @@ export class AdminService {
       .where('payment.created_at BETWEEN :start AND :end', { start, end })
       .andWhere('payment.payment_status = :status', { status: PaymentStatus.COMPLETED });
 
-    if (query.city && query.city !== 'all') {
+    if (query.state && query.state !== 'all') {
       // payment table doesn't have city, so join with booking
-      queryBuilder.andWhere('booking.city = :city', { city: query.city });
+      const cities = citiesForState(query.state);
+      queryBuilder.andWhere(cities.length ? 'booking.city IN (:...cities)' : '1 = 0', { cities });
     }
 
     // Chart Data
@@ -1734,7 +1801,7 @@ export class AdminService {
     period?: string;
     startDate?: string;
     endDate?: string;
-    city?: string;
+    state?: string;
   }) {
     const { start, end } = this.getDateRange(query);
 
@@ -1743,7 +1810,7 @@ export class AdminService {
     //   platformRevenue = Zipto's cut = commission + platform fee + shield
     // (GST is excluded — it's a remitted tax, not anyone's revenue.) Computed
     // from booking columns, not a flat % approximation.
-    const topDrivers = await this.bookingRepository
+    const driversQb = this.bookingRepository
       .createQueryBuilder('booking')
       .leftJoin('booking.driver', 'driver') // Join with user
       .select('booking.driver_id', 'id')
@@ -1758,7 +1825,14 @@ export class AdminService {
       )
       .where('booking.created_at BETWEEN :start AND :end', { start, end })
       .andWhere('booking.status = :status', { status: BookingStatus.COMPLETED })
-      .andWhere('booking.driver_id IS NOT NULL')
+      .andWhere('booking.driver_id IS NOT NULL');
+
+    if (query.state && query.state !== 'all') {
+      const cities = citiesForState(query.state);
+      driversQb.andWhere(cities.length ? 'booking.city IN (:...cities)' : '1 = 0', { cities });
+    }
+
+    const topDrivers = await driversQb
       .groupBy('booking.driver_id')
       .addGroupBy('driver.name') // Postgres requires this
       .orderBy('"platformRevenue"', 'DESC')
@@ -1801,9 +1875,13 @@ export class AdminService {
     period?: string;
     startDate?: string;
     endDate?: string;
-    city?: string;
+    state?: string;
   }) {
     const { start, end } = this.getDateRange(query);
+    // Users don't carry a city/state, so the state filter only narrows the
+    // booking-derived metrics below (active/returning) — new-signup counts
+    // can't be attributed to a state without a schema change.
+    const cities = query.state && query.state !== 'all' ? citiesForState(query.state) : null;
 
     // New Customers in period
     const newCustomers = await this.userRepository.count({
@@ -1814,22 +1892,24 @@ export class AdminService {
     });
 
     // Active customers (who made a booking in this period)
-    const activeCustomerResult = await this.bookingRepository
+    const activeCustomerQb = this.bookingRepository
       .createQueryBuilder('booking')
       .select('COUNT(DISTINCT booking.customer_id)', 'count')
-      .where('booking.created_at BETWEEN :start AND :end', { start, end })
-      .getRawOne();
+      .where('booking.created_at BETWEEN :start AND :end', { start, end });
+    if (cities) activeCustomerQb.andWhere(cities.length ? 'booking.city IN (:...cities)' : '1 = 0', { cities });
+    const activeCustomerResult = await activeCustomerQb.getRawOne();
 
     const activeCustomers = parseInt(activeCustomerResult?.count || '0');
 
     // Returning customers: Active customers who joined BEFORE this period
-    const returningCustomerResult = await this.bookingRepository
+    const returningCustomerQb = this.bookingRepository
       .createQueryBuilder('booking')
       .leftJoin('booking.customer', 'customer')
       .select('COUNT(DISTINCT booking.customer_id)', 'count')
       .where('booking.created_at BETWEEN :start AND :end', { start, end })
-      .andWhere('customer.created_at < :start', { start })
-      .getRawOne();
+      .andWhere('customer.created_at < :start', { start });
+    if (cities) returningCustomerQb.andWhere(cities.length ? 'booking.city IN (:...cities)' : '1 = 0', { cities });
+    const returningCustomerResult = await returningCustomerQb.getRawOne();
 
     const returningCustomers = parseInt(returningCustomerResult?.count || '0');
 
@@ -1882,7 +1962,7 @@ export class AdminService {
     period?: string;
     startDate?: string;
     endDate?: string;
-    city?: string;
+    state?: string;
   }) {
     // Generate data based on type
     let data = [];

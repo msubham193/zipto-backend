@@ -1,7 +1,15 @@
-import { IsOptional, IsEnum, IsInt, Min } from 'class-validator';
+import { IsOptional, IsEnum, IsInt, IsString, Min } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { BookingStatus } from '../../booking/entities/booking.entity';
+import { VehicleType } from '../../vehicle/entities/vehicle.entity';
+
+export enum PaymentStatusFilter {
+  PENDING = 'pending',
+  PAID = 'paid',
+  FAILED = 'failed',
+  REFUNDED = 'refunded',
+}
 
 export class GetBookingsDto {
   @ApiPropertyOptional({
@@ -11,6 +19,21 @@ export class GetBookingsDto {
   @IsOptional()
   @IsEnum(BookingStatus)
   status?: BookingStatus;
+
+  @ApiPropertyOptional({ description: 'Search by booking ID, customer, or driver name/phone' })
+  @IsOptional()
+  @IsString()
+  search?: string;
+
+  @ApiPropertyOptional({ enum: VehicleType, description: 'Filter by vehicle type' })
+  @IsOptional()
+  @IsEnum(VehicleType)
+  vehicleType?: VehicleType;
+
+  @ApiPropertyOptional({ enum: PaymentStatusFilter, description: 'Filter by payment status' })
+  @IsOptional()
+  @IsEnum(PaymentStatusFilter)
+  paymentStatus?: PaymentStatusFilter;
 
   @ApiPropertyOptional({
     description: 'Page number for pagination',

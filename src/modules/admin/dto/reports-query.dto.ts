@@ -48,11 +48,11 @@ export class ReportsQueryDto {
   endDate?: string;
 
   @ApiPropertyOptional({
-    description: 'Filter by city',
+    description: 'Filter by state (derived from the booking city)',
   })
   @IsOptional()
   @IsString()
-  city?: string;
+  state?: string;
 
   @ApiPropertyOptional({
     enum: ReportType,
