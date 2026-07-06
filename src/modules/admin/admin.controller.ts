@@ -12,8 +12,8 @@ import { BookingService } from '../booking/booking.service';
 import { NotificationService } from '../notification/notification.service';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { GetBookingsDto } from './dto/get-bookings.dto';
-import { PaginationDto } from './dto/pagination.dto';
 import { CustomerQueryDto } from './dto/customer-query.dto';
+import { DriverQueryDto } from './dto/driver-query.dto';
 import { ReportsQueryDto } from './dto/reports-query.dto';
 import { CreatePricingRuleDto, UpdatePricingRuleDto } from './dto/pricing-rule.dto';
 import { VehiclesQueryDto } from './dto/vehicles-query.dto';
@@ -296,9 +296,9 @@ export class AdminController {
   }
 
   @Get('drivers')
-  @ApiOperation({ summary: 'Get all drivers with pagination' })
+  @ApiOperation({ summary: 'Get all drivers with pagination, search, status, KYC, and vehicle-type filters' })
   @ApiResponse({ status: 200, description: 'Drivers retrieved' })
-  async getAllDrivers(@Query() query: PaginationDto) {
+  async getAllDrivers(@Query() query: DriverQueryDto) {
     return this.adminService.getAllDrivers(query);
   }
 

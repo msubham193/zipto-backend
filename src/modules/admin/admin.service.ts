@@ -657,16 +657,64 @@ export class AdminService {
   /**
    * Get all drivers with pagination
    */
-  async getAllDrivers(query: { page?: number; limit?: number }) {
+  async getAllDrivers(query: {
+    page?: number;
+    limit?: number;
+    search?: string;
+    status?: 'all' | 'active' | 'suspended' | 'pending_approval';
+    kycStatus?: VerificationStatus;
+    vehicleType?: VehicleType;
+  }) {
     const page = Number(query.page) || 1;
     const limit = Number(query.limit) || 20;
 
-    const [drivers, total] = await this.driverProfileRepository.findAndCount({
-      relations: ['user'],
-      order: { created_at: 'DESC' },
-      skip: (page - 1) * limit,
-      take: limit,
-    });
+    const qb = this.driverProfileRepository
+      .createQueryBuilder('profile')
+      .leftJoinAndSelect('profile.user', 'user')
+      .orderBy('profile.created_at', 'DESC');
+
+    if (query.kycStatus) {
+      qb.andWhere('profile.verification_status = :kycStatus', { kycStatus: query.kycStatus });
+    }
+
+    // "Status" is the admin-facing account state, distinct from KYC (above)
+    // and from the driver's live availability_status (online/offline/busy):
+    //   suspended        -> user.is_active is false (suspendDriver/activateDriver toggle this)
+    //   pending_approval -> KYC not yet approved
+    //   active           -> approved and not suspended
+    if (query.status === 'suspended') {
+      qb.andWhere('user.is_active = false');
+    } else if (query.status === 'pending_approval') {
+      qb.andWhere('profile.verification_status != :approved', { approved: VerificationStatus.APPROVED });
+    } else if (query.status === 'active') {
+      qb.andWhere('user.is_active = true').andWhere('profile.verification_status = :approved', {
+        approved: VerificationStatus.APPROVED,
+      });
+    }
+
+    // The driver's current vehicle lives on the vehicles table (vehicles.driver_id
+    // -> driver_profiles.id) rather than a reliable relation on DriverProfile, so
+    // vehicle-type filtering and vehicle-number search both go through an EXISTS.
+    if (query.vehicleType) {
+      qb.andWhere(
+        'EXISTS (SELECT 1 FROM vehicles v WHERE v.driver_id = profile.id AND v.vehicle_type = :vehicleType)',
+        { vehicleType: query.vehicleType },
+      );
+    }
+
+    if (query.search) {
+      const search = `%${query.search.trim()}%`;
+      qb.andWhere(
+        `(user.name ILIKE :search OR user.phone ILIKE :search
+          OR EXISTS (SELECT 1 FROM vehicles v WHERE v.driver_id = profile.id AND v.registration_number ILIKE :search))`,
+        { search },
+      );
+    }
+
+    const [drivers, total] = await qb
+      .skip((page - 1) * limit)
+      .take(limit)
+      .getManyAndCount();
 
     return {
       drivers,
