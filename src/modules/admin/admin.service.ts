@@ -547,9 +547,18 @@ export class AdminService {
     }
 
     if (query.paymentStatus) {
+      // A booking can have multiple payment rows (a failed attempt followed
+      // by a fresh row for the retry), so "the booking's payment status" must
+      // mean its MOST RECENT payment — matching any historical row would
+      // classify a since-succeeded booking as still failed.
       const dbStatus = query.paymentStatus === 'paid' ? PaymentStatus.COMPLETED : query.paymentStatus;
       idQb.andWhere(
-        'EXISTS (SELECT 1 FROM payments p WHERE p.booking_id = booking.id AND p.payment_status = :paymentStatus)',
+        `EXISTS (
+           SELECT 1 FROM payments p
+            WHERE p.booking_id = booking.id
+              AND p.payment_status = :paymentStatus
+              AND p.id = (SELECT p2.id FROM payments p2 WHERE p2.booking_id = booking.id ORDER BY p2.created_at DESC LIMIT 1)
+         )`,
         { paymentStatus: dbStatus },
       );
     }
@@ -571,6 +580,9 @@ export class AdminService {
           .leftJoinAndSelect('booking.payments', 'payments')
           .where('booking.id IN (:...ids)', { ids })
           .orderBy('booking.created_at', 'DESC')
+          // Frontend reads payments[0] as "the" payment status for a booking —
+          // order newest-first so that's always the most recent attempt.
+          .addOrderBy('payments.created_at', 'DESC')
           .getMany()
       : [];
 
@@ -893,7 +905,7 @@ export class AdminService {
     const [bookings, total] = await this.bookingRepository.findAndCount({
       where: { customer_id: customerId },
       relations: ['driver', 'payments'],
-      order: { created_at: 'DESC' },
+      order: { created_at: 'DESC', payments: { created_at: 'DESC' } },
       skip: (page - 1) * limit,
       take: limit,
     });
@@ -964,6 +976,9 @@ export class AdminService {
     const booking = await this.bookingRepository.findOne({
       where: { id: bookingId },
       relations: ['customer', 'driver', 'vehicle', 'payments'],
+      // A booking can have multiple payment rows (failed attempt -> new row
+      // for the retry); order newest-first so payments[0] is always current.
+      order: { payments: { created_at: 'DESC' } },
     });
     if (!booking) throw new NotFoundException('Booking not found');
 
