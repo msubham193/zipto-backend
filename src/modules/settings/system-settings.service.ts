@@ -20,8 +20,8 @@ const DEFAULTS: Array<{ key: string; value: string; description: string }> = [
   { key: 'referral_enabled',        value: 'true', description: 'Master switch for the referral program' },
   { key: 'referral_referee_coins',  value: '500',  description: 'Coins credited to the new user (referee) after their first completed ride' },
   { key: 'referral_referrer_coins', value: '1000', description: 'Coins credited to the referrer after their referee completes a first ride' },
-  { key: 'referral_share_base_url', value: 'https://api.ridezipto.com/refer', description: 'Base URL for referral share links (code is appended: /refer/CODE)' },
-  { key: 'referral_banner_url',     value: 'https://api.ridezipto.com/referral-banner.jpeg', description: 'Banner image shown as the WhatsApp/social link preview (og:image)' },
+  { key: 'referral_share_base_url', value: 'https://refer.bookfleet.in/refer', description: 'Base URL for referral share links (code is appended: /refer/CODE)' },
+  { key: 'referral_banner_url',     value: 'https://refer.bookfleet.in/referral-banner.jpeg', description: 'Banner image shown as the WhatsApp/social link preview (og:image)' },
   { key: 'referral_play_store_url', value: 'https://play.google.com/store/apps/details?id=com.ridezipto.customer', description: 'Play Store URL the referral landing page redirects to' },
   { key: 'platform_fee', value: '5', description: 'Flat platform fee (₹) added to every fare. Admin-configurable; shown on the customer fare estimate.' },
   { key: 'gst_percent',  value: '0', description: 'GST percentage applied on the delivery charge. Admin-configurable; shown on the customer fare estimate.' },
@@ -171,8 +171,8 @@ export class SystemSettingsService implements OnModuleInit {
       enabled: (map.referral_enabled ?? 'true') !== 'false',
       referee_coins: parseInt(map.referral_referee_coins ?? '500', 10) || 0,
       referrer_coins: parseInt(map.referral_referrer_coins ?? '1000', 10) || 0,
-      share_base_url: (map.referral_share_base_url ?? 'https://api.ridezipto.com/refer').replace(/\/+$/, ''),
-      banner_url: map.referral_banner_url ?? 'https://api.ridezipto.com/referral-banner.jpeg',
+      share_base_url: (map.referral_share_base_url ?? 'https://refer.bookfleet.in/refer').replace(/\/+$/, ''),
+      banner_url: map.referral_banner_url ?? 'https://refer.bookfleet.in/referral-banner.jpeg',
       play_store_url: map.referral_play_store_url ?? 'https://play.google.com/store/apps/details?id=com.ridezipto.customer',
     };
   }

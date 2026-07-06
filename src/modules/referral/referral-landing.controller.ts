@@ -6,7 +6,7 @@ import { SystemSettingsService } from '../settings/system-settings.service';
 
 /**
  * Public, prefix-less landing page for referral share links
- * (https://api.ridezipto.com/refer/CODE).
+ * (https://refer.bookfleet.in/refer/CODE — see referral_share_base_url).
  *
  * Its job is twofold:
  *  1. Serve OpenGraph/Twitter meta tags so WhatsApp/Telegram/social render the
