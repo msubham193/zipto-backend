@@ -277,6 +277,21 @@ export class AdminAccountService implements OnModuleInit {
     return { message: `A new temporary password was emailed to ${target.email}.` };
   }
 
+  /** Super-admin permanently removes a colleague's admin account. */
+  async deleteAdmin(actor: User, targetId: string) {
+    this.assertSuperAdmin(actor);
+    const target = await this.findManageableAdmin(actor, targetId);
+    if (target.is_super_admin) {
+      throw new ForbiddenException('The super-admin account cannot be deleted.');
+    }
+
+    await this.revokeAllSessions(target.id);
+    await this.userRepository.delete(target.id);
+
+    this.logger.warn(`Admin ${this.mask(target.email)} deleted by ${this.mask(actor.email)}`);
+    return { message: `${target.name || 'Admin'} was deleted.` };
+  }
+
   private async findManageableAdmin(actor: User, targetId: string): Promise<User> {
     if (targetId === actor.id) {
       throw new BadRequestException('Use the password change screen to manage your own account.');

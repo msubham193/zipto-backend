@@ -83,6 +83,12 @@ export class AdminController {
     return this.adminAccountService.resetAdminPassword(user, id);
   }
 
+  @Delete('team/:id')
+  @ApiOperation({ summary: 'Permanently delete an admin account (super-admin only)' })
+  async deleteAdmin(@GetUser() user: User, @Param('id') id: string) {
+    return this.adminAccountService.deleteAdmin(user, id);
+  }
+
   // ─────────────────────────────────────────────────────────────────────────
   // Transaction ledger (unified audit log of every money/coin movement)
   // ─────────────────────────────────────────────────────────────────────────
