@@ -7,6 +7,7 @@ const defaultCorsOrigins = [
   'https://zipto-admin.vercel.app',
   'https://zipto-admin-panel.vercel.app',
   'https://admin.ridezipto.com',
+  'https://admin.bookfleet.in',
 ];
 
 const envCorsOrigins = (process.env.CORS_ORIGIN || '')
