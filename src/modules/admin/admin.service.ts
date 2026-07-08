@@ -683,6 +683,10 @@ export class AdminService {
     const qb = this.driverProfileRepository
       .createQueryBuilder('profile')
       .leftJoinAndSelect('profile.user', 'user')
+      // DriverProfile has no formal relation to Vehicle (only a possibly-stale
+      // vehicle_id column) — map the real, authoritative vehicle onto each
+      // result so the list can show it instead of always "Not Assigned".
+      .leftJoinAndMapOne('profile.vehicle', Vehicle, 'vehicle', 'vehicle.driver_id = profile.id')
       .orderBy('profile.created_at', 'DESC');
 
     if (query.kycStatus) {
