@@ -167,7 +167,7 @@ export class EmailService {
     invitedBy: string,
   ): Promise<void> {
     const panelUrl = this.configService.get<string>('externalServices.admin.panelUrl')
-      || 'https://admin.ridezipto.com';
+      || 'https://admin.bookfleet.in';
 
     const body = `
       <p style="margin:0 0 16px">Hi ${this.esc(name)},</p>
