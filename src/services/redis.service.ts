@@ -58,4 +58,9 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
     );
     return result === 'OK';
   }
+
+  /** Liveness check for the health endpoint — throws if Redis is unreachable. */
+  async ping(): Promise<void> {
+    await this.client.ping();
+  }
 }

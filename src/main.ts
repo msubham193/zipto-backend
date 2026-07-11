@@ -4,6 +4,7 @@ import { ConfigService } from '@nestjs/config';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import helmet from 'helmet';
+import * as compression from 'compression';
 import * as express from 'express';
 import { join } from 'path';
 import { AppModule } from './app.module';
@@ -21,6 +22,11 @@ async function bootstrap() {
         ? ['error', 'warn', 'log']
         : ['error', 'warn', 'log', 'debug', 'verbose'],
   });
+
+  // Let Nest call onModuleDestroy/beforeApplicationShutdown on SIGTERM/SIGINT
+  // (pm2 restart/stop, container stop) so TypeORM/Bull/Redis close their
+  // connections cleanly instead of the process being killed mid-request.
+  app.enableShutdownHooks();
 
   // Get configuration
   const configService = app.get(ConfigService);
@@ -47,6 +53,11 @@ async function bootstrap() {
     }),
   );
   app.use(express.urlencoded({ extended: true, limit: '1mb' }));
+
+  // Gzip API responses (JSON payloads especially — admin report/list endpoints
+  // can be large). Images/already-compressed types are skipped automatically
+  // by the underlying `compressible` mime-type check.
+  app.use(compression());
 
   // Serve static public assets (e.g. the referral banner used for link previews)
   // at the host root, unaffected by the /api global prefix:
