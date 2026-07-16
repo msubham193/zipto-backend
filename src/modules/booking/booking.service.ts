@@ -619,6 +619,21 @@ export class BookingService {
   }
 
   private async cleanupOffer(offerId: string) {
+    // Notify whichever driver(s) currently hold this offer (sequential single
+    // driver, or a broadcast list) BEFORE the Redis keys are wiped below —
+    // otherwise a driver's app keeps ringing/showing the offer forever with no
+    // way to learn the customer already cancelled it.
+    const [sequentialDriverId, broadcastDriverIds] = await Promise.all([
+      this.cacheManager.get<string>(`offer:${offerId}:offer`),
+      this.cacheManager.get<string[]>(`offer:${offerId}:broadcast_drivers`),
+    ]);
+    const offeredDriverIds = new Set<string>();
+    if (sequentialDriverId) offeredDriverIds.add(sequentialDriverId);
+    (broadcastDriverIds || []).forEach((id) => offeredDriverIds.add(id));
+    for (const driverId of offeredDriverIds) {
+      this.bookingGateway.notifyUser(driverId, 'booking_cancelled', { bookingId: offerId });
+    }
+
     await this.cacheManager.del(`offer:${offerId}`);
     await this.cacheManager.del(`offer:${offerId}:offer`);
     await this.cacheManager.del(`offer:${offerId}:excluded`);
@@ -1055,10 +1070,21 @@ export class BookingService {
       throw new BadRequestException(`Cannot cancel booking with status: ${booking.status}`);
     }
 
+    const assignedDriverId = booking.driver_id;
+
     booking.status = BookingStatus.CANCELLED;
     booking.cancellation_reason = cancelDto.reason;
 
     const saved = await this.bookingRepository.save(booking);
+
+    // A driver may already be assigned/accepted (just not yet ONGOING) —
+    // let their app know immediately instead of leaving them mid-flow on a
+    // booking that no longer exists.
+    if (assignedDriverId) {
+      this.bookingGateway.notifyUser(assignedDriverId, 'booking_cancelled', {
+        bookingId: booking.id,
+      });
+    }
 
     // Fire-and-forget fraud checks
     this.fraudService.runFraudChecks(booking.customer_id, bookingId).catch(() => {});
