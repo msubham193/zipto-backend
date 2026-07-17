@@ -658,6 +658,13 @@ export class BookingService {
     const offerData = await this.cacheManager.get<any>(`offer:${offerId}`);
     this.logger.log(`[processDriverSearch] offer=${offerId}, found=${!!offerData}, attempt=${attempt}`);
     if (!offerData) return; // offer accepted or expired
+    if (offerData.timed_out) {
+      // Customer's 60s hard search-timeout already fired (handleSearchTimeout
+      // withdrew the last offer and is showing a retry-fare prompt) — don't
+      // keep dispatching to new drivers until the customer explicitly retries.
+      this.logger.log(`[processDriverSearch] offer=${offerId} already timed out for customer — not dispatching`);
+      return;
+    }
 
     const resolvedVehicleType = vehicleType || offerData.vehicle_type;
     const { latitude, longitude } = offerData.pickup_location;
@@ -734,6 +741,11 @@ export class BookingService {
       await this.cacheManager.del(`offer:${offerId}:vehicle_type`);
 
       this.bookingGateway.notifyUser(driverId, 'offer_expired', { bookingId: offerId });
+
+      // Don't chain to the next driver once the customer's search has already
+      // timed out — handleSearchTimeout already withdrew this offer for the
+      // same reason; avoid a redundant dispatch cycle.
+      if (offerData.timed_out) return;
 
       await this.bookingQueue.add('search_driver', {
         bookingId: offerId,
@@ -823,6 +835,31 @@ export class BookingService {
     this.logger.log(`[SearchTimeout] 60s expired for offer ${offerId}`);
 
     const retryCount = offerData.retry_count || 0;
+
+    // The customer's fixed 60s window is up, but the sequential/broadcast
+    // dispatch cycle has no fixed relationship to it (default settings allow
+    // up to max_search_attempts × offer_timeout_seconds = 150s of sequential
+    // offers alone, plus a 5-minute broadcast window) — so a driver can still
+    // be actively holding a live "Accept" prompt well past this point. Withdraw
+    // it from whoever holds it right now instead of leaving their app ringing
+    // until their own, unrelated local timer eventually catches up.
+    const [sequentialDriverId, broadcastDriverIds] = await Promise.all([
+      this.cacheManager.get<string>(`offer:${offerId}:offer`),
+      this.cacheManager.get<string[]>(`offer:${offerId}:broadcast_drivers`),
+    ]);
+    const heldByDriverIds = new Set<string>();
+    if (sequentialDriverId) heldByDriverIds.add(sequentialDriverId);
+    (broadcastDriverIds || []).forEach(id => heldByDriverIds.add(id));
+    for (const driverId of heldByDriverIds) {
+      this.bookingGateway.notifyUser(driverId, 'offer_expired', { bookingId: offerId });
+    }
+    await Promise.all([
+      this.cacheManager.del(`offer:${offerId}:offer`),
+      this.cacheManager.del(`offer:${offerId}:excluded`),
+      this.cacheManager.del(`offer:${offerId}:vehicle_type`),
+      this.cacheManager.del(`offer:${offerId}:broadcast`),
+      this.cacheManager.del(`offer:${offerId}:broadcast_drivers`),
+    ]);
 
     // Keep offer alive 90s so customer can decide to increase fare or cancel
     await this.cacheManager.set(`offer:${offerId}`, {
@@ -1247,7 +1284,10 @@ export class BookingService {
     const isBroadcast = await this.cacheManager.get<boolean>(`offer:${offerId}:broadcast`);
     if (!isBroadcast) {
       const offeredDriverId = await this.cacheManager.get(`offer:${offerId}:offer`);
-      if (offeredDriverId && offeredDriverId !== driverId) {
+      // Strict inequality (not a truthy check): a missing/withdrawn offer key
+      // (e.g. handleSearchTimeout cleared it) must reject every driver, not
+      // silently let anyone through because offeredDriverId happened to be null.
+      if (offeredDriverId !== driverId) {
         await this.cacheManager.del(`offer:${offerId}:accepting`);
         throw new BadRequestException('Offer expired or assigned to another driver');
       }
