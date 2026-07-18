@@ -14,6 +14,7 @@ import { In, Repository } from 'typeorm';
 import { Cron } from '@nestjs/schedule';
 import { Booking, BookingStatus, BookingType } from './entities/booking.entity';
 import { PricingRule } from './entities/pricing-rule.entity';
+import { BookingDemandLog } from './entities/booking-demand-log.entity';
 import { Payment, PaymentMethod, PaymentStatus } from '../payment/entities/payment.entity';
 import { User } from '../auth/entities/user.entity';
 import {
@@ -67,6 +68,8 @@ export class BookingService {
     private paymentRepository: Repository<Payment>,
     @InjectRepository(User)
     private userRepository: Repository<User>,
+    @InjectRepository(BookingDemandLog)
+    private demandLogRepository: Repository<BookingDemandLog>,
     private mapboxService: MapboxService,
     private smsService: SmsService,
     private exotelService: ExotelService,
@@ -499,6 +502,19 @@ export class BookingService {
       this.processDriverSearch(offerId, [], vehicle_type, 1).catch(err =>
         this.logger.error(`Driver search failed: ${err.message}`),
       );
+
+      // Fire-and-forget: log this attempt for the rider-facing demand heatmap.
+      // The `bookings` table only gets a row once a driver accepts, so without
+      // this, unmatched demand (no driver found) would be invisible — exactly
+      // the signal riders need most to know where to position themselves.
+      this.demandLogRepository
+        .insert({
+          offer_id: offerId,
+          latitude: pickup_location.latitude,
+          longitude: pickup_location.longitude,
+          vehicle_type,
+        })
+        .catch(err => this.logger.error(`[DemandLog] Failed to log offer ${offerId}: ${err.message}`));
     }
 
     return {
@@ -1130,6 +1146,56 @@ export class BookingService {
   }
 
   /**
+   * Rider-facing demand heatmap — aggregates booking_demand_logs (every
+   * search attempt, matched or not — see createBooking/acceptBooking) into
+   * ~111m grid cells over a lookback window, so a newly onboarded driver can
+   * see where demand actually is instead of guessing. Cached briefly since
+   * the underlying picture only meaningfully shifts over minutes, not on
+   * every request — this can be hit by every driver's app on open.
+   */
+  async getDemandHeatmap(days: number = 14, vehicleType?: string) {
+    const cacheKey = `demand_heatmap:${days}:${vehicleType || 'all'}`;
+    const cached = await this.cacheManager.get<any>(cacheKey);
+    if (cached) return cached;
+
+    const params: any[] = [days];
+    let vehicleFilter = '';
+    if (vehicleType) {
+      params.push(vehicleType);
+      vehicleFilter = `AND vehicle_type = $${params.length}`;
+    }
+
+    const rows = await this.bookingRepository.manager.query(
+      `SELECT
+         ROUND(latitude::numeric, 3)  AS latitude,
+         ROUND(longitude::numeric, 3) AS longitude,
+         COUNT(*)::int AS weight,
+         COUNT(*) FILTER (WHERE matched = false)::int AS unmatched_weight
+       FROM booking_demand_logs
+       WHERE created_at > NOW() - ($1 * INTERVAL '1 day')
+       ${vehicleFilter}
+       GROUP BY 1, 2
+       ORDER BY weight DESC
+       LIMIT 500`,
+      params,
+    );
+
+    const result = {
+      points: rows.map((r: any) => ({
+        latitude: Number(r.latitude),
+        longitude: Number(r.longitude),
+        weight: Number(r.weight),
+        unmatchedWeight: Number(r.unmatched_weight),
+      })),
+      windowDays: days,
+      generatedAt: new Date().toISOString(),
+    };
+
+    await this.cacheManager.set(cacheKey, result, 5 * 60 * 1000);
+    return result;
+  }
+
+  /**
    * Get nearby bookings for driver (within radius)
    */
   async getNearbyBookings(latitude: number, longitude: number, radius: number = 5) {
@@ -1404,6 +1470,11 @@ export class BookingService {
 
       // Store accepted mapping so customer can resolve offer_id → booking_id
       await this.cacheManager.set(`offer:accepted:${offerId}`, createdBooking.id, 10 * 60 * 1000);
+
+      // Fire-and-forget: mark this demand-log entry as matched (see createBooking)
+      this.demandLogRepository
+        .update({ offer_id: offerId }, { matched: true })
+        .catch(err => this.logger.error(`[DemandLog] Failed to mark offer ${offerId} matched: ${err.message}`));
 
       // Notify customer with real booking ID
       this.bookingGateway.notifyUser(offerData.customer_id, 'booking_accepted', {

@@ -11,6 +11,7 @@ import {
   IsNumber,
   IsInt,
   Min,
+  Max,
   IsBoolean,
   IsArray,
   MaxLength,
@@ -237,4 +238,19 @@ export class HandoffAcceptDto {
   @IsUUID()
   @IsNotEmpty()
   vehicle_id: string;
+}
+
+export class GetDemandHeatmapDto {
+  @ApiPropertyOptional({ example: 14, description: 'Lookback window in days (1-90, default 14)' })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(90)
+  days?: number;
+
+  @ApiPropertyOptional({ enum: VehicleType, description: 'Filter demand points to a single vehicle type' })
+  @IsOptional()
+  @IsEnum(VehicleType)
+  vehicle_type?: VehicleType;
 }

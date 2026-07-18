@@ -26,6 +26,7 @@ import {
   CompleteTripDto,
   HandoffRequestDto,
   HandoffAcceptDto,
+  GetDemandHeatmapDto,
 } from './dto/booking.dto';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { GetUser } from '../../common/decorators/get-user.decorator';
@@ -193,6 +194,20 @@ export class BookingController {
   }
 
   // Driver Endpoints
+
+  @Get('demand-heatmap')
+  @Roles('driver')
+  @ApiOperation({
+    summary: '[Driver] Demand heatmap — where booking requests have been coming from',
+    description:
+      'Aggregates every booking search attempt (matched or not) into grid cells over a lookback ' +
+      'window, so a driver can see high-demand areas instead of guessing where to position themselves. ' +
+      'Especially useful while overall order volume is still low.',
+  })
+  @ApiResponse({ status: 200, description: 'Heatmap points retrieved' })
+  async getDemandHeatmap(@Query() dto: GetDemandHeatmapDto) {
+    return this.bookingService.getDemandHeatmap(dto.days ?? 14, dto.vehicle_type);
+  }
 
   @Get('nearby')
   @Roles('driver')
