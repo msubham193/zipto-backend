@@ -23,6 +23,16 @@ export class UpdateCustomerDto {
   language_preference?: string;
 }
 
+export class UpdateCustomerPresenceDto {
+  @ApiProperty({ example: 20.2961 })
+  @IsLatitude()
+  latitude: number;
+
+  @ApiProperty({ example: 85.8245 })
+  @IsLongitude()
+  longitude: number;
+}
+
 export class SavedLocationDto {
   @ApiProperty({ example: 'Home' })
   @IsString()

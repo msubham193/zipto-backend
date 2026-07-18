@@ -15,6 +15,14 @@ import {
 import { UpdateCustomerDto, SavedLocationDto } from './dto/customer.dto';
 import { HdfcPaymentService } from '../../services/hdfc-payment.service';
 import { TransactionLogService } from '../transaction-log/transaction-log.service';
+import { RedisService } from '../../services/redis.service';
+
+// Presence naturally disappears if the customer's app stops pinging (closed,
+// backgrounded, or lost connectivity) — no explicit "went offline" event needed.
+const PRESENCE_TTL_MS = 2 * 60 * 1000;
+const PRESENCE_KEY_PREFIX = 'customer:presence:';
+const LIVE_HEATMAP_CACHE_KEY = 'live_customer_heatmap';
+const LIVE_HEATMAP_CACHE_TTL_MS = 15 * 1000;
 
 @Injectable()
 export class CustomerService {
@@ -28,6 +36,7 @@ export class CustomerService {
     private dataSource: DataSource,
     private hdfcService: HdfcPaymentService,
     private readonly transactionLog: TransactionLogService,
+    private readonly redisService: RedisService,
   ) {}
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -107,6 +116,57 @@ export class CustomerService {
     profile.saved_locations = locations;
     await this.customerProfileRepository.save(profile);
     return profile.saved_locations;
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Live presence (real-time "app is open here" signal for the driver-facing
+  // live heatmap — deliberately Redis-only/ephemeral, never written to
+  // Postgres. Distinct from BookingDemandLog, which only logs an actual
+  // booking attempt; this reflects anyone with the app open, whether or not
+  // they ever book.
+  // ─────────────────────────────────────────────────────────────────────────
+
+  async updatePresence(userId: string, latitude: number, longitude: number) {
+    await this.redisService.set(
+      `${PRESENCE_KEY_PREFIX}${userId}`,
+      { latitude, longitude },
+      PRESENCE_TTL_MS,
+    );
+    return { message: 'Presence updated' };
+  }
+
+  /**
+   * Driver-facing live heatmap — aggregates every currently-live customer
+   * presence key into ~111m grid cells. No individual customer identity or
+   * exact location is ever exposed, only anonymous per-cell counts.
+   */
+  async getLiveHeatmap() {
+    const cached = await this.redisService.get<any>(LIVE_HEATMAP_CACHE_KEY);
+    if (cached) return cached;
+
+    const keys = await this.redisService.scanKeys(`${PRESENCE_KEY_PREFIX}*`);
+    const values = await this.redisService.mget<{ latitude: number; longitude: number }>(keys);
+
+    const grid = new Map<string, number>();
+    for (const v of values) {
+      if (!v) continue;
+      const lat = Math.round(v.latitude * 1000) / 1000;
+      const lng = Math.round(v.longitude * 1000) / 1000;
+      const cellKey = `${lat},${lng}`;
+      grid.set(cellKey, (grid.get(cellKey) || 0) + 1);
+    }
+
+    const points = Array.from(grid.entries())
+      .map(([cellKey, weight]) => {
+        const [lat, lng] = cellKey.split(',').map(Number);
+        return { latitude: lat, longitude: lng, weight };
+      })
+      .sort((a, b) => b.weight - a.weight)
+      .slice(0, 500);
+
+    const result = { points, generatedAt: new Date().toISOString() };
+    await this.redisService.set(LIVE_HEATMAP_CACHE_KEY, result, LIVE_HEATMAP_CACHE_TTL_MS);
+    return result;
   }
 
   // ─────────────────────────────────────────────────────────────────────────

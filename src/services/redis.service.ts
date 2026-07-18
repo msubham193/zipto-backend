@@ -63,4 +63,35 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
   async ping(): Promise<void> {
     await this.client.ping();
   }
+
+  /**
+   * Non-blocking key enumeration via SCAN (unlike KEYS, never blocks the
+   * single-threaded event loop). Fine at low-to-moderate key counts; if a
+   * pattern ever needs to match tens of thousands of keys routinely, prefer
+   * a purpose-built structure (e.g. Redis GEO commands) over scanning.
+   */
+  async scanKeys(pattern: string): Promise<string[]> {
+    const keys: string[] = [];
+    let cursor = '0';
+    do {
+      const [nextCursor, batch] = await this.client.scan(cursor, 'MATCH', pattern, 'COUNT', 200);
+      keys.push(...batch);
+      cursor = nextCursor;
+    } while (cursor !== '0');
+    return keys;
+  }
+
+  /** Bulk GET — parsed values in the same order as `keys`, null for any that don't exist. */
+  async mget<T>(keys: string[]): Promise<(T | null)[]> {
+    if (keys.length === 0) return [];
+    const raw = await this.client.mget(...keys);
+    return raw.map(v => {
+      if (v === null) return null;
+      try {
+        return JSON.parse(v) as T;
+      } catch {
+        return v as unknown as T;
+      }
+    });
+  }
 }

@@ -21,7 +21,7 @@ import {
 import { IsNumber, Min, Max } from 'class-validator';
 import { Type } from 'class-transformer';
 import { CustomerService } from './customer.service';
-import { UpdateCustomerDto, SavedLocationDto } from './dto/customer.dto';
+import { UpdateCustomerDto, SavedLocationDto, UpdateCustomerPresenceDto } from './dto/customer.dto';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { GetUser } from '../../common/decorators/get-user.decorator';
 import { User } from '../auth/entities/user.entity';
@@ -86,6 +86,34 @@ export class CustomerController {
     @Param('index', ParseIntPipe) index: number,
   ) {
     return this.customerService.removeSavedLocation(user.id, index);
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Live presence — real-time "app is open here" signal for the driver-facing
+  // live heatmap. Ephemeral (2 min TTL in Redis), never persisted to Postgres.
+  // ─────────────────────────────────────────────────────────────────────────
+
+  @Put('presence')
+  @ApiOperation({
+    summary: 'Ping current location while the app is open (foreground only)',
+    description:
+      'Powers the driver-facing live demand heatmap. The app should call this periodically ' +
+      'only while in the foreground — presence expires automatically 2 minutes after the last ping.',
+  })
+  async updatePresence(@GetUser() user: User, @Body() dto: UpdateCustomerPresenceDto) {
+    return this.customerService.updatePresence(user.id, dto.latitude, dto.longitude);
+  }
+
+  @Get('live-heatmap')
+  @Roles('driver')
+  @ApiOperation({
+    summary: '[Driver] Live heatmap of customers currently using the app',
+    description:
+      'Aggregates real-time customer presence pings into anonymous grid cells — no individual ' +
+      'identity or exact location is exposed, only per-area counts.',
+  })
+  async getLiveHeatmap() {
+    return this.customerService.getLiveHeatmap();
   }
 
   // ─────────────────────────────────────────────────────────────────────────
