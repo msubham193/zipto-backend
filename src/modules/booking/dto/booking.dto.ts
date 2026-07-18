@@ -240,6 +240,51 @@ export class HandoffAcceptDto {
   vehicle_id: string;
 }
 
+export class GetHotspotsDto {
+  @ApiProperty({ example: 20.2961, description: "Rider's current latitude" })
+  @Type(() => Number)
+  @IsLatitude()
+  latitude: number;
+
+  @ApiProperty({ example: 85.8245, description: "Rider's current longitude" })
+  @Type(() => Number)
+  @IsLongitude()
+  longitude: number;
+
+  @ApiPropertyOptional({ example: 7, description: 'Search radius in km (1-20, default 7)' })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(1)
+  @Max(20)
+  radius_km?: number;
+
+  @ApiPropertyOptional({ enum: VehicleType, description: 'Filter to a single vehicle type' })
+  @IsOptional()
+  @IsEnum(VehicleType)
+  vehicle_type?: VehicleType;
+}
+
+export class GetHotspotPeakTimeDto {
+  @ApiProperty({ example: 20.2961 })
+  @Type(() => Number)
+  @IsLatitude()
+  latitude: number;
+
+  @ApiProperty({ example: 85.8245 })
+  @Type(() => Number)
+  @IsLongitude()
+  longitude: number;
+
+  @ApiPropertyOptional({ example: 1, description: 'Radius in km around the point to analyze (default 1)' })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0.2)
+  @Max(10)
+  radius_km?: number;
+}
+
 export class GetDemandHeatmapDto {
   @ApiPropertyOptional({ example: 14, description: 'Lookback window in days (1-90, default 14)' })
   @IsOptional()

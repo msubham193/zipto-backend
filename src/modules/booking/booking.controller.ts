@@ -27,6 +27,8 @@ import {
   HandoffRequestDto,
   HandoffAcceptDto,
   GetDemandHeatmapDto,
+  GetHotspotsDto,
+  GetHotspotPeakTimeDto,
 } from './dto/booking.dto';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { GetUser } from '../../common/decorators/get-user.decorator';
@@ -139,61 +141,34 @@ export class BookingController {
     return this.bookingService.cancelOffer(offerId, user.id);
   }
 
-  @Get(':id')
-  @Roles('customer', 'driver')
-  @ApiOperation({ summary: 'Get booking details by ID' })
-  @ApiResponse({ status: 200, description: 'Booking retrieved successfully' })
-  @ApiResponse({ status: 404, description: 'Booking not found' })
-  async getById(@Param('id') id: string, @GetUser() user: User) {
-    const result = await this.bookingService.getById(id, user.id);
-    // Merge the last-known live driver location (Redis) as a REST fallback for
-    // the customer's map when the socket stream has a gap or just opened.
-    try {
-      const loc = await this.bookingGateway.getLastDriverLocation(id);
-      const data: any = (result as any)?.data ?? result;
-      if (loc && data && !data.driver_location) {
-        data.driver_location = { latitude: loc.latitude, longitude: loc.longitude, heading: loc.heading, ts: loc.ts };
-      }
-    } catch { /* non-fatal — location is best-effort */ }
-    return result;
+  // NOTE: these must stay registered before @Get(':id') below — NestJS matches
+  // routes in declaration order, and ':id' would otherwise swallow literal
+  // paths like /booking/hotspots as if "hotspots" were an id.
+  @Get('hotspots')
+  @Roles('driver')
+  @ApiOperation({
+    summary: "[Driver] Demand hotspots around the rider's current location",
+    description:
+      'Composite demand/supply score per grid cell within radius_km of the given position — combines ' +
+      'recent booking requests, active orders, and current driver supply into low/medium/high/very_high ' +
+      'tiers. Tiering is always relative to the hottest cell currently found nearby, never a hardcoded ' +
+      'absolute threshold, so this works the same in any city without per-city configuration.',
+  })
+  @ApiResponse({ status: 200, description: 'Hotspot points retrieved' })
+  async getHotspots(@Query() dto: GetHotspotsDto) {
+    return this.bookingService.getHotspots(dto.latitude, dto.longitude, dto.radius_km ?? 7, dto.vehicle_type);
   }
 
-  @Put(':id/cancel')
-  @Roles('customer', 'driver')
-  @ApiOperation({ summary: 'Cancel booking' })
-  @ApiResponse({ status: 200, description: 'Booking cancelled successfully' })
-  async cancel(
-    @Param('id') id: string,
-    @GetUser() user: User,
-    @Body() cancelDto: CancelBookingDto,
-  ) {
-    return this.bookingService.cancel(id, user.id, cancelDto);
+  @Get('hotspots/peak-time')
+  @Roles('driver')
+  @ApiOperation({
+    summary: '[Driver] Peak hour-of-day for a tapped hotspot',
+    description: 'Historical (30-day) hour-of-day analysis around a specific point — on-demand only, not part of the main hotspots list.',
+  })
+  @ApiResponse({ status: 200, description: 'Peak hour retrieved' })
+  async getHotspotPeakTime(@Query() dto: GetHotspotPeakTimeDto) {
+    return this.bookingService.getHotspotPeakTime(dto.latitude, dto.longitude, dto.radius_km ?? 1);
   }
-
-  @Get('customer/active')
-  @Roles('customer')
-  @ApiOperation({ summary: 'Get current active booking for customer' })
-  async getCustomerActiveBooking(@GetUser() user: User) {
-    return this.bookingService.getCustomerActiveBooking(user.id);
-  }
-
-  @Get('customer/history')
-  @Roles('customer')
-  @ApiOperation({ summary: 'Get customer booking history' })
-  @ApiQuery({ name: 'page', required: false, type: Number })
-  @ApiQuery({ name: 'limit', required: false, type: Number })
-  @ApiQuery({ name: 'status', required: false, type: String })
-  @ApiResponse({ status: 200, description: 'Booking history retrieved' })
-  async getCustomerHistory(
-    @GetUser() user: User,
-    @Query('page', new DefaultValuePipe(1), ParseIntPipe) page: number,
-    @Query('limit', new DefaultValuePipe(10), ParseIntPipe) limit: number,
-    @Query('status') status?: string,
-  ) {
-    return this.bookingService.getCustomerHistory(user.id, page, limit, status);
-  }
-
-  // Driver Endpoints
 
   @Get('demand-heatmap')
   @Roles('driver')
@@ -252,6 +227,62 @@ export class BookingController {
   async getAvailableBookings(@GetUser() user: User) {
     return this.bookingService.getAvailableBookings(user.id);
   }
+
+  @Get(':id')
+  @Roles('customer', 'driver')
+  @ApiOperation({ summary: 'Get booking details by ID' })
+  @ApiResponse({ status: 200, description: 'Booking retrieved successfully' })
+  @ApiResponse({ status: 404, description: 'Booking not found' })
+  async getById(@Param('id') id: string, @GetUser() user: User) {
+    const result = await this.bookingService.getById(id, user.id);
+    // Merge the last-known live driver location (Redis) as a REST fallback for
+    // the customer's map when the socket stream has a gap or just opened.
+    try {
+      const loc = await this.bookingGateway.getLastDriverLocation(id);
+      const data: any = (result as any)?.data ?? result;
+      if (loc && data && !data.driver_location) {
+        data.driver_location = { latitude: loc.latitude, longitude: loc.longitude, heading: loc.heading, ts: loc.ts };
+      }
+    } catch { /* non-fatal — location is best-effort */ }
+    return result;
+  }
+
+  @Put(':id/cancel')
+  @Roles('customer', 'driver')
+  @ApiOperation({ summary: 'Cancel booking' })
+  @ApiResponse({ status: 200, description: 'Booking cancelled successfully' })
+  async cancel(
+    @Param('id') id: string,
+    @GetUser() user: User,
+    @Body() cancelDto: CancelBookingDto,
+  ) {
+    return this.bookingService.cancel(id, user.id, cancelDto);
+  }
+
+  @Get('customer/active')
+  @Roles('customer')
+  @ApiOperation({ summary: 'Get current active booking for customer' })
+  async getCustomerActiveBooking(@GetUser() user: User) {
+    return this.bookingService.getCustomerActiveBooking(user.id);
+  }
+
+  @Get('customer/history')
+  @Roles('customer')
+  @ApiOperation({ summary: 'Get customer booking history' })
+  @ApiQuery({ name: 'page', required: false, type: Number })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
+  @ApiQuery({ name: 'status', required: false, type: String })
+  @ApiResponse({ status: 200, description: 'Booking history retrieved' })
+  async getCustomerHistory(
+    @GetUser() user: User,
+    @Query('page', new DefaultValuePipe(1), ParseIntPipe) page: number,
+    @Query('limit', new DefaultValuePipe(10), ParseIntPipe) limit: number,
+    @Query('status') status?: string,
+  ) {
+    return this.bookingService.getCustomerHistory(user.id, page, limit, status);
+  }
+
+  // Driver Endpoints
 
   @Get('driver/active')
   @Roles('driver')

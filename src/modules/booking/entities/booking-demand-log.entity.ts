@@ -33,6 +33,12 @@ export class BookingDemandLog {
   @Column({ type: 'varchar', length: 30, nullable: true })
   vehicle_type: string | null;
 
+  /** Estimated fare at request time — lets the hotspot heatmap estimate
+   *  earnings/hour for an area without a separate query against `bookings`
+   *  (which would miss unmatched requests entirely). */
+  @Column({ type: 'decimal', precision: 10, scale: 2, nullable: true })
+  estimated_fare: number | null;
+
   /** Flipped to true (fire-and-forget) once a driver accepts this offer. */
   @Column({ type: 'boolean', default: false })
   matched: boolean;

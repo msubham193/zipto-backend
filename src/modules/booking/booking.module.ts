@@ -5,6 +5,7 @@ import { BookingService } from './booking.service';
 import { Booking } from './entities/booking.entity';
 import { PricingRule } from './entities/pricing-rule.entity';
 import { BookingDemandLog } from './entities/booking-demand-log.entity';
+import { DriverProfile } from '../driver/entities/driver-profile.entity';
 import { User } from '../auth/entities/user.entity';
 import { AuthModule } from '../auth/auth.module';
 import { CoinModule } from '../coin/coin.module';
@@ -24,7 +25,7 @@ import { PaymentModule } from '../payment/payment.module';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Booking, PricingRule, Payment, User, BookingDemandLog]),
+    TypeOrmModule.forFeature([Booking, PricingRule, Payment, User, BookingDemandLog, DriverProfile]),
     AuthModule,
     CoinModule,
     ReferralModule,

@@ -15,6 +15,7 @@ import { Cron } from '@nestjs/schedule';
 import { Booking, BookingStatus, BookingType } from './entities/booking.entity';
 import { PricingRule } from './entities/pricing-rule.entity';
 import { BookingDemandLog } from './entities/booking-demand-log.entity';
+import { DriverProfile } from '../driver/entities/driver-profile.entity';
 import { Payment, PaymentMethod, PaymentStatus } from '../payment/entities/payment.entity';
 import { User } from '../auth/entities/user.entity';
 import {
@@ -70,6 +71,8 @@ export class BookingService {
     private userRepository: Repository<User>,
     @InjectRepository(BookingDemandLog)
     private demandLogRepository: Repository<BookingDemandLog>,
+    @InjectRepository(DriverProfile)
+    private driverProfileRepository: Repository<DriverProfile>,
     private mapboxService: MapboxService,
     private smsService: SmsService,
     private exotelService: ExotelService,
@@ -513,6 +516,7 @@ export class BookingService {
           latitude: pickup_location.latitude,
           longitude: pickup_location.longitude,
           vehicle_type,
+          estimated_fare: discountedFare,
         })
         .catch(err => this.logger.error(`[DemandLog] Failed to log offer ${offerId}: ${err.message}`));
     }
@@ -1192,6 +1196,276 @@ export class BookingService {
     };
 
     await this.cacheManager.set(cacheKey, result, 5 * 60 * 1000);
+    return result;
+  }
+
+  /**
+   * Available (online, not busy, GPS-fresh) driver coordinates within radius —
+   * same eligibility rules as findNearbyDrivers, but returns every match's
+   * location (capped at 500) instead of the top-10 by distance, since
+   * getHotspots needs a full supply count across potentially many cells.
+   */
+  private async findAvailableDriverLocations(
+    lat: number,
+    lng: number,
+    radiusKm: number,
+    vehicleType?: string,
+  ): Promise<{ latitude: number; longitude: number }[]> {
+    const maxAgeMin = Math.max(
+      1,
+      parseInt(process.env.DISPATCH_LOCATION_MAX_AGE_MINUTES || '5', 10) || 5,
+    );
+
+    const params: any[] = [lng, lat, radiusKm * 1000, maxAgeMin];
+    let vehicleFilter = '';
+    if (vehicleType) {
+      params.push(vehicleType);
+      vehicleFilter = `AND v.vehicle_type = $${params.length}`;
+    }
+
+    try {
+      const results = await this.driverProfileRepository.manager.query(
+        `
+        SELECT
+          ST_Y(dp.current_location::geometry) AS latitude,
+          ST_X(dp.current_location::geometry) AS longitude
+        FROM driver_profiles dp
+        JOIN vehicles v ON v.driver_id = dp.id
+          AND v.verification_status = 'approved'
+          ${vehicleFilter}
+        WHERE dp.availability_status = 'online'
+          AND dp.current_location IS NOT NULL
+          AND dp.last_location_at IS NOT NULL
+          AND dp.last_location_at > NOW() - ($4 * INTERVAL '1 minute')
+          AND ST_DWithin(
+            dp.current_location,
+            ST_SetSRID(ST_MakePoint($1, $2), 4326)::geography,
+            $3
+          )
+          AND NOT EXISTS (
+            SELECT 1 FROM bookings b
+            WHERE b.driver_id = dp.user_id
+              AND b.status IN ('accepted', 'driver_assigned', 'ongoing')
+          )
+        LIMIT 500
+        `,
+        params,
+      );
+      return results.map((r: any) => ({ latitude: Number(r.latitude), longitude: Number(r.longitude) }));
+    } catch (err) {
+      this.logger.error('[findAvailableDriverLocations] Query failed', err);
+      return [];
+    }
+  }
+
+  private static readonly HOTSPOT_WINDOW_MINUTES = 20; // "last 15-30 min" per product spec
+  private static readonly HOTSPOT_SUPPLY_RADIUS_KM = 1.5; // how far a driver "counts" toward a cell's supply
+
+  private static haversineKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
+    const R = 6371;
+    const toRad = (x: number) => (x * Math.PI) / 180;
+    const dLat = toRad(lat2 - lat1);
+    const dLon = toRad(lon2 - lon1);
+    const a =
+      Math.sin(dLat / 2) ** 2 +
+      Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+    return R * 2 * Math.asin(Math.sqrt(a));
+  }
+
+  /**
+   * Composite demand hotspots around a rider's live location — combines recent
+   * booking requests (matched or not), currently active orders, and current
+   * driver supply into a single demand/supply score per ~111m grid cell, then
+   * tiers cells relative to the hottest one currently found nearby (never
+   * hardcoded absolute thresholds, so this scales the same whether the rider
+   * is in a small town or a metro). Cached briefly (matches the 30-60s client
+   * refresh cadence) to keep this cheap even if every online driver polls it.
+   */
+  async getHotspots(latitude: number, longitude: number, radiusKm: number = 7, vehicleType?: string) {
+    const cacheKey = `hotspots:${latitude.toFixed(3)}:${longitude.toFixed(3)}:${radiusKm}:${vehicleType || 'all'}`;
+    const cached = await this.cacheManager.get<any>(cacheKey);
+    if (cached) return cached;
+
+    const radiusMeters = radiusKm * 1000;
+    const windowMinutes = BookingService.HOTSPOT_WINDOW_MINUTES;
+
+    const demandParams: any[] = [windowMinutes, longitude, latitude, radiusMeters];
+    let vehicleFilterDemand = '';
+    if (vehicleType) {
+      demandParams.push(vehicleType);
+      vehicleFilterDemand = `AND vehicle_type = $${demandParams.length}`;
+    }
+
+    const [demandRows, activeRows, driverLocations] = await Promise.all([
+      this.bookingRepository.manager.query(
+        `SELECT
+           ROUND(latitude::numeric, 3)  AS latitude,
+           ROUND(longitude::numeric, 3) AS longitude,
+           COUNT(*)::int AS request_count,
+           COUNT(*) FILTER (WHERE matched = false)::int AS pending_count,
+           COALESCE(AVG(estimated_fare), 0)::float AS avg_fare
+         FROM booking_demand_logs
+         WHERE created_at > NOW() - ($1 * INTERVAL '1 minute')
+           AND ST_DWithin(
+             ST_SetSRID(ST_MakePoint(longitude, latitude), 4326)::geography,
+             ST_SetSRID(ST_MakePoint($2, $3), 4326)::geography,
+             $4
+           )
+           ${vehicleFilterDemand}
+         GROUP BY 1, 2`,
+        demandParams,
+      ),
+      this.bookingRepository.manager.query(
+        `SELECT
+           ROUND(ST_Y(pickup_location::geometry)::numeric, 3) AS latitude,
+           ROUND(ST_X(pickup_location::geometry)::numeric, 3) AS longitude,
+           COUNT(*)::int AS active_count
+         FROM bookings
+         WHERE status IN ('accepted', 'driver_assigned', 'ongoing')
+           AND ST_DWithin(
+             pickup_location,
+             ST_SetSRID(ST_MakePoint($1, $2), 4326)::geography,
+             $3
+           )
+         GROUP BY 1, 2`,
+        [longitude, latitude, radiusMeters],
+      ),
+      this.findAvailableDriverLocations(latitude, longitude, radiusKm, vehicleType),
+    ]);
+
+    interface Cell {
+      latitude: number;
+      longitude: number;
+      requestCount: number;
+      pendingCount: number;
+      activeCount: number;
+      sumFare: number;
+      fareSamples: number;
+    }
+    const cells = new Map<string, Cell>();
+    const cellKey = (lat: number, lng: number) => `${lat},${lng}`;
+
+    for (const row of demandRows) {
+      const lat = Number(row.latitude);
+      const lng = Number(row.longitude);
+      cells.set(cellKey(lat, lng), {
+        latitude: lat,
+        longitude: lng,
+        requestCount: Number(row.request_count),
+        pendingCount: Number(row.pending_count),
+        activeCount: 0,
+        sumFare: Number(row.avg_fare) * Number(row.request_count),
+        fareSamples: Number(row.request_count),
+      });
+    }
+    for (const row of activeRows) {
+      const lat = Number(row.latitude);
+      const lng = Number(row.longitude);
+      const key = cellKey(lat, lng);
+      const existing = cells.get(key);
+      if (existing) {
+        existing.activeCount = Number(row.active_count);
+      } else {
+        cells.set(key, {
+          latitude: lat,
+          longitude: lng,
+          requestCount: 0,
+          pendingCount: 0,
+          activeCount: Number(row.active_count),
+          sumFare: 0,
+          fareSamples: 0,
+        });
+      }
+    }
+
+    const scored = Array.from(cells.values())
+      .map(cell => {
+        const nearbyDrivers = driverLocations.filter(
+          d => BookingService.haversineKm(cell.latitude, cell.longitude, d.latitude, d.longitude)
+            <= BookingService.HOTSPOT_SUPPLY_RADIUS_KM,
+        ).length;
+        const activityScore = cell.requestCount + cell.pendingCount * 1.5 + cell.activeCount * 0.5;
+        const rawScore = activityScore / Math.max(1, nearbyDrivers);
+        const avgFare = cell.fareSamples > 0 ? cell.sumFare / cell.fareSamples : 0;
+        const estimatedOrdersPerHour = Math.round(cell.requestCount * (60 / windowMinutes) * 10) / 10;
+        const estimatedEarningsPerHour = Math.round(estimatedOrdersPerHour * avgFare);
+        const distanceKm =
+          Math.round(BookingService.haversineKm(latitude, longitude, cell.latitude, cell.longitude) * 10) / 10;
+        return {
+          latitude: cell.latitude,
+          longitude: cell.longitude,
+          rawScore,
+          estimatedOrdersPerHour,
+          estimatedEarningsPerHour,
+          distanceKm,
+        };
+      })
+      .filter(c => c.rawScore > 0);
+
+    const maxScore = Math.max(...scored.map(c => c.rawScore), 0.0001);
+    const tierOf = (score: number): 'low' | 'medium' | 'high' | 'very_high' => {
+      const ratio = score / maxScore;
+      if (ratio > 0.75) return 'very_high';
+      if (ratio > 0.5) return 'high';
+      if (ratio > 0.25) return 'medium';
+      return 'low';
+    };
+
+    const points = scored
+      .map(c => ({
+        latitude: c.latitude,
+        longitude: c.longitude,
+        tier: tierOf(c.rawScore),
+        estimatedOrdersPerHour: c.estimatedOrdersPerHour,
+        estimatedEarningsPerHour: c.estimatedEarningsPerHour,
+        distanceKm: c.distanceKm,
+      }))
+      .sort((a, b) => b.estimatedOrdersPerHour - a.estimatedOrdersPerHour)
+      .slice(0, 100);
+
+    const result = {
+      points,
+      radiusKm,
+      windowMinutes,
+      generatedAt: new Date().toISOString(),
+    };
+
+    await this.cacheManager.set(cacheKey, result, 20 * 1000);
+    return result;
+  }
+
+  /**
+   * Peak hour-of-day for a specific tapped hotspot, over the last 30 days.
+   * Deliberately a separate, on-demand call (not part of getHotspots) since
+   * it needs a much longer lookback and a different grouping than the live
+   * scoring above — wasteful to compute for every cell on every refresh.
+   */
+  async getHotspotPeakTime(latitude: number, longitude: number, radiusKm: number = 1) {
+    const cacheKey = `hotspot_peak:${latitude.toFixed(3)}:${longitude.toFixed(3)}:${radiusKm}`;
+    const cached = await this.cacheManager.get<any>(cacheKey);
+    if (cached) return cached;
+
+    const rows = await this.bookingRepository.manager.query(
+      `SELECT EXTRACT(HOUR FROM booking_time)::int AS hour, COUNT(*)::int AS cnt
+       FROM bookings
+       WHERE status != 'cancelled'
+         AND booking_time > NOW() - INTERVAL '30 days'
+         AND ST_DWithin(
+           pickup_location,
+           ST_SetSRID(ST_MakePoint($1, $2), 4326)::geography,
+           $3
+         )
+       GROUP BY 1
+       ORDER BY cnt DESC
+       LIMIT 1`,
+      [longitude, latitude, radiusKm * 1000],
+    );
+
+    const result = rows.length > 0
+      ? { hasData: true, peakHour: rows[0].hour as number, sampleSize: rows[0].cnt as number }
+      : { hasData: false, peakHour: null as number | null, sampleSize: 0 };
+
+    await this.cacheManager.set(cacheKey, result, 10 * 60 * 1000);
     return result;
   }
 
