@@ -1258,8 +1258,70 @@ export class BookingService {
     }
   }
 
-  private static readonly HOTSPOT_WINDOW_MINUTES = 20; // "last 15-30 min" per product spec
+  private static readonly HOTSPOT_WINDOW_MINUTES = 30; // "last 15-30 min" per product spec
   private static readonly HOTSPOT_SUPPLY_RADIUS_KM = 1.5; // how far a driver "counts" toward a cell's supply
+  // When the live window is empty (normal at low volume), fall back to
+  // aggregated demand over this many days so the map is still useful.
+  private static readonly HOTSPOT_HISTORICAL_DAYS = 14;
+  // Assumed active hours/day, used only to turn a historical total into a
+  // per-hour rate ("orders during a typical active hour", not a 24h average).
+  private static readonly HOTSPOT_ACTIVE_HOURS_PER_DAY = 14;
+
+  /**
+   * Aggregate booking_demand_logs into ~111m grid cells within radius, over
+   * either the live (last N minutes) or historical (last N days) window.
+   * Shared by getHotspots' live path and its low-volume fallback.
+   */
+  private async queryDemandCells(
+    latitude: number,
+    longitude: number,
+    radiusMeters: number,
+    vehicleType: string | undefined,
+    mode: 'live' | 'historical',
+  ): Promise<{ latitude: number; longitude: number; requestCount: number; pendingCount: number; avgFare: number }[]> {
+    const timeClause =
+      mode === 'live'
+        ? `created_at > NOW() - ($1 * INTERVAL '1 minute')`
+        : `created_at > NOW() - ($1 * INTERVAL '1 day')`;
+    const windowValue =
+      mode === 'live'
+        ? BookingService.HOTSPOT_WINDOW_MINUTES
+        : BookingService.HOTSPOT_HISTORICAL_DAYS;
+
+    const params: any[] = [windowValue, longitude, latitude, radiusMeters];
+    let vehicleFilter = '';
+    if (vehicleType) {
+      params.push(vehicleType);
+      vehicleFilter = `AND vehicle_type = $${params.length}`;
+    }
+
+    const rows = await this.bookingRepository.manager.query(
+      `SELECT
+         ROUND(latitude::numeric, 3)  AS latitude,
+         ROUND(longitude::numeric, 3) AS longitude,
+         COUNT(*)::int AS request_count,
+         COUNT(*) FILTER (WHERE matched = false)::int AS pending_count,
+         COALESCE(AVG(estimated_fare), 0)::float AS avg_fare
+       FROM booking_demand_logs
+       WHERE ${timeClause}
+         AND ST_DWithin(
+           ST_SetSRID(ST_MakePoint(longitude, latitude), 4326)::geography,
+           ST_SetSRID(ST_MakePoint($2, $3), 4326)::geography,
+           $4
+         )
+         ${vehicleFilter}
+       GROUP BY 1, 2`,
+      params,
+    );
+
+    return rows.map((r: any) => ({
+      latitude: Number(r.latitude),
+      longitude: Number(r.longitude),
+      requestCount: Number(r.request_count),
+      pendingCount: Number(r.pending_count),
+      avgFare: Number(r.avg_fare),
+    }));
+  }
 
   private static haversineKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
     const R = 6371;
@@ -1287,124 +1349,131 @@ export class BookingService {
     if (cached) return cached;
 
     const radiusMeters = radiusKm * 1000;
-    const windowMinutes = BookingService.HOTSPOT_WINDOW_MINUTES;
+    const emptyResult = () => ({ points: [], source: 'live' as const, radiusKm, generatedAt: new Date().toISOString() });
 
-    const demandParams: any[] = [windowMinutes, longitude, latitude, radiusMeters];
-    let vehicleFilterDemand = '';
-    if (vehicleType) {
-      demandParams.push(vehicleType);
-      vehicleFilterDemand = `AND vehicle_type = $${demandParams.length}`;
+    // 1) Try the live window. 2) If empty (normal at low volume), fall back to
+    //    aggregated historical demand so the rider still sees where demand
+    //    actually concentrates, rather than a blank map.
+    let source: 'live' | 'historical' = 'live';
+    let demandCells = await this.queryDemandCells(latitude, longitude, radiusMeters, vehicleType, 'live');
+    if (demandCells.length === 0) {
+      source = 'historical';
+      demandCells = await this.queryDemandCells(latitude, longitude, radiusMeters, vehicleType, 'historical');
+    }
+    if (demandCells.length === 0) {
+      const empty = {...emptyResult(), source};
+      await this.cacheManager.set(cacheKey, empty, 20 * 1000);
+      return empty;
     }
 
-    const [demandRows, activeRows, driverLocations] = await Promise.all([
-      this.bookingRepository.manager.query(
-        `SELECT
-           ROUND(latitude::numeric, 3)  AS latitude,
-           ROUND(longitude::numeric, 3) AS longitude,
-           COUNT(*)::int AS request_count,
-           COUNT(*) FILTER (WHERE matched = false)::int AS pending_count,
-           COALESCE(AVG(estimated_fare), 0)::float AS avg_fare
-         FROM booking_demand_logs
-         WHERE created_at > NOW() - ($1 * INTERVAL '1 minute')
-           AND ST_DWithin(
-             ST_SetSRID(ST_MakePoint(longitude, latitude), 4326)::geography,
-             ST_SetSRID(ST_MakePoint($2, $3), 4326)::geography,
-             $4
-           )
-           ${vehicleFilterDemand}
-         GROUP BY 1, 2`,
-        demandParams,
-      ),
-      this.bookingRepository.manager.query(
-        `SELECT
-           ROUND(ST_Y(pickup_location::geometry)::numeric, 3) AS latitude,
-           ROUND(ST_X(pickup_location::geometry)::numeric, 3) AS longitude,
-           COUNT(*)::int AS active_count
-         FROM bookings
-         WHERE status IN ('accepted', 'driver_assigned', 'ongoing')
-           AND ST_DWithin(
-             pickup_location,
-             ST_SetSRID(ST_MakePoint($1, $2), 4326)::geography,
-             $3
-           )
-         GROUP BY 1, 2`,
-        [longitude, latitude, radiusMeters],
-      ),
-      this.findAvailableDriverLocations(latitude, longitude, radiusKm, vehicleType),
-    ]);
-
+    // Live scoring additionally factors current active orders + how much driver
+    // supply is already sitting on each cell (a busy area that's already well
+    // covered shouldn't outrank an underserved one). Historical scoring is pure
+    // demand volume — current supply has no bearing on past demand.
     interface Cell {
       latitude: number;
       longitude: number;
       requestCount: number;
       pendingCount: number;
       activeCount: number;
-      sumFare: number;
-      fareSamples: number;
+      avgFare: number;
     }
     const cells = new Map<string, Cell>();
     const cellKey = (lat: number, lng: number) => `${lat},${lng}`;
-
-    for (const row of demandRows) {
-      const lat = Number(row.latitude);
-      const lng = Number(row.longitude);
-      cells.set(cellKey(lat, lng), {
-        latitude: lat,
-        longitude: lng,
-        requestCount: Number(row.request_count),
-        pendingCount: Number(row.pending_count),
+    for (const c of demandCells) {
+      cells.set(cellKey(c.latitude, c.longitude), {
+        latitude: c.latitude,
+        longitude: c.longitude,
+        requestCount: c.requestCount,
+        pendingCount: c.pendingCount,
         activeCount: 0,
-        sumFare: Number(row.avg_fare) * Number(row.request_count),
-        fareSamples: Number(row.request_count),
+        avgFare: c.avgFare,
       });
     }
-    for (const row of activeRows) {
-      const lat = Number(row.latitude);
-      const lng = Number(row.longitude);
-      const key = cellKey(lat, lng);
-      const existing = cells.get(key);
-      if (existing) {
-        existing.activeCount = Number(row.active_count);
-      } else {
-        cells.set(key, {
-          latitude: lat,
-          longitude: lng,
-          requestCount: 0,
-          pendingCount: 0,
-          activeCount: Number(row.active_count),
-          sumFare: 0,
-          fareSamples: 0,
-        });
+
+    let driverLocations: { latitude: number; longitude: number }[] = [];
+    if (source === 'live') {
+      const [activeRows, drivers] = await Promise.all([
+        this.bookingRepository.manager.query(
+          `SELECT
+             ROUND(ST_Y(pickup_location::geometry)::numeric, 3) AS latitude,
+             ROUND(ST_X(pickup_location::geometry)::numeric, 3) AS longitude,
+             COUNT(*)::int AS active_count
+           FROM bookings
+           WHERE status IN ('accepted', 'driver_assigned', 'ongoing')
+             AND ST_DWithin(
+               pickup_location,
+               ST_SetSRID(ST_MakePoint($1, $2), 4326)::geography,
+               $3
+             )
+           GROUP BY 1, 2`,
+          [longitude, latitude, radiusMeters],
+        ),
+        this.findAvailableDriverLocations(latitude, longitude, radiusKm, vehicleType),
+      ]);
+      driverLocations = drivers;
+      for (const row of activeRows) {
+        const lat = Number(row.latitude);
+        const lng = Number(row.longitude);
+        const key = cellKey(lat, lng);
+        const existing = cells.get(key);
+        if (existing) {
+          existing.activeCount = Number(row.active_count);
+        } else {
+          cells.set(key, { latitude: lat, longitude: lng, requestCount: 0, pendingCount: 0, activeCount: Number(row.active_count), avgFare: 0 });
+        }
       }
     }
 
+    // Turn a request count into a per-hour rate depending on the window used.
+    const ratePerHour = (requestCount: number): number =>
+      source === 'live'
+        ? requestCount * (60 / BookingService.HOTSPOT_WINDOW_MINUTES)
+        : requestCount / BookingService.HOTSPOT_HISTORICAL_DAYS / BookingService.HOTSPOT_ACTIVE_HOURS_PER_DAY;
+
     const scored = Array.from(cells.values())
       .map(cell => {
-        const nearbyDrivers = driverLocations.filter(
-          d => BookingService.haversineKm(cell.latitude, cell.longitude, d.latitude, d.longitude)
-            <= BookingService.HOTSPOT_SUPPLY_RADIUS_KM,
-        ).length;
-        const activityScore = cell.requestCount + cell.pendingCount * 1.5 + cell.activeCount * 0.5;
-        const rawScore = activityScore / Math.max(1, nearbyDrivers);
-        const avgFare = cell.fareSamples > 0 ? cell.sumFare / cell.fareSamples : 0;
-        const estimatedOrdersPerHour = Math.round(cell.requestCount * (60 / windowMinutes) * 10) / 10;
-        const estimatedEarningsPerHour = Math.round(estimatedOrdersPerHour * avgFare);
+        let rawScore: number;
+        if (source === 'live') {
+          const nearbyDrivers = driverLocations.filter(
+            d => BookingService.haversineKm(cell.latitude, cell.longitude, d.latitude, d.longitude)
+              <= BookingService.HOTSPOT_SUPPLY_RADIUS_KM,
+          ).length;
+          const activityScore = cell.requestCount + cell.pendingCount * 1.5 + cell.activeCount * 0.5;
+          rawScore = activityScore / Math.max(1, nearbyDrivers);
+        } else {
+          rawScore = cell.requestCount + cell.pendingCount * 1.5;
+        }
+
+        const rate = ratePerHour(cell.requestCount);
+        const ordersLow = Math.max(0, Math.floor(rate * 0.7));
+        const ordersHigh = Math.max(ordersLow + 1, Math.ceil(rate * 1.3));
+        const earningsLow = Math.round(ordersLow * cell.avgFare);
+        const earningsHigh = Math.round(ordersHigh * cell.avgFare);
         const distanceKm =
           Math.round(BookingService.haversineKm(latitude, longitude, cell.latitude, cell.longitude) * 10) / 10;
+
         return {
           latitude: cell.latitude,
           longitude: cell.longitude,
           rawScore,
-          estimatedOrdersPerHour,
-          estimatedEarningsPerHour,
+          ordersPerHour: { low: ordersLow, high: ordersHigh },
+          earningsPerHour: { low: earningsLow, high: earningsHigh },
           distanceKm,
         };
       })
       .filter(c => c.rawScore > 0);
 
-    const maxScore = Math.max(...scored.map(c => c.rawScore), 0.0001);
-    const tierOf = (score: number): 'low' | 'medium' | 'high' | 'very_high' => {
-      const ratio = score / maxScore;
+    if (scored.length === 0) {
+      const empty = { ...emptyResult(), source };
+      await this.cacheManager.set(cacheKey, empty, 20 * 1000);
+      return empty;
+    }
+
+    // Tier relative to the hottest cell currently found nearby — never a
+    // hardcoded absolute threshold, so it scales in any city.
+    const maxScore = Math.max(...scored.map(c => c.rawScore));
+    const tierOf = (ratio: number): 'low' | 'medium' | 'high' | 'very_high' => {
       if (ratio > 0.75) return 'very_high';
       if (ratio > 0.5) return 'high';
       if (ratio > 0.25) return 'medium';
@@ -1412,21 +1481,26 @@ export class BookingService {
     };
 
     const points = scored
-      .map(c => ({
-        latitude: c.latitude,
-        longitude: c.longitude,
-        tier: tierOf(c.rawScore),
-        estimatedOrdersPerHour: c.estimatedOrdersPerHour,
-        estimatedEarningsPerHour: c.estimatedEarningsPerHour,
-        distanceKm: c.distanceKm,
-      }))
-      .sort((a, b) => b.estimatedOrdersPerHour - a.estimatedOrdersPerHour)
+      .map(c => {
+        const intensity = c.rawScore / maxScore; // 0-1, drives the heatmap glow
+        return {
+          latitude: c.latitude,
+          longitude: c.longitude,
+          tier: tierOf(intensity),
+          intensity: Math.round(intensity * 100) / 100,
+          ordersPerHour: c.ordersPerHour,
+          earningsPerHour: c.earningsPerHour,
+          distanceKm: c.distanceKm,
+        };
+      })
+      .sort((a, b) => b.intensity - a.intensity)
       .slice(0, 100);
 
     const result = {
       points,
+      source,
       radiusKm,
-      windowMinutes,
+      windowMinutes: source === 'live' ? BookingService.HOTSPOT_WINDOW_MINUTES : undefined,
       generatedAt: new Date().toISOString(),
     };
 
