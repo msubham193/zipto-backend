@@ -137,8 +137,12 @@ export class CustomerService {
 
   /**
    * Driver-facing live heatmap — aggregates every currently-live customer
-   * presence key into ~111m grid cells. No individual customer identity or
-   * exact location is ever exposed, only anonymous per-cell counts.
+   * presence into coarse ~1.1km locality cells (2-decimal grid). Privacy by
+   * design: a customer's exact position is NEVER exposed — only the snapped
+   * cell centre and an anonymous per-cell count are returned, so a driver
+   * learns "customers are active around this locality", never where anyone
+   * precisely is. The rider app names these areas (reverse-geocode) and shows
+   * a direction to travel, rather than plotting individuals.
    */
   async getLiveHeatmap() {
     const cached = await this.redisService.get<any>(LIVE_HEATMAP_CACHE_KEY);
@@ -147,11 +151,13 @@ export class CustomerService {
     const keys = await this.redisService.scanKeys(`${PRESENCE_KEY_PREFIX}*`);
     const values = await this.redisService.mget<{ latitude: number; longitude: number }>(keys);
 
+    // Snap to a ~1.1km grid (2 decimal places). The reported coordinate is the
+    // grid cell centre, not the customer's real position.
     const grid = new Map<string, number>();
     for (const v of values) {
       if (!v) continue;
-      const lat = Math.round(v.latitude * 1000) / 1000;
-      const lng = Math.round(v.longitude * 1000) / 1000;
+      const lat = Math.round(v.latitude * 100) / 100;
+      const lng = Math.round(v.longitude * 100) / 100;
       const cellKey = `${lat},${lng}`;
       grid.set(cellKey, (grid.get(cellKey) || 0) + 1);
     }
@@ -162,7 +168,7 @@ export class CustomerService {
         return { latitude: lat, longitude: lng, weight };
       })
       .sort((a, b) => b.weight - a.weight)
-      .slice(0, 500);
+      .slice(0, 200);
 
     const result = { points, generatedAt: new Date().toISOString() };
     await this.redisService.set(LIVE_HEATMAP_CACHE_KEY, result, LIVE_HEATMAP_CACHE_TTL_MS);
