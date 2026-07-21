@@ -491,6 +491,10 @@ export class BookingService {
     // Track active offer per customer so the status banner can find it
     await this.cacheManager.set(`customer:active_offer:${userId}`, offerId, OFFER_TTL_MS);
 
+    // Lazily derive the customer's state (once) from their pickup location, for
+    // the admin state-wise views. Fire-and-forget — never blocks the booking.
+    this.populateCustomerStateIfMissing(userId, pickup_location.latitude, pickup_location.longitude);
+
     this.logger.log(`Offer created: ${offerId}, type: ${booking_type}, vehicle: ${vehicle_type}`);
 
     if (booking_type === BookingType.INSTANT) {
@@ -529,6 +533,22 @@ export class BookingService {
       duration:       fareEstimate.duration,
       status:         'searching',
     };
+  }
+
+  /**
+   * Reverse-geocode a customer's pickup coordinate to an Indian state and store
+   * it on the user — only if they have no state yet, so it runs at most once per
+   * customer. Fire-and-forget: never blocks or fails a booking.
+   */
+  private populateCustomerStateIfMissing(userId: string, latitude: number, longitude: number): void {
+    (async () => {
+      const user = await this.userRepository.findOne({ where: { id: userId }, select: ['id', 'state'] });
+      if (!user || user.state) return;
+      const state = await this.mapboxService.reverseGeocodeState(latitude, longitude);
+      if (state) {
+        await this.userRepository.update({ id: userId }, { state });
+      }
+    })().catch(() => {/* non-critical — retried on the customer's next booking */});
   }
 
   /**

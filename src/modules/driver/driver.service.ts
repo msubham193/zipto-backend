@@ -27,6 +27,7 @@ import { getPaginationMeta } from '../../common/utils/helpers.util';
 import { S3Service } from '../../services/s3.service';
 import { NotificationService } from '../notification/notification.service';
 import { RedisService } from '../../services/redis.service';
+import { MapboxService } from '../../services/mapbox.service';
 import { DriverWalletService } from './driver-wallet.service';
 import { RazorpayXService } from '../../services/razorpayx.service';
 import { CashfreeService } from '../../services/cashfree.service';
@@ -65,6 +66,7 @@ export class DriverService {
     private readonly razorpayXService: RazorpayXService,
     private readonly cashfreeService: CashfreeService,
     private readonly cashfreePayoutService: CashfreePayoutService,
+    private readonly mapboxService: MapboxService,
   ) {}
 
   /**
@@ -248,7 +250,28 @@ export class DriverService {
     // If the cron finds an ongoing booking without this key, the driver has gone dark.
     await this.cacheManager.set(`driver:last_ping:${userId}`, Date.now(), GPS_PING_TTL_MS);
 
+    // Lazily derive the driver's state (once) from their first known GPS fix —
+    // fire-and-forget so it never slows the high-frequency location ping.
+    this.populateUserStateIfMissing(userId, latitude, longitude);
+
     return { message: 'Location updated successfully' };
+  }
+
+  /**
+   * Reverse-geocode a coordinate to an Indian state and store it on the user —
+   * but only if the user has no state yet (so this runs at most once per user,
+   * even though updateLocation fires every few seconds). Fully fire-and-forget:
+   * any failure is swallowed and simply retried on the next location update.
+   */
+  private populateUserStateIfMissing(userId: string, latitude: number, longitude: number): void {
+    (async () => {
+      const user = await this.userRepository.findOne({ where: { id: userId }, select: ['id', 'state'] });
+      if (!user || user.state) return;
+      const state = await this.mapboxService.reverseGeocodeState(latitude, longitude);
+      if (state) {
+        await this.userRepository.update({ id: userId }, { state });
+      }
+    })().catch(() => {/* non-critical — will retry on next ping */});
   }
 
   /**

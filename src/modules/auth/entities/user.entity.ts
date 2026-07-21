@@ -84,6 +84,13 @@ export class User {
   @Column({ type: 'varchar', length: 10, default: 'en' })
   language_preference: string;
 
+  // Indian state, derived by reverse-geocoding the user's location (driver's
+  // live GPS / customer's booking pickup) and populated once. Null until we
+  // have a location to derive it from. Used for the admin state-wise views.
+  @Column({ type: 'varchar', length: 60, nullable: true })
+  @Index()
+  state: string | null;
+
   @Column({ type: 'text', nullable: true })
   @Exclude()
   refresh_token: string | null;

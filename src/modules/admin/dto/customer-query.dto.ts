@@ -12,4 +12,9 @@ export class CustomerQueryDto extends PaginationDto {
   @IsOptional()
   @IsIn(['all', 'active', 'blocked'])
   status?: 'all' | 'active' | 'blocked';
+
+  @ApiPropertyOptional({ description: 'Filter by (derived) state, or "Unknown" for users without one' })
+  @IsOptional()
+  @IsString()
+  state?: string;
 }

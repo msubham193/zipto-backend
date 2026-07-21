@@ -306,6 +306,43 @@ export class MapboxService implements OnModuleDestroy {
   }
 
   /**
+   * Reverse-geocode coordinates to just the Indian state
+   * (administrative_area_level_1), e.g. "Odisha". Used to bucket users by
+   * state for the admin state-wise views. Returns null if unresolved.
+   */
+  async reverseGeocodeState(lat: number, lng: number): Promise<string | null> {
+    if (!this.apiKey) return null;
+
+    const cacheKey = `state:${this.coordKey(lat, lng)}`;
+    const cached = this.getCached(this.reverseGeocodeCache, cacheKey);
+    if (cached !== undefined) return cached;
+
+    try {
+      const response = await axios.get(`${this.baseUrl}/geocode/json`, {
+        params: {
+          latlng: `${lat},${lng}`,
+          key: this.apiKey,
+          language: 'en',
+          result_type: 'administrative_area_level_1',
+        },
+        timeout: API_TIMEOUT,
+      });
+
+      let state: string | null = null;
+      if (response.data.status === 'OK' && response.data.results?.length) {
+        const comps = response.data.results[0].address_components || [];
+        const stateComp = comps.find((c: any) => c.types?.includes('administrative_area_level_1'));
+        state = stateComp?.long_name ?? null;
+      }
+      this.setCache(this.reverseGeocodeCache, cacheKey, state, CACHE_TTL.REVERSE_GEOCODE);
+      return state;
+    } catch (error: any) {
+      this.logger.error(`Reverse geocode (state) error: ${error.message}`);
+      return null;
+    }
+  }
+
+  /**
    * Search for places (autocomplete). No server-side caching — clients debounce.
    */
   async searchPlaces(

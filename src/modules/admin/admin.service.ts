@@ -631,13 +631,13 @@ export class AdminService {
   /**
    * Get all customers with pagination, search, and status filter
    */
-  async getAllCustomers(query: { page?: number; limit?: number; search?: string; status?: string }) {
+  async getAllCustomers(query: { page?: number; limit?: number; search?: string; status?: string; state?: string }) {
     const page = Number(query.page) || 1;
     const limit = Number(query.limit) || 20;
 
     const qb = this.userRepository
       .createQueryBuilder('u')
-      .select(['u.id', 'u.phone', 'u.email', 'u.name', 'u.is_verified', 'u.is_active', 'u.created_at', 'u.updated_at'])
+      .select(['u.id', 'u.phone', 'u.email', 'u.name', 'u.is_verified', 'u.is_active', 'u.state', 'u.created_at', 'u.updated_at'])
       .where('u.role = :role', { role: UserRole.CUSTOMER })
       // Hide self-deleted (anonymized) accounts from the admin list.
       .andWhere('u.is_deleted = false');
@@ -645,6 +645,12 @@ export class AdminService {
     const status = (query.status || '').toLowerCase();
     if (status === 'active') qb.andWhere('u.is_active = true');
     else if (status === 'blocked') qb.andWhere('u.is_active = false');
+
+    if (query.state) {
+      // "Unknown" is the UI label for customers whose state we couldn't derive yet.
+      if (query.state === 'Unknown') qb.andWhere('u.state IS NULL');
+      else qb.andWhere('u.state = :state', { state: query.state });
+    }
 
     if (query.search) {
       qb.andWhere('(u.name ILIKE :search OR u.email ILIKE :search OR u.phone ILIKE :search)', {
@@ -676,6 +682,7 @@ export class AdminService {
     status?: 'all' | 'active' | 'suspended' | 'pending_approval';
     kycStatus?: VerificationStatus;
     vehicleType?: VehicleType;
+    state?: string;
   }) {
     const page = Number(query.page) || 1;
     const limit = Number(query.limit) || 20;
@@ -718,6 +725,11 @@ export class AdminService {
       );
     }
 
+    if (query.state) {
+      if (query.state === 'Unknown') qb.andWhere('user.state IS NULL');
+      else qb.andWhere('user.state = :state', { state: query.state });
+    }
+
     if (query.search) {
       const search = `%${query.search.trim()}%`;
       qb.andWhere(
@@ -737,6 +749,81 @@ export class AdminService {
       total,
       page,
       pages: Math.ceil(total / limit),
+    };
+  }
+
+  /**
+   * Distinct states (with counts) present among a role's users — powers the
+   * admin state filter dropdown and doubles as the state-wise breakdown. Users
+   * whose state couldn't be derived yet are bucketed under "Unknown".
+   */
+  async getUserStates(role: 'customer' | 'driver') {
+    const rows = await this.userRepository.query(
+      `SELECT COALESCE(NULLIF(state, ''), 'Unknown') AS state, COUNT(*)::int AS count
+         FROM users
+        WHERE role = $1 AND is_deleted = false
+        GROUP BY COALESCE(NULLIF(state, ''), 'Unknown')
+        ORDER BY count DESC, state ASC`,
+      [role],
+    );
+    return rows.map((r: any) => ({ state: r.state, count: Number(r.count) }));
+  }
+
+  /**
+   * Backfill state for existing users who predate state capture, deriving it
+   * from the location we already have (customer's latest booking pickup,
+   * driver's last GPS fix). Processes a bounded batch per call — the admin can
+   * re-run until `remaining` is 0. Users with no usable location stay Unknown.
+   */
+  async backfillUserStates(limit = 50) {
+    const customerRows = await this.userRepository.query(
+      `SELECT u.id,
+              ST_Y(b.pickup_location::geometry) AS lat,
+              ST_X(b.pickup_location::geometry) AS lng
+         FROM users u
+         JOIN LATERAL (
+           SELECT pickup_location FROM bookings bk
+            WHERE bk.customer_id = u.id
+            ORDER BY bk.created_at DESC LIMIT 1
+         ) b ON true
+        WHERE u.role = 'customer' AND u.is_deleted = false AND u.state IS NULL
+        LIMIT $1`,
+      [limit],
+    );
+
+    const driverRows = await this.userRepository.query(
+      `SELECT u.id,
+              ST_Y(dp.current_location::geometry) AS lat,
+              ST_X(dp.current_location::geometry) AS lng
+         FROM users u
+         JOIN driver_profiles dp ON dp.user_id = u.id
+        WHERE u.role = 'driver' AND u.is_deleted = false AND u.state IS NULL
+          AND dp.current_location IS NOT NULL
+        LIMIT $1`,
+      [limit],
+    );
+
+    let updated = 0;
+    for (const row of [...customerRows, ...driverRows]) {
+      const lat = Number(row.lat);
+      const lng = Number(row.lng);
+      if (!isFinite(lat) || !isFinite(lng)) continue;
+      const state = await this.mapboxService.reverseGeocodeState(lat, lng);
+      if (state) {
+        await this.userRepository.update({ id: row.id }, { state });
+        updated++;
+      }
+    }
+
+    const [{ remaining }] = await this.userRepository.query(
+      `SELECT COUNT(*)::int AS remaining FROM users
+        WHERE role IN ('customer','driver') AND is_deleted = false AND state IS NULL`,
+    );
+
+    return {
+      processed: customerRows.length + driverRows.length,
+      updated,
+      remaining: Number(remaining),
     };
   }
 

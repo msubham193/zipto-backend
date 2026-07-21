@@ -27,4 +27,9 @@ export class DriverQueryDto extends PaginationDto {
   @IsOptional()
   @IsEnum(VehicleType)
   vehicleType?: VehicleType;
+
+  @ApiPropertyOptional({ description: 'Filter by (derived) state, or "Unknown" for drivers without one' })
+  @IsOptional()
+  @IsString()
+  state?: string;
 }

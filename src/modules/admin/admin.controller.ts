@@ -1,7 +1,7 @@
 import { Controller, Get, Put, Post, Delete, Param, Query, Body, BadRequestException, Req, Headers, Res } from '@nestjs/common';
 import { RawBodyRequest } from '@nestjs/common';
 import { Request, Response } from 'express';
-import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
 import { Public } from '../../common/decorators/public.decorator';
 import { GetUser } from '../../common/decorators/get-user.decorator';
 import { User } from '../auth/entities/user.entity';
@@ -266,10 +266,26 @@ export class AdminController {
   }
 
   @Get('customers')
-  @ApiOperation({ summary: 'Get all customers with pagination, search, and status filter' })
+  @ApiOperation({ summary: 'Get all customers with pagination, search, status, and state filter' })
   @ApiResponse({ status: 200, description: 'Customers retrieved' })
   async getAllCustomers(@Query() query: CustomerQueryDto) {
     return this.adminService.getAllCustomers(query);
+  }
+
+  @Get('user-states')
+  @ApiOperation({ summary: 'Distinct states (with counts) for customers or drivers — powers the state filter' })
+  @ApiQuery({ name: 'role', required: true, enum: ['customer', 'driver'] })
+  @ApiResponse({ status: 200, description: 'State breakdown retrieved' })
+  async getUserStates(@Query('role') role: 'customer' | 'driver') {
+    return this.adminService.getUserStates(role === 'driver' ? 'driver' : 'customer');
+  }
+
+  @Post('user-states/backfill')
+  @ApiOperation({ summary: 'Backfill state for existing users from their known location (batched; re-run until remaining is 0)' })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
+  @ApiResponse({ status: 200, description: 'Backfill batch processed' })
+  async backfillUserStates(@Query('limit') limit?: number) {
+    return this.adminService.backfillUserStates(Number(limit) || 50);
   }
 
   @Get('customers/:id')
