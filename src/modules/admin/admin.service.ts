@@ -198,6 +198,7 @@ export class AdminService {
       totalUsers,
       totalCustomers,
       totalDrivers,
+      registeredDrivers,
       totalBookings,
       completedBookings,
       ongoingBookings,
@@ -220,6 +221,10 @@ export class AdminService {
       // "All Drivers" list — a user can have role=driver without having completed
       // onboarding (no profile), which previously made the two counts disagree.
       this.driverProfileRepository.count(),
+      // Everyone who registered as a driver (incl. those who never finished
+      // onboarding) — shown as context on the dashboard so the drop-off between
+      // "registered" and "onboarded" is visible instead of confusing.
+      this.userRepository.count({ where: { role: UserRole.DRIVER, is_deleted: false } }),
       this.bookingRepository.count(),
       this.bookingRepository.count({ where: { status: BookingStatus.COMPLETED } }),
       this.bookingRepository.count({ where: { status: BookingStatus.ONGOING } }),
@@ -250,6 +255,7 @@ export class AdminService {
         total: totalUsers,
         customers: totalCustomers,
         drivers: totalDrivers,
+        registered_drivers: registeredDrivers,
       },
       bookings: {
         total: totalBookings,
