@@ -16,6 +16,7 @@ import { UpdateCustomerDto, SavedLocationDto } from './dto/customer.dto';
 import { HdfcPaymentService } from '../../services/hdfc-payment.service';
 import { TransactionLogService } from '../transaction-log/transaction-log.service';
 import { RedisService } from '../../services/redis.service';
+import { MapboxService } from '../../services/mapbox.service';
 
 // Presence naturally disappears if the customer's app stops pinging (closed,
 // backgrounded, or lost connectivity) — no explicit "went offline" event needed.
@@ -37,6 +38,7 @@ export class CustomerService {
     private hdfcService: HdfcPaymentService,
     private readonly transactionLog: TransactionLogService,
     private readonly redisService: RedisService,
+    private readonly mapboxService: MapboxService,
   ) {}
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -132,7 +134,29 @@ export class CustomerService {
       { latitude, longitude },
       PRESENCE_TTL_MS,
     );
+
+    // Lazily derive the customer's state from where they open the app — this
+    // covers customers who never booked (they'd otherwise have no location to
+    // geocode). Once per customer, fire-and-forget so it never slows the ping.
+    this.populateStateIfMissing(userId, latitude, longitude);
+
     return { message: 'Presence updated' };
+  }
+
+  /**
+   * Reverse-geocode a coordinate to an Indian state and store it on the user,
+   * only if they have no state yet — so it runs at most once per customer.
+   * Fire-and-forget: any failure is swallowed and retried on the next ping.
+   */
+  private populateStateIfMissing(userId: string, latitude: number, longitude: number): void {
+    (async () => {
+      const user = await this.userRepository.findOne({ where: { id: userId }, select: ['id', 'state'] });
+      if (!user || user.state) return;
+      const state = await this.mapboxService.reverseGeocodeState(latitude, longitude);
+      if (state) {
+        await this.userRepository.update({ id: userId }, { state });
+      }
+    })().catch(() => {/* non-critical — retried on next presence ping */});
   }
 
   /**

@@ -803,17 +803,24 @@ export class AdminService {
    * re-run until `remaining` is 0. Users with no usable location stay Unknown.
    */
   async backfillUserStates(limit = 50) {
+    // Derive a customer's coordinate from their latest booking pickup, falling
+    // back to their first saved address (Home/Work) so customers who signed up
+    // but never booked can still get a state.
     const customerRows = await this.userRepository.query(
       `SELECT u.id,
-              ST_Y(b.pickup_location::geometry) AS lat,
-              ST_X(b.pickup_location::geometry) AS lng
+              COALESCE(b.lat, (cp.saved_locations->0->>'latitude')::float)  AS lat,
+              COALESCE(b.lng, (cp.saved_locations->0->>'longitude')::float) AS lng
          FROM users u
-         JOIN LATERAL (
-           SELECT pickup_location FROM bookings bk
+         LEFT JOIN customer_profiles cp ON cp.user_id = u.id
+         LEFT JOIN LATERAL (
+           SELECT ST_Y(pickup_location::geometry) AS lat,
+                  ST_X(pickup_location::geometry) AS lng
+             FROM bookings bk
             WHERE bk.customer_id = u.id
             ORDER BY bk.created_at DESC LIMIT 1
          ) b ON true
         WHERE u.role = 'customer' AND u.is_deleted = false AND u.state IS NULL
+          AND (b.lat IS NOT NULL OR cp.saved_locations->0 IS NOT NULL)
         LIMIT $1`,
       [limit],
     );
