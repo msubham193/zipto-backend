@@ -17,4 +17,9 @@ export class CustomerQueryDto extends PaginationDto {
   @IsOptional()
   @IsString()
   state?: string;
+
+  @ApiPropertyOptional({ description: 'Filter by booking activity', enum: ['all', 'booked', 'never'] })
+  @IsOptional()
+  @IsIn(['all', 'booked', 'never'])
+  activity?: 'all' | 'booked' | 'never';
 }

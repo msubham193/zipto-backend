@@ -637,7 +637,7 @@ export class AdminService {
   /**
    * Get all customers with pagination, search, and status filter
    */
-  async getAllCustomers(query: { page?: number; limit?: number; search?: string; status?: string; state?: string }) {
+  async getAllCustomers(query: { page?: number; limit?: number; search?: string; status?: string; state?: string; activity?: string }) {
     const page = Number(query.page) || 1;
     const limit = Number(query.limit) || 20;
 
@@ -658,6 +658,16 @@ export class AdminService {
       else qb.andWhere('u.state = :state', { state: query.state });
     }
 
+    // Booking activity: distinguish customers who've actually ordered from those
+    // who only signed up (never booked) — the latter are why so many have no
+    // derived state.
+    const activity = (query.activity || '').toLowerCase();
+    if (activity === 'booked') {
+      qb.andWhere('EXISTS (SELECT 1 FROM bookings b WHERE b.customer_id = u.id)');
+    } else if (activity === 'never') {
+      qb.andWhere('NOT EXISTS (SELECT 1 FROM bookings b WHERE b.customer_id = u.id)');
+    }
+
     if (query.search) {
       qb.andWhere('(u.name ILIKE :search OR u.email ILIKE :search OR u.phone ILIKE :search)', {
         search: `%${query.search.trim()}%`,
@@ -670,8 +680,19 @@ export class AdminService {
       .take(limit)
       .getManyAndCount();
 
+    // Attach each customer's real booking count in one grouped query, so the
+    // list can show it (0 = never booked) instead of a placeholder.
+    const ids = customers.map((c) => c.id);
+    const countRows: Array<{ customer_id: string; cnt: string }> = ids.length
+      ? await this.bookingRepository.query(
+          `SELECT customer_id, COUNT(*)::int AS cnt FROM bookings WHERE customer_id = ANY($1) GROUP BY customer_id`,
+          [ids],
+        )
+      : [];
+    const countMap = new Map(countRows.map((r) => [r.customer_id, Number(r.cnt)]));
+
     return {
-      customers,
+      customers: customers.map((c) => ({ ...c, total_bookings: countMap.get(c.id) ?? 0 })),
       total,
       page,
       pages: Math.ceil(total / limit),
