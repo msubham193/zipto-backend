@@ -4,7 +4,7 @@ import { ExtractJwt, Strategy } from 'passport-jwt';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { User } from '../entities/user.entity';
+import { User, UserRole } from '../entities/user.entity';
 
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
@@ -30,6 +30,22 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
 
     if (!user) {
       throw new UnauthorizedException('User not found or inactive');
+    }
+
+    // Single-session enforcement for drivers: a login on a new device rotates
+    // active_session_id, so any token minted for an earlier device carries a
+    // stale `sid` and is rejected here — signing that device out immediately.
+    // Skipped when active_session_id is null (pre-existing sessions) so this
+    // never force-logs-out everyone the moment it ships.
+    if (
+      user.role === UserRole.DRIVER &&
+      user.active_session_id &&
+      payload.sid !== user.active_session_id
+    ) {
+      throw new UnauthorizedException({
+        message: 'You have been signed out because your account was used on another device.',
+        code: 'SESSION_REVOKED',
+      });
     }
 
     return user;

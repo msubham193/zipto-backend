@@ -95,6 +95,14 @@ export class User {
   @Exclude()
   refresh_token: string | null;
 
+  // Single active session for drivers: rotated on every login and embedded in
+  // the JWT as `sid`. A token whose sid ≠ this is rejected, so logging in on a
+  // new device instantly signs the previous device out. Null until first login
+  // after this was introduced (so existing sessions aren't force-killed).
+  @Column({ type: 'varchar', length: 64, nullable: true })
+  @Exclude()
+  active_session_id: string | null;
+
   @Column({ type: 'text', nullable: true })
   fcm_token: string | null;
 

@@ -608,13 +608,28 @@ export class AuthService {
         throw new UnauthorizedException('Invalid refresh token');
       }
 
+      // Single-session enforcement for drivers: a refresh token from a device
+      // that has since been superseded by a newer login carries a stale sid —
+      // block it so the old device can't silently mint fresh access tokens.
+      if (
+        user.role === UserRole.DRIVER &&
+        user.active_session_id &&
+        payload.sid !== user.active_session_id
+      ) {
+        throw new UnauthorizedException({
+          message: 'You have been signed out because your account was used on another device.',
+          code: 'SESSION_REVOKED',
+        });
+      }
+
       // Issue a NEW access token only — keep the SAME refresh token. Rotating it
       // here caused random logouts: when several requests 401 at once (token just
       // expired), the first refresh rotated the token and the rest failed with
       // the now-stale one → forced logout. The refresh token stays valid for its
-      // full lifetime, so concurrent refreshes are all idempotent.
+      // full lifetime, so concurrent refreshes are all idempotent. Preserve the
+      // token's sid so the refreshed access token stays valid for this session.
       const accessToken = this.jwtService.sign(
-        { sub: user.id, phone: user.phone, role: user.role },
+        { sub: user.id, phone: user.phone, role: user.role, sid: payload.sid },
         {
           secret: this.configService.get<string>('jwt.secret'),
           expiresIn: this.configService.get<string>('jwt.expiresIn'),
@@ -724,7 +739,13 @@ export class AuthService {
    * visibility/debugging, not used for lookup.
    */
   private async generateTokens(user: User, deviceId?: string) {
-    const payload = { sub: user.id, phone: user.phone, role: user.role };
+    // Rotate the session id on every login and stamp it into both tokens.
+    // Drivers are then enforced to a single active session (see JwtStrategy and
+    // refreshToken) — a fresh login makes every earlier device's token stale.
+    const sessionId = crypto.randomUUID();
+    await this.userRepository.update({ id: user.id }, { active_session_id: sessionId });
+
+    const payload = { sub: user.id, phone: user.phone, role: user.role, sid: sessionId };
 
     const accessToken = this.jwtService.sign(payload, {
       secret: this.configService.get<string>('jwt.secret'),
