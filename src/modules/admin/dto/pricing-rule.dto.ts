@@ -99,6 +99,11 @@ export class CreatePricingRuleDto {
   @IsString()
   city?: string;
 
+  @ApiPropertyOptional({ example: 'Odisha', description: 'State this rule applies to; null or omitted = the default rule set' })
+  @IsOptional()
+  @IsString()
+  state?: string | null;
+
   @ApiPropertyOptional({ example: true })
   @IsOptional()
   @IsBoolean()
@@ -204,6 +209,11 @@ export class UpdatePricingRuleDto {
   @IsOptional()
   @IsString()
   city?: string;
+
+  @ApiPropertyOptional({ example: 'Odisha', description: 'State this rule applies to; null or omitted = the default rule set' })
+  @IsOptional()
+  @IsString()
+  state?: string | null;
 
   @ApiPropertyOptional({ example: true })
   @IsOptional()

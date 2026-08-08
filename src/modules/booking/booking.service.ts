@@ -10,11 +10,12 @@ import {
 import { PaymentService } from '../payment/payment.service';
 import { randomUUID } from 'crypto';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, Repository } from 'typeorm';
+import { In, IsNull, Repository } from 'typeorm';
 import { Cron } from '@nestjs/schedule';
 import { Booking, BookingStatus, BookingType } from './entities/booking.entity';
 import { PricingRule } from './entities/pricing-rule.entity';
 import { BookingDemandLog } from './entities/booking-demand-log.entity';
+import { VehicleType } from '../vehicle/entities/vehicle.entity';
 import { DriverProfile } from '../driver/entities/driver-profile.entity';
 import { Payment, PaymentMethod, PaymentStatus } from '../payment/entities/payment.entity';
 import { User } from '../auth/entities/user.entity';
@@ -188,6 +189,40 @@ export class BookingService {
   }
 
   /**
+   * Resolve the pricing rule for a vehicle type at a pickup location. A rule
+   * configured for the pickup's state (derived by reverse-geocoding the pickup)
+   * wins; otherwise the DEFAULT rule set (state IS NULL) applies. If the geocode
+   * fails or the state has no rule, we fall through to the default — pricing
+   * never breaks over a lookup miss.
+   */
+  private async resolvePricingRule(
+    vehicleType: VehicleType,
+    pickupLat: number,
+    pickupLng: number,
+  ): Promise<PricingRule | null> {
+    let state: string | null = null;
+    try {
+      state = await this.mapboxService.reverseGeocodeState(pickupLat, pickupLng);
+    } catch {
+      state = null;
+    }
+
+    if (state) {
+      const stateRule = await this.pricingRuleRepository.findOne({
+        where: { vehicle_type: vehicleType, state, is_active: true },
+      });
+      if (stateRule) return stateRule;
+    }
+
+    // Default rule set (state IS NULL). Ordered for a deterministic result if
+    // more than one default somehow exists for a vehicle type.
+    return this.pricingRuleRepository.findOne({
+      where: { vehicle_type: vehicleType, state: IsNull(), is_active: true },
+      order: { created_at: 'ASC' },
+    });
+  }
+
+  /**
    * Estimate fare for a trip
    */
   async estimateFare(estimateFareDto: EstimateFareDto) {
@@ -212,10 +247,13 @@ export class BookingService {
     const distance = routeData.distance / 1000;
     const duration = Math.ceil(routeData.duration / 60);
 
-    // Get pricing rule for vehicle type
-    const pricingRule = await this.pricingRuleRepository.findOne({
-      where: { vehicle_type, city: DEFAULT_PRICING_CITY, is_active: true },
-    });
+    // Get the pricing rule for this vehicle type — state-specific if one exists
+    // for the pickup's state, otherwise the default rule set.
+    const pricingRule = await this.resolvePricingRule(
+      vehicle_type,
+      pickup_location.latitude,
+      pickup_location.longitude,
+    );
 
     if (!pricingRule) {
       throw new NotFoundException(`Pricing rule not found for vehicle type: ${vehicle_type}`);
@@ -2448,9 +2486,11 @@ export class BookingService {
   async getPublicPricingRules() {
     await this.ensureDefaultPricingRules();
 
+    // Public pricing shows the DEFAULT rule set (state IS NULL). State-specific
+    // overrides only take effect at booking time based on the pickup location.
     const rules = await this.pricingRuleRepository.find({
       where: {
-        city: DEFAULT_PRICING_CITY,
+        state: IsNull(),
         is_active: true,
         vehicle_type: In([...PUBLIC_VEHICLE_TYPES]),
       },
@@ -2466,17 +2506,22 @@ export class BookingService {
    * Create pricing rule (for admin)
    */
   async createPricingRule(data: Partial<PricingRule>) {
+    // Empty/blank state means "default rule set" — normalize to NULL so it
+    // matches the IsNull() lookups in resolvePricingRule.
+    const state = data.state && String(data.state).trim() ? String(data.state).trim() : null;
+
+    // One active rule per (vehicle type, state) — the default set uses NULL.
     const existing = await this.pricingRuleRepository.findOne({
-      where: { vehicle_type: data.vehicle_type, city: data.city || 'Bhubaneswar', is_active: true },
+      where: { vehicle_type: data.vehicle_type, state: state ?? IsNull(), is_active: true },
     });
 
     if (existing) {
       throw new BadRequestException(
-        `Active pricing rule already exists for ${data.vehicle_type} in ${data.city || 'Bhubaneswar'}`,
+        `Active pricing rule already exists for ${data.vehicle_type} in ${state || 'Default'}`,
       );
     }
 
-    const pricingRule = this.pricingRuleRepository.create(data);
+    const pricingRule = this.pricingRuleRepository.create({ ...data, state });
     return this.pricingRuleRepository.save(pricingRule);
   }
 
@@ -2488,6 +2533,11 @@ export class BookingService {
 
     if (!pricingRule) {
       throw new NotFoundException('Pricing rule not found');
+    }
+
+    // Normalize a blank state to NULL (default rule set).
+    if ('state' in data) {
+      data.state = data.state && String(data.state).trim() ? String(data.state).trim() : null;
     }
 
     Object.assign(pricingRule, data);

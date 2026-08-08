@@ -83,6 +83,14 @@ export class PricingRule {
   @Index()
   city: string;
 
+  // Indian state this rule applies to. NULL = the DEFAULT rule set (applied
+  // wherever a state-specific rule doesn't exist). A rule with a state overrides
+  // the default for bookings whose pickup falls in that state. The booking's
+  // state is derived by reverse-geocoding the pickup location.
+  @Column({ type: 'varchar', length: 60, nullable: true })
+  @Index()
+  state: string | null;
+
   @Column({ type: 'boolean', default: true })
   is_active: boolean;
 
