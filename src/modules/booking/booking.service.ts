@@ -2486,17 +2486,29 @@ export class BookingService {
   async getPublicPricingRules() {
     await this.ensureDefaultPricingRules();
 
-    // Public pricing shows the DEFAULT rule set (state IS NULL). State-specific
-    // overrides only take effect at booking time based on the pickup location.
+    // The public list is the customer app's vehicle menu, so EVERY vehicle type
+    // with an active rule must appear — even one that only has a state-specific
+    // rule and no Default (otherwise it would vanish from the app entirely).
+    // Per vehicle type we show one indicative rule, preferring the Default
+    // (state IS NULL) over a state override. The actual charged fare is always
+    // resolved per-location at booking time (see resolvePricingRule).
     const rules = await this.pricingRuleRepository.find({
       where: {
-        state: IsNull(),
         is_active: true,
         vehicle_type: In([...PUBLIC_VEHICLE_TYPES]),
       },
     });
 
-    return rules.sort(
+    const byType = new Map<VehicleType, PricingRule>();
+    for (const rule of rules) {
+      const existing = byType.get(rule.vehicle_type);
+      // Take the first rule seen, but let a Default rule replace a state one.
+      if (!existing || (existing.state && !rule.state)) {
+        byType.set(rule.vehicle_type, rule);
+      }
+    }
+
+    return Array.from(byType.values()).sort(
       (left, right) =>
         getVehicleTypeSortOrder(left.vehicle_type) - getVehicleTypeSortOrder(right.vehicle_type),
     );
