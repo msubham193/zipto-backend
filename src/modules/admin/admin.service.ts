@@ -700,6 +700,24 @@ export class AdminService {
   }
 
   /**
+   * A driver's stored availability_status stays "online" until they explicitly
+   * go offline — so an app that was closed / lost connection without toggling
+   * off looks "online" forever while its GPS goes stale. For the admin display,
+   * treat "online" as real only if the driver has pinged their location within
+   * the dispatch freshness window (same rule that decides who actually gets
+   * rides). Otherwise report them offline so the status matches "last active".
+   * "busy"/"offline" are returned unchanged.
+   */
+  private effectiveAvailability(status: string | null, lastLocationAt: Date | string | null): string | null {
+    if (status !== 'online') return status;
+    if (!lastLocationAt) return 'offline';
+    const maxAgeMs =
+      (parseInt(process.env.DISPATCH_LOCATION_MAX_AGE_MINUTES || '5', 10) || 5) * 60 * 1000;
+    const age = Date.now() - new Date(lastLocationAt).getTime();
+    return age <= maxAgeMs ? 'online' : 'offline';
+  }
+
+  /**
    * Get all drivers with pagination
    */
   async getAllDrivers(query: {
@@ -771,8 +789,15 @@ export class AdminService {
       .take(limit)
       .getManyAndCount();
 
+    // Show "online" only when the GPS ping is fresh (see effectiveAvailability),
+    // so the list's online dot matches reality instead of a stale status flag.
+    const normalizedDrivers = drivers.map((d) => ({
+      ...d,
+      availability_status: this.effectiveAvailability(d.availability_status, d.last_location_at),
+    }));
+
     return {
-      drivers,
+      drivers: normalizedDrivers,
       total,
       page,
       pages: Math.ceil(total / limit),
@@ -948,6 +973,9 @@ export class AdminService {
     return {
       ...driver,
       ...signedDocs,
+      // "online" only counts if the GPS ping is fresh — otherwise the badge
+      // contradicts a weeks-old "last active".
+      availability_status: this.effectiveAvailability(driver.availability_status, last_location_at),
       vehicle: signedVehicle,
       current_lat,
       current_lng,
